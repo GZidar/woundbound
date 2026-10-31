@@ -1,4 +1,5 @@
 using WoundBound.Rules.Calculation;
+using WoundBound.Rules.Catalog;
 using WoundBound.Rules.Enums;
 using WoundBound.Rules.Models;
 
@@ -31,7 +32,42 @@ namespace WoundBound.Game.Combat
         /// <summary>Stabilized at 0 Body (Core Rules §4). Only ever true of a player character.</summary>
         public bool IsStable { get; internal set; }
 
-        public required int DodgeThreshold { get; init; }
+        /// <summary>Dodge Threshold before anything in play moves it: 11 + Tier + Agility for a character, the statblock's for a foe.</summary>
+        public required int BaseDodgeThreshold { get; init; }
+
+        /// <summary>Stability Threshold before anything in play moves it (Core Rules §10).</summary>
+        public required int BaseStabilityThreshold { get; init; }
+
+        /// <summary>Resolve Threshold before anything in play moves it; null for a foe with no mind to sway.</summary>
+        public int? BaseResolveThreshold { get; init; }
+
+        /// <summary>
+        /// Everything currently moving a Threshold — for now the Dodge, Grounded and Resolute
+        /// actions — held and summed the way the Rules library's Play Mode holds them.
+        /// </summary>
+        internal List<ThresholdModifier> ThresholdModifiers { get; set; } = new();
+
+        /// <summary>What an attack is rolled against right now: the base, plus every modifier held (Core Rules §10).</summary>
+        public int DodgeThreshold => BaseDodgeThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Dodge);
+
+        public int StabilityThreshold => BaseStabilityThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Stability);
+
+        public int? ResolveThreshold => BaseResolveThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Resolve);
+
+        /// <summary>Which bracing actions — Dodge, Grounded, Resolute — this creature has standing, until the start of its next turn.</summary>
+        public IEnumerable<CombatAction> StandingGround => ThresholdModifiers
+            .Where(m => m.StackKey == ThresholdModifierCalculator.BracingActionKey)
+            .Select(m => CombatActionCatalog.BracingAction(m.Threshold))
+            .OfType<CombatAction>();
+
+        /// <summary>
+        /// Standing their ground (Core Rules §10): no move of any kind until their next turn, and
+        /// Disadvantage on every attack roll they make while it lasts.
+        /// </summary>
+        public bool IsStandingGround => StandingGround.Any();
+
+        /// <summary>Has spent movement this turn — and so can no longer stand their ground. Swapping a loadout isn't movement.</summary>
+        public bool HasMovedThisTurn { get; internal set; }
 
         /// <summary>
         /// The character sheet behind a party member — the source of their loadouts, which change

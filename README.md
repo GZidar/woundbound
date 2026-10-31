@@ -10,6 +10,7 @@ WoundBoundGame.sln
 external/WoundBound/        git submodule: the rules repo (Azure DevOps) — rules text, WoundBound.Rules, data catalogues
 src/WoundBound.Game/        plain C# — encounters, turns, moves, attacks. No Godot dependency.
 tests/WoundBound.Game.Tests/ xUnit tests of the above, with scripted dice
+tools/WoundBound.Sim/       bot v bot simulator: plays many seeded fights per tactic and compares them
 game/                       the Godot project — draws the board and forwards clicks. No rules in here.
 ```
 
@@ -51,6 +52,10 @@ three Bramble Ratkin from the starting adversaries. What it exercises, all throu
 - Panic dodge, offered after the roll and only when +2 Dodge Threshold would turn the hit; against
   a critical it's a Riposte and the attacker takes the wound. The GM's creatures dodge too.
 - Reaction attacks against anybody leaving an enemy's reach.
+- Standing Your Ground: Dodge, Grounded and Resolute, +2 DT / ST / RT until the next turn. The first
+  takes the move, a second the action, a third an extra action. None for anyone who has moved,
+  none twice a turn, no moving after, and Disadvantage on attacks while it lasts. Stacks with a
+  panic dodge. The GM's creatures can do it too, though the simple GM never does.
 - GM Opportunities: banked from extra actions (at most 3), Immediate from reactions and Threshold
   boosts (lapsing at the spender's next turn); spent on an extra adversary turn — on a creature that
   can strike, ideally one that has already acted — or, with a full bank, on an attack's Advantage.
@@ -76,8 +81,28 @@ for one step at a time, so a brain can re-plan after a dodge or a Riposte.
 brain to `Encounter` (or `SampleEncounters.FighterVersusRatkin`) to change how the GM plays.
 
 Not yet: manoeuvres, Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting,
-shields, Standing Your Ground (Dodge / Grounded / Resolute actions), multiple party members choosing
+shields, shoves and frights (so Grounded and Resolute have nothing to resist yet), multiple party members choosing
 their own order, obstacles, movement paths (a move is a hop from square to square).
+
+## Bot v bot
+
+A party brain (`IPartyBrain`) can take the player's seat while the GM brain keeps its own, so a
+fight plays itself.
+- **The driver:** `BotDriver` carries out the party's choices through the same `Encounter` commands
+  the buttons call, so a bot gets exactly the rules a player does. A refused choice throws.
+- **The tactics:** `TacticalPartyBrain` plays by `PartyTactics`, a handful of switches the
+  simulator can measure. They cover shooting first with a bow at the ready, buying extra attacks,
+  bracing when hurt, a Stamina reserve, and when to panic dodge. The presets are
+  `PartyTactics.Presets`.
+- **In the game:** turn on **Bot plays the fighter** and pick a tactic to watch it play.
+- **The simulator:** plays every preset over the same seeded fights and compares them.
+
+  ```
+  dotnet run --project tools/WoundBound.Sim -- --fights 1000 --seed 1
+  ```
+
+As the rules grow, each new choice becomes a new switch, and the simulator says whether it wins
+fights.
 
 ## Updating the rules
 

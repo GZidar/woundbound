@@ -1,5 +1,5 @@
 using WoundBound.Game.Combat;
-using WoundBound.Game.Combat.Gm;
+using WoundBound.Game.Combat.Brains;
 
 namespace WoundBound.Game.Tests;
 
@@ -11,17 +11,17 @@ public class GmBrainTests
     /// <summary>The simple brain, with whichever of its choices a test wants to override.</summary>
     private sealed class TestBrain : SimpleGmBrain
     {
-        public Func<GmView, GmTurn, GmStep?>? Step { get; init; }
+        public Func<BattleView, GmTurn, GmStep?>? Step { get; init; }
 
         public bool Dodges { get; init; } = true;
 
         public bool Reacts { get; init; } = true;
 
-        public override GmStep NextStep(GmView view, GmTurn turn) => Step?.Invoke(view, turn) ?? base.NextStep(view, turn);
+        public override GmStep NextStep(BattleView view, GmTurn turn) => Step?.Invoke(view, turn) ?? base.NextStep(view, turn);
 
-        public override bool PanicDodges(GmView view, PendingReaction reaction) => Dodges;
+        public override bool PanicDodges(BattleView view, PendingReaction reaction) => Dodges;
 
-        public override bool StrikesAtLeaver(GmView view, Combatant adversary, Combatant leaver) => Reacts;
+        public override bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => Reacts;
     }
 
     private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Fight(IGmBrain gm, params int[] dice)

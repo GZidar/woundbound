@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WoundBound.Game\WoundBound.Game.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The catalogues straight from the rules submodule, as the tests and the game use them. -->
+    <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\range-bands.json" Link="data\range-bands.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-adversaries.json" Link="data\starting-adversaries.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-weapons.json" Link="data\starting-weapons.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

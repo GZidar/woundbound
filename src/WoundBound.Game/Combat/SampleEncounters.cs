@@ -39,7 +39,7 @@ namespace WoundBound.Game.Combat
         };
 
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
-        public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Gm.IGmBrain? gm = null)
+        public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {
             var ratkin = data.Adversary("Bramble Ratkin");
 

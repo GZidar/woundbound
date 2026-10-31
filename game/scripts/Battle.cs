@@ -2,8 +2,11 @@ using System.Collections.Generic;
 using System.Linq;
 using Godot;
 using WoundBound.Game.Combat;
+using WoundBound.Game.Combat.Brains;
 using WoundBound.Game.Data;
 using WoundBound.Rules.Calculation;
+using WoundBound.Rules.Catalog;
+using WoundBound.Rules.Enums;
 using Side = WoundBound.Game.Combat.Side;
 
 namespace WoundBoundGame
@@ -17,6 +20,7 @@ namespace WoundBoundGame
     {
         private const int CellSize = 72;
         private const double AdversaryTurnDelay = 0.7;
+        private const double BotStepDelay = 0.4;
         private static readonly Vector2 BoardOrigin = new(24, 24);
 
         private static readonly Color LightSquare = new(0.20f, 0.21f, 0.24f);
@@ -34,7 +38,14 @@ namespace WoundBoundGame
         private Encounter encounter = null!;
         private GridPosition? hovered;
         private int linesShown;
-        private bool adversaryTurnPending;
+        private bool stepPending;
+
+        /// <summary>Plays the party when Bot v Bot is on; null while a person is at the controls.</summary>
+        private BotDriver? bot;
+        private CheckButton botToggle = null!;
+        private OptionButton tacticPicker = null!;
+        private Button panicDodgeButton = null!;
+        private Button takeHitButton = null!;
 
         private Label statusLabel = null!;
         private Label characterLabel = null!;
@@ -43,6 +54,7 @@ namespace WoundBoundGame
         private Label reactionLabel = null!;
         private Button swapButton = null!;
         private Button extraActionButton = null!;
+        private readonly Dictionary<CombatAction, Button> standGroundButtons = new();
         private Button endTurnButton = null!;
         private RichTextLabel logLabel = null!;
 
@@ -71,6 +83,7 @@ namespace WoundBoundGame
             }
 
             if (@event is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }
+                || bot is not null
                 || encounter.Phase != EncounterPhase.PartyTurn
                 || hovered is not { } clicked)
             {
@@ -163,7 +176,9 @@ namespace WoundBoundGame
         private void StartEncounter()
         {
             encounter = SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller());
-            adversaryTurnPending = false;
+            stepPending = false;
+            bot = null;
+            UpdateBot();
             linesShown = 0;
             logLabel.Clear();
             Refresh();
@@ -181,23 +196,42 @@ namespace WoundBoundGame
             UpdateHud();
             QueueRedraw();
 
-            if (encounter.Phase == EncounterPhase.AdversaryTurn && !adversaryTurnPending)
+            // The GM's turns always play themselves; with Bot v Bot on, so does the party.
+            var gmToAct = encounter.Phase == EncounterPhase.AdversaryTurn;
+            if ((gmToAct || (bot is not null && !encounter.IsOver)) && !stepPending)
             {
-                adversaryTurnPending = true;
+                stepPending = true;
                 var waitingOn = encounter;
-                GetTree().CreateTimer(AdversaryTurnDelay).Timeout += () =>
+                GetTree().CreateTimer(gmToAct ? AdversaryTurnDelay : BotStepDelay).Timeout += () =>
                 {
+                    stepPending = false;
+
                     // A restart mid-pause replaces the encounter; the old one's turn is moot.
                     if (waitingOn != encounter)
                     {
                         return;
                     }
 
-                    adversaryTurnPending = false;
-                    encounter.RunAdversaryTurn();
+                    if (bot is not null)
+                    {
+                        bot.Step();
+                    }
+                    else if (encounter.Phase == EncounterPhase.AdversaryTurn)
+                    {
+                        encounter.RunAdversaryTurn();
+                    }
+
                     Refresh();
                 };
             }
+        }
+
+        /// <summary>Puts a bot in the player's seat, or takes it out, to match the toggle and the chosen tactic.</summary>
+        private void UpdateBot()
+        {
+            bot = botToggle.ButtonPressed
+                ? new BotDriver(encounter, new TacticalPartyBrain(PartyTactics.Presets[Mathf.Max(0, tacticPicker.Selected)]))
+                : null;
         }
 
         /// <summary>Shows the panic-dodge choice while the encounter is waiting on it, and hides it otherwise.</summary>
@@ -243,9 +277,21 @@ namespace WoundBoundGame
                 $"In hand: {attack.Name} +{attack.AttackModifier}, 1d{attack.DamageDieSides}+{attack.DamageModifier}" +
                 (attack.IsRanged ? " (ranged — not at Close)" : $" (Reach {attack.Reach})") + "\n" +
                 $"At the ready: {character.ReadyWeapon?.Name ?? "nothing"}\n" +
-                $"DT {character.DodgeThreshold} · {character.Armour} armour (absorbs {armourAbsorbs})";
+                $"{Threshold("DT", character.DodgeThreshold, character.BaseDodgeThreshold)} · " +
+                $"{Threshold("ST", character.StabilityThreshold, character.BaseStabilityThreshold)} · " +
+                $"{Threshold("RT", character.ResolveThreshold, character.BaseResolveThreshold)} · " +
+                $"{character.Armour} armour (absorbs {armourAbsorbs})" +
+                (character.IsStandingGround
+                    ? $"\nStanding your ground ({string.Join(", ", character.StandingGround)}): no moving, and Disadvantage on attacks, until your next turn."
+                    : string.Empty);
 
-            var isPartyTurn = encounter.Phase == EncounterPhase.PartyTurn && encounter.Active is not null;
+            static string Threshold(string name, int? now, int? baseValue) =>
+                now is null ? $"{name} —" : now == baseValue ? $"{name} {now}" : $"{name} {now} ({baseValue}{now - baseValue:+0;−0})";
+
+            // With a bot at the controls the buttons are for watching, not pressing.
+            var isPartyTurn = bot is null && encounter.Phase == EncounterPhase.PartyTurn && encounter.Active is not null;
+            panicDodgeButton.Disabled = bot is not null;
+            takeHitButton.Disabled = bot is not null;
             hoverLabel.Text = DescribeHovered(isPartyTurn ? encounter.Active : null);
 
             var refusal = isPartyTurn ? encounter.ExtraActionRefusal(encounter.Active!) : null;
@@ -257,6 +303,15 @@ namespace WoundBoundGame
             swapButton.Disabled = !isPartyTurn || swapRefusal is not null;
             swapButton.TooltipText = swapRefusal ?? "Costs a move (or an action once the move is spent). Not movement, and no Opportunity for the GM.";
 
+            foreach (var (action, button) in standGroundButtons)
+            {
+                var why = isPartyTurn ? Encounter.StandGroundRefusal(encounter.Active!, action) : null;
+                button.Disabled = !isPartyTurn || why is not null;
+                button.TooltipText = why ??
+                    $"{CombatActionCatalog.For(action).Effect}. Takes the move (or the action, if the move's gone). " +
+                    "No moving this turn, and Disadvantage on attacks until your next turn. No Opportunity for the GM.";
+            }
+
             endTurnButton.Disabled = !isPartyTurn;
         }
 
@@ -267,6 +322,7 @@ namespace WoundBoundGame
                 "You are the blue token (yellow ring on your turn).\n" +
                 "• Move: click a highlighted square. Blue costs your move; amber spends your action too.\n" +
                 "• Swap: trade the loadout in hand for the one at the ready, for a move.\n" +
+                "• Dodge / Grounded / Resolute: +2 to a Threshold in place of your move — but no moving, and attacks at Disadvantage.\n" +
                 "• Attack: click a ratkin with a red ring — in Reach for a blade, beyond Close for a bow.\n" +
                 "• End turn when you're done, and the GM moves one ratkin.";
 
@@ -308,6 +364,7 @@ namespace WoundBoundGame
                 {
                     1 => $"Click to move {squares} square(s). Costs your move.",
                     { } cost => $"Click to move {squares} squares. Costs {cost} moves — your move and your action, so no attack after.",
+                    null when active.IsStandingGround => "You're standing your ground — no moving until your next turn.",
                     null => Encounter.MovesAvailable(active) == 0
                         ? "Nothing left to move with this turn."
                         : "Too far to reach with what you have left this turn."
@@ -368,6 +425,19 @@ namespace WoundBoundGame
             };
             buttons.AddChild(extraActionButton);
 
+            foreach (var action in new[] { CombatAction.Dodge, CombatAction.Grounded, CombatAction.Resolute })
+            {
+                var threshold = CombatActionCatalog.For(action).Effect.Split(' ')[1]; // "+2 DT until your turn" → "DT"
+                var button = new Button { Text = $"{action} (+2 {threshold})" };
+                button.Pressed += () =>
+                {
+                    encounter.TryStandGround(action);
+                    Refresh();
+                };
+                buttons.AddChild(button);
+                standGroundButtons[action] = button;
+            }
+
             endTurnButton = new Button { Text = "End turn" };
             endTurnButton.Pressed += () =>
             {
@@ -379,6 +449,34 @@ namespace WoundBoundGame
             var restartButton = new Button { Text = "Restart" };
             restartButton.Pressed += StartEncounter;
             buttons.AddChild(restartButton);
+
+            // Bot v Bot: a party brain takes the player's seat, and the fight plays itself.
+            var botRow = new HBoxContainer();
+            botRow.AddThemeConstantOverride("separation", 8);
+            column.AddChild(botRow);
+
+            botToggle = new CheckButton { Text = "Bot plays the fighter" };
+            botToggle.Toggled += _ =>
+            {
+                UpdateBot();
+                Refresh();
+            };
+            botRow.AddChild(botToggle);
+
+            tacticPicker = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            foreach (var tactic in PartyTactics.Presets)
+            {
+                tacticPicker.AddItem(tactic.Name);
+            }
+
+            tacticPicker.ItemSelected += _ =>
+            {
+                if (bot is not null)
+                {
+                    UpdateBot();
+                }
+            };
+            botRow.AddChild(tacticPicker);
 
             reactionBox = new PanelContainer { Visible = false };
             reactionBox.AddThemeStyleboxOverride("panel", new StyleBoxFlat
@@ -398,21 +496,21 @@ namespace WoundBoundGame
             reactionButtons.AddThemeConstantOverride("separation", 8);
             reactionColumn.AddChild(reactionButtons);
 
-            var dodgeButton = new Button { Text = "Panic dodge (1 Stamina)" };
-            dodgeButton.Pressed += () =>
+            panicDodgeButton = new Button { Text = "Panic dodge (1 Stamina)" };
+            panicDodgeButton.Pressed += () =>
             {
                 encounter.RespondToReaction(dodge: true);
                 Refresh();
             };
-            reactionButtons.AddChild(dodgeButton);
+            reactionButtons.AddChild(panicDodgeButton);
 
-            var takeItButton = new Button { Text = "Take the hit" };
-            takeItButton.Pressed += () =>
+            takeHitButton = new Button { Text = "Take the hit" };
+            takeHitButton.Pressed += () =>
             {
                 encounter.RespondToReaction(dodge: false);
                 Refresh();
             };
-            reactionButtons.AddChild(takeItButton);
+            reactionButtons.AddChild(takeHitButton);
 
             logLabel = new RichTextLabel
             {

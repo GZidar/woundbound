@@ -1,4 +1,4 @@
-namespace WoundBound.Game.Combat.Gm
+namespace WoundBound.Game.Combat.Brains
 {
     /// <summary>
     /// The GM played simply: every creature goes for the nearest character. Whoever can already
@@ -8,7 +8,7 @@ namespace WoundBound.Game.Combat.Gm
     /// </summary>
     public class SimpleGmBrain : IGmBrain
     {
-        public virtual Combatant ChooseOwedTurn(GmView view)
+        public virtual Combatant ChooseOwedTurn(BattleView view)
         {
             var targets = view.Characters.ToList();
             return view.Adversaries
@@ -22,7 +22,7 @@ namespace WoundBound.Game.Combat.Gm
         /// can strike a character on that turn, preferring one that has already acted, since
         /// chaining two turns back to back is the strongest use of one.
         /// </summary>
-        public virtual Combatant? ChooseExtraTurn(GmView view)
+        public virtual Combatant? ChooseExtraTurn(BattleView view)
         {
             var targets = view.Characters.ToList();
             return view.Adversaries
@@ -32,7 +32,7 @@ namespace WoundBound.Game.Combat.Gm
                 .FirstOrDefault();
         }
 
-        public virtual GmStep NextStep(GmView view, GmTurn turn)
+        public virtual GmStep NextStep(BattleView view, GmTurn turn)
         {
             var actor = turn.Actor;
             if (NearestTarget(view, actor) is not { } target)
@@ -68,16 +68,16 @@ namespace WoundBound.Game.Combat.Gm
         }
 
         /// <summary>A Minion dropped by any blow that lands has every reason to turn whatever it can.</summary>
-        public virtual bool StrikesAtLeaver(GmView view, Combatant adversary, Combatant leaver) => true;
+        public virtual bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => true;
 
-        public virtual bool PanicDodges(GmView view, PendingReaction reaction) => true;
+        public virtual bool PanicDodges(BattleView view, PendingReaction reaction) => true;
 
         /// <summary>Nearest first, each a single move toward the nearest character; any already in reach stay put.</summary>
-        public virtual GmCloseIn? NextCloseIn(GmView view, IReadOnlyList<Combatant> stillIdle)
+        public virtual GmCloseIn? NextCloseIn(BattleView view, IReadOnlyList<Combatant> stillIdle)
         {
             foreach (var adversary in stillIdle.OrderBy(a => NearestTarget(view, a) is { } t ? t.Position.DistanceTo(a.Position) : int.MaxValue))
             {
-                if (NearestTarget(view, adversary) is not { } target || adversary.CanReach(target.Position))
+                if (adversary.IsStandingGround || NearestTarget(view, adversary) is not { } target || adversary.CanReach(target.Position))
                 {
                     continue;
                 }
@@ -99,23 +99,15 @@ namespace WoundBound.Game.Combat.Gm
             return null;
         }
 
-        protected static Combatant? NearestTarget(GmView view, Combatant actor) =>
-            view.Characters.MinBy(t => actor.Position.DistanceTo(t.Position));
+        protected static Combatant? NearestTarget(BattleView view, Combatant actor) => view.NearestEnemy(actor);
 
         /// <summary>Whether <paramref name="adversary"/> could hit a character on a fresh turn: from where it stands, or after a single move.</summary>
-        protected static bool CanStrikeThisTurn(GmView view, Combatant adversary) =>
+        protected static bool CanStrikeThisTurn(BattleView view, Combatant adversary) =>
             NearestTarget(view, adversary) is { } target
             && (adversary.CanReach(target.Position) || StrikeSquare(view, adversary, target) is not null);
 
         /// <summary>The nearest square one move away from which <paramref name="actor"/> can strike <paramref name="target"/>, leaving the action for the blow.</summary>
-        protected static GridPosition? StrikeSquare(GmView view, Combatant actor, Combatant target)
-        {
-            var origin = actor.Position;
-            return view.SquaresWithin(actor, 1).Keys
-                .Where(square => actor.CanReachFrom(square, target.Position))
-                .OrderBy(square => square.DistanceTo(origin))
-                .Select(square => (GridPosition?)square)
-                .FirstOrDefault();
-        }
+        protected static GridPosition? StrikeSquare(BattleView view, Combatant actor, Combatant target) =>
+            view.StrikeSquare(actor, target, moves: 1);
     }
 }

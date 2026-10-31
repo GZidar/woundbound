@@ -1,15 +1,15 @@
-namespace WoundBound.Game.Combat.Gm
+namespace WoundBound.Game.Combat.Brains
 {
     /// <summary>
     /// The fight as a GM brain sees it: everything a GM at the table could see or work out, and
     /// no way to change any of it. Every rule question is answered by the <see cref="Encounter"/>,
     /// so a brain asking "could I hit them from there?" gets the same answer the rules would.
     /// </summary>
-    public sealed class GmView
+    public sealed class BattleView
     {
         private readonly Encounter encounter;
 
-        internal GmView(Encounter encounter)
+        internal BattleView(Encounter encounter)
         {
             this.encounter = encounter;
         }
@@ -67,6 +67,35 @@ namespace WoundBound.Game.Combat.Gm
         /// <summary>Whether a melee blow from <paramref name="from"/> could land on <paramref name="square"/>.</summary>
         public static bool CanReachFrom(Combatant attacker, GridPosition from, GridPosition square) =>
             attacker.CanReachFrom(from, square);
+
+        /// <summary>Everybody still fighting on the other side from <paramref name="combatant"/>.</summary>
+        public IEnumerable<Combatant> EnemiesOf(Combatant combatant) =>
+            encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party);
+
+        /// <summary>The closest enemy still fighting, or null if there's nobody left.</summary>
+        public Combatant? NearestEnemy(Combatant combatant) =>
+            EnemiesOf(combatant).MinBy(e => combatant.Position.DistanceTo(e.Position));
+
+        /// <summary>
+        /// The nearest free square at most <paramref name="moves"/> moves away from which
+        /// <paramref name="actor"/>'s melee reach takes in <paramref name="target"/>, or null.
+        /// </summary>
+        public GridPosition? StrikeSquare(Combatant actor, Combatant target, int moves = 1)
+        {
+            var origin = actor.Position;
+            return SquaresWithin(actor, moves).Keys
+                .Where(square => actor.CanReachFrom(square, target.Position))
+                .OrderBy(square => square.DistanceTo(origin))
+                .Select(square => (GridPosition?)square)
+                .FirstOrDefault();
+        }
+
+        /// <summary>Why <paramref name="combatant"/> can't swap loadouts now, or null if they can.</summary>
+        public static string? SwapRefusal(Combatant combatant) => Encounter.SwapRefusal(combatant);
+
+        /// <summary>Why <paramref name="combatant"/> can't take Dodge, Grounded or Resolute now, or null if they can.</summary>
+        public static string? StandGroundRefusal(Combatant combatant, Rules.Enums.CombatAction action) =>
+            Encounter.StandGroundRefusal(combatant, action);
 
         /// <summary>Why <paramref name="combatant"/> can't make a tactical Stamina spend now, or null if they can.</summary>
         public static string? TacticalSpendRefusal(Combatant combatant) => Encounter.TacticalSpendRefusal(combatant);

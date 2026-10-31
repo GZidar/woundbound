@@ -1,4 +1,4 @@
-using WoundBound.Game.Combat.Gm;
+using WoundBound.Game.Combat.Brains;
 using WoundBound.Rules.Calculation;
 using WoundBound.Rules.Catalog;
 using WoundBound.Rules.Enums;
@@ -92,7 +92,7 @@ namespace WoundBound.Game.Combat
         private Combatant? extraTurnChosen;
 
         private readonly IGmBrain gm;
-        private readonly GmView view;
+        private readonly BattleView view;
 
         /// <param name="gm">Who plays the GM's side. Defaults to <see cref="SimpleGmBrain"/>.</param>
         public Encounter(int width, int height, IEnumerable<Combatant> combatants, RangeBandTables bands, IDiceRoller dice, IGmBrain? gm = null)
@@ -103,10 +103,13 @@ namespace WoundBound.Game.Combat
             this.bands = bands;
             this.dice = dice;
             this.gm = gm ?? new SimpleGmBrain();
-            view = new GmView(this);
+            view = new BattleView(this);
 
             StartRound();
         }
+
+        /// <summary>The fight as a brain sees it — for bots at either seat.</summary>
+        internal BattleView View => view;
 
         public int Width { get; }
 
@@ -154,11 +157,52 @@ namespace WoundBound.Game.Combat
         /// left. A move is priced by the band its own distance falls in (Core Rules §9, "Speed").
         /// </summary>
         public int? MoveCostTo(Combatant combatant, GridPosition square) =>
-            PriceOfMove(combatant, square) is { } cost && cost <= MovesAvailable(combatant) ? cost : null;
+            !combatant.IsStandingGround && PriceOfMove(combatant, square) is { } cost && cost <= MovesAvailable(combatant) ? cost : null;
 
-        /// <summary>Every square the active character could move to now, with what each would cost.</summary>
+        /// <summary>Every square the active character could move to now, with what each would cost. None while they stand their ground.</summary>
         public IReadOnlyDictionary<GridPosition, int> ReachableSquares(Combatant combatant) =>
-            SquaresWithin(combatant, MovesAvailable(combatant));
+            combatant.IsStandingGround
+                ? new Dictionary<GridPosition, int>()
+                : SquaresWithin(combatant, MovesAvailable(combatant));
+
+        /// <summary>
+        /// Why <paramref name="combatant"/> can't take <paramref name="action"/> — Dodge, Grounded or
+        /// Resolute — right now, or null if they can (Core Rules §10, "Standing Your Ground"). Each
+        /// takes the place of the move: the first is paid with the move, a second with the action,
+        /// a third with an extra action bought with Stamina. Nobody who has moved this turn can
+        /// take one, and none can be taken twice in a turn.
+        /// </summary>
+        public static string? StandGroundRefusal(Combatant combatant, CombatAction action)
+        {
+            if (CombatActionCatalog.For(action).Braces is not { } threshold)
+            {
+                return $"{action} isn't a way of standing your ground.";
+            }
+
+            if (combatant.IsOutOfFight)
+            {
+                return $"{combatant.Name} is in no state to.";
+            }
+
+            if (combatant.HasMovedThisTurn)
+            {
+                return "Already moved this turn — standing your ground means making no move at all.";
+            }
+
+            if (combatant.StandingGround.Contains(action))
+            {
+                return $"Already taking the {action} action — it can't be taken twice in a turn.";
+            }
+
+            if (threshold == ThresholdType.Resolve && combatant.BaseResolveThreshold is null)
+            {
+                return $"{combatant.Name} has no Resolve to steel.";
+            }
+
+            return MovesAvailable(combatant) < 1
+                ? "Nothing left to pay with: the first takes the move, a second the action, a third an extra action bought with Stamina."
+                : null;
+        }
 
         public bool CanAttack(Combatant attacker, Combatant target) =>
             attacker.Side != target.Side
@@ -269,6 +313,7 @@ namespace WoundBound.Game.Combat
 
             var from = mover.Position;
             var paidWith = PayMoves(mover, cost);
+            mover.HasMovedThisTurn = true;
 
             // "Leaving an enemy's reach is a trigger" (Core Rules §9, "Movement"): from a square
             // within that enemy's Reach to one outside it. The slice moves in a straight hop, so the
@@ -327,6 +372,45 @@ namespace WoundBound.Game.Combat
 
             Write($"{swapper.Name} swaps loadouts — {putAway} away, {takenUp} in hand — for {paidWith}.");
             return true;
+        }
+
+        /// <summary>
+        /// Takes the Dodge, Grounded or Resolute action: +2 to that Threshold until the start of
+        /// the next turn, paid for like a move — and from now until then, no moving and
+        /// Disadvantage on every attack roll (Core Rules §10, "Standing Your Ground").
+        /// </summary>
+        public bool TryStandGround(CombatAction action)
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } bracer || StandGroundRefusal(bracer, action) is not null)
+            {
+                return false;
+            }
+
+            StandGround(bracer, action);
+            return true;
+        }
+
+        private void StandGround(Combatant bracer, CombatAction action)
+        {
+            var threshold = CombatActionCatalog.For(action).Braces!.Value;
+            var paidWith = PayMoves(bracer, 1);
+
+            bracer.ThresholdModifiers = ThresholdModifierCalculator.Add(bracer.ThresholdModifiers, new ThresholdModifier
+            {
+                Threshold = threshold,
+                Amount = ThresholdModifierCalculator.BracingActionBonus,
+                Source = $"{action} action",
+                Duration = ThresholdModifierDuration.UntilMyTurn,
+                StackKey = ThresholdModifierCalculator.BracingActionKey,
+            });
+
+            var now = threshold switch
+            {
+                ThresholdType.Dodge => $"DT {bracer.DodgeThreshold}",
+                ThresholdType.Stability => $"ST {bracer.StabilityThreshold}",
+                _ => $"RT {bracer.ResolveThreshold}",
+            };
+            Write($"{bracer.Name} {CombatActionCatalog.ActionLogLine(action, extra: false).TrimEnd('.')} — {now}, for {paidWith}.");
         }
 
         /// <summary>Spends 1 Stamina for an extra action this turn (Core Rules §6), handing the GM a banked Opportunity.</summary>
@@ -474,6 +558,7 @@ namespace WoundBound.Game.Combat
                 }
 
                 ExpireImmediateOpportunities(next);
+                StartTurnFor(next);
 
                 if (next.Stamina <= 0)
                 {
@@ -561,7 +646,7 @@ namespace WoundBound.Game.Combat
                     throw new InvalidOperationException($"The GM brain closed in with {adversary.Name}, which took a turn this round or has already moved.");
                 }
 
-                if (PriceOfMove(adversary, closeIn.Square) is not { } cost || cost > 1)
+                if (adversary.IsStandingGround || PriceOfMove(adversary, closeIn.Square) is not { } cost || cost > 1)
                 {
                     throw new InvalidOperationException($"The GM brain closed {adversary.Name} in to {closeIn.Square}, which isn't a single free move away.");
                 }
@@ -584,8 +669,25 @@ namespace WoundBound.Game.Combat
         /// One adversary's turn: a move and an action, spent however the GM brain chooses, a step
         /// at a time. Each step is checked against the rules before it happens.
         /// </summary>
+        /// <summary>
+        /// What the start of any creature's turn clears: everything that lasted "until the start
+        /// of the next turn" — standing their ground among it (Core Rules §10).
+        /// </summary>
+        private void StartTurnFor(Combatant combatant)
+        {
+            var wasStanding = combatant.StandingGround.ToList();
+            combatant.ThresholdModifiers = ThresholdModifierCalculator.AtTurnStart(combatant.ThresholdModifiers);
+            combatant.HasMovedThisTurn = false;
+
+            if (wasStanding.Count > 0)
+            {
+                Write($"{combatant.Name} stops standing their ground ({string.Join(", ", wasStanding)}).");
+            }
+        }
+
         private void TakeAdversaryTurn(Combatant actor, bool allowOpportunityBonus, Action done)
         {
+            StartTurnFor(actor);
             Active = actor;
             actor.HasMove = true;
             actor.ActionsRemaining = 1;
@@ -644,8 +746,19 @@ namespace WoundBound.Game.Combat
                     ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done));
                     return;
 
+                case GmStep.StandGround brace:
+                    if (StandGroundRefusal(actor, brace.Action) is { } why)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} take the {brace.Action} action: {why}");
+                    }
+
+                    StandGround(actor, brace.Action);
+                    turn.HasStoodGround = true;
+                    TakeStep(turn, done);
+                    return;
+
                 default:
-                    if (!turn.HasAttacked && actor.HasMove)
+                    if (!turn.HasAttacked && !turn.HasStoodGround && actor.HasMove)
                     {
                         Write($"{actor.Name} holds its ground.");
                     }
@@ -695,6 +808,7 @@ namespace WoundBound.Game.Combat
         {
             var from = mover.Position;
             mover.Position = square;
+            mover.HasMovedThisTurn = true;
             var paidWith = PayMoves(mover, cost);
 
             var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(square));
@@ -738,10 +852,13 @@ namespace WoundBound.Game.Combat
                 Write($"The GM spends {SpendOpportunity()} Opportunity on {attacker.Name}'s bonus: Advantage.");
             }
 
-            var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(opportunityBonus, disadvantage: false))
+            // Standing your ground costs the blow: Disadvantage on every attack roll while it lasts,
+            // reaction attacks included (Core Rules §10). An Advantage cancels it.
+            var disadvantage = attacker.IsStandingGround;
+            var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(opportunityBonus, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
                 .ToList();
-            var roll = RollCalculator.Resolve(rolled, attacker.Attack.AttackModifier, plan.DodgeThreshold, opportunityBonus, disadvantage: false);
+            var roll = RollCalculator.Resolve(rolled, attacker.Attack.AttackModifier, plan.DodgeThreshold, opportunityBonus, disadvantage);
 
             if (!asReaction)
             {
@@ -971,8 +1088,9 @@ namespace WoundBound.Game.Combat
             var roll = outcome.Roll;
             var dice = string.Join("+", roll.CountedDice);
             var dropped = RollCalculator.DroppedDice(roll);
-            var advantage = outcome.UsedOpportunity
-                ? $" (Advantage, dropped {string.Join(", ", dropped)})"
+            var advantage = roll.AppliedAdvantage ? $" (Advantage, dropped {string.Join(", ", dropped)})"
+                : roll.AppliedDisadvantage ? $" (Disadvantage for standing their ground, dropped {string.Join(", ", dropped)})"
+                : outcome.UsedOpportunity ? " (Advantage and Disadvantage cancel)"
                 : string.Empty;
             var sign = roll.Modifier >= 0 ? "+" : "−";
             var range = outcome.Plan.RangeDodgeModifier > 0 ? $" (+{outcome.Plan.RangeDodgeModifier} for range)" : string.Empty;
