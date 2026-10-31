@@ -31,9 +31,9 @@ public class EncounterTests
         // Strength: Tier 1 + Strength 3. A longsword is Medium (d6) and Power, so +Strength damage.
         Assert.Equal(7, fighter.BodyMax);
         Assert.Equal(14, fighter.DodgeThreshold);
-        Assert.Equal(4, fighter.AttackModifier);
-        Assert.Equal(6, fighter.DamageDieSides);
-        Assert.Equal(3, fighter.DamageModifier);
+        Assert.Equal(4, fighter.Attack.AttackModifier);
+        Assert.Equal(6, fighter.Attack.DamageDieSides);
+        Assert.Equal(3, fighter.Attack.DamageModifier);
         Assert.Equal(ArmourWeight.Light, fighter.Armour);
         Assert.Equal(1, fighter.Reach);
         Assert.Equal(1, fighter.TacticalSpendsPerRound);
@@ -49,7 +49,7 @@ public class EncounterTests
         {
             Assert.True(r.IsMinion);
             Assert.Equal(11, r.DodgeThreshold);
-            Assert.Equal(4, r.DamageDieSides);
+            Assert.Equal(4, r.Attack.DamageDieSides);
         });
     }
 
@@ -125,9 +125,9 @@ public class EncounterTests
     [Fact]
     public void ARatkinBite_IsReducedByTheFightersLightArmour()
     {
-        // Fighter ends turn without acting. A ratkin closes and bites: 9+6 +0 = 15 vs DT 14, d4 = 3,
-        // and light armour absorbs 1 (Core Rules §9, "Armour").
-        var (encounter, fighter, _) = Fight(9, 6, 3);
+        // Fighter ends turn without acting. A ratkin closes and bites: 10+7 +0 = 17 vs DT 14 — too
+        // high for a panic dodge to turn — d4 = 3, and light armour absorbs 1 (Core Rules §9, "Armour").
+        var (encounter, fighter, _) = Fight(10, 7, 3);
         Assert.True(encounter.TryMove(new GridPosition(4, 4)));
         encounter.EndTurn();
 
@@ -141,14 +141,18 @@ public class EncounterTests
     public void TheGm_TakesOneAdversaryTurnPerCharacter_ThenANewRoundBegins()
     {
         // Three ratkin, one fighter: one adversary turn a round (Core Rules §9). The fighter stays
-        // out of reach, so the ratkin only move, and no dice are rolled.
+        // out of reach, so the ratkin only move, and no dice are rolled. The two left out of the
+        // round's turns close in at its end.
         var (encounter, _, ratkin) = Fight();
-        encounter.EndTurn();
         var before = ratkin.Select(r => r.Position).ToList();
+        encounter.EndTurn();
 
         encounter.RunAdversaryTurn();
 
-        Assert.Equal(1, ratkin.Select(r => r.Position).Zip(before).Count(p => p.First != p.Second));
+        Assert.Equal(1, encounter.AdversaryTurnsPerRound);
+        Assert.Single(encounter.Log, line => line.StartsWith("Ratkin") && line.Contains(" moves "));
+        Assert.All(ratkin.Select(r => r.Position).Zip(before), p => Assert.NotEqual(p.Second, p.First));
+        Assert.Equal(2, encounter.Log.Count(line => line.Contains("closes in")));
         Assert.Equal(2, encounter.Round);
         Assert.Equal(EncounterPhase.PartyTurn, encounter.Phase);
     }
@@ -167,21 +171,6 @@ public class EncounterTests
         // T1 allows one tactical spend a round (Core Rules §6, "Stamina Limit").
         Assert.NotNull(encounter.ExtraActionRefusal(fighter));
         Assert.False(encounter.TryBuyExtraAction());
-    }
-
-    [Fact]
-    public void TheGm_SpendsAnOpportunityForAdvantage()
-    {
-        // Ratkin rolls three dice and keeps 8+7; drops the 2. 15 vs DT 14 hits; d4 = 1, absorbed.
-        var (encounter, fighter, _) = Fight(2, 8, 7, 1);
-        Assert.True(encounter.TryBuyExtraAction());
-        Assert.True(encounter.TryMove(new GridPosition(4, 4)));
-        encounter.EndTurn();
-
-        encounter.RunAdversaryTurn();
-
-        Assert.Equal(0, encounter.GmOpportunities);
-        Assert.Equal(7, fighter.Body);
     }
 
     [Fact]

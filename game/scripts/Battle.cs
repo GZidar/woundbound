@@ -39,6 +39,9 @@ namespace WoundBoundGame
         private Label statusLabel = null!;
         private Label characterLabel = null!;
         private Label hoverLabel = null!;
+        private PanelContainer reactionBox = null!;
+        private Label reactionLabel = null!;
+        private Button swapButton = null!;
         private Button extraActionButton = null!;
         private Button endTurnButton = null!;
         private RichTextLabel logLabel = null!;
@@ -197,31 +200,63 @@ namespace WoundBoundGame
             }
         }
 
+        /// <summary>Shows the panic-dodge choice while the encounter is waiting on it, and hides it otherwise.</summary>
+        private void UpdateReactionPrompt()
+        {
+            reactionBox.Visible = encounter.Pending is not null;
+            if (encounter.Pending is not { } pending)
+            {
+                return;
+            }
+
+            var roll = pending.Roll;
+            reactionLabel.Text =
+                $"{pending.Attacker.Name}'s {pending.Attacker.Attack.Name} rolls ({string.Join("+", roll.CountedDice)})" +
+                $"{(roll.Modifier >= 0 ? "+" : "−")}{System.Math.Abs(roll.Modifier)} = {roll.Total} against your DT {pending.DodgeThreshold}: a hit.\n" +
+                $"A panic dodge raises your DT to {pending.RaisedDodgeThreshold} and makes it miss" +
+                (pending.WouldRiposte ? " — and it's a critical, so the miss is a Riposte: the attacker takes the wound." : ".") +
+                "\nIt costs 1 Stamina and your tactical spend for the round, and hands the GM an Immediate Opportunity.";
+        }
+
         private void UpdateHud()
         {
             statusLabel.Text = $"Round {encounter.Round} · " + encounter.Phase switch
             {
                 EncounterPhase.PartyTurn => $"Your turn: {encounter.Active?.Name}",
                 EncounterPhase.AdversaryTurn => "The GM is acting…",
+                EncounterPhase.AwaitingReaction => "React?",
                 EncounterPhase.Victory => "Victory!",
                 _ => "Defeat."
-            } + $"\nGM Opportunities banked: {encounter.GmOpportunities}";
+            } + $"\nGM Opportunities: {encounter.BankedOpportunities}/{Encounter.MaxBankedOpportunities} banked" +
+              (encounter.ImmediateOpportunities > 0 ? $", {encounter.ImmediateOpportunities} immediate" : string.Empty);
+
+            UpdateReactionPrompt();
 
             var character = encounter.Combatants.First(c => c.Side == Side.Party);
+            var attack = character.Attack;
             var armourAbsorbs = InventoryCalculator.ArmourDamageAbsorbed(character.Armour);
             characterLabel.Text =
                 $"{character.Name}\n" +
                 $"Body {character.Body}/{character.BodyMax} ({character.BodyStatus})   Stamina {character.Stamina}/{character.StaminaMax}\n" +
                 $"Tactical spends this round: {character.TacticalSpendsThisRound}/{character.TacticalSpendsPerRound}\n" +
                 $"Move: {(character.HasMove ? "available" : "used")}   Actions left: {character.ActionsRemaining}\n" +
-                $"DT {character.DodgeThreshold} · {character.AttackName} +{character.AttackModifier}, " +
-                $"1d{character.DamageDieSides}+{character.DamageModifier} · {character.Armour} armour (absorbs {armourAbsorbs})";
+                $"In hand: {attack.Name} +{attack.AttackModifier}, 1d{attack.DamageDieSides}+{attack.DamageModifier}" +
+                (attack.IsRanged ? " (ranged — not at Close)" : $" (Reach {attack.Reach})") + "\n" +
+                $"At the ready: {character.ReadyWeapon?.Name ?? "nothing"}\n" +
+                $"DT {character.DodgeThreshold} · {character.Armour} armour (absorbs {armourAbsorbs})";
 
             var isPartyTurn = encounter.Phase == EncounterPhase.PartyTurn && encounter.Active is not null;
             hoverLabel.Text = DescribeHovered(isPartyTurn ? encounter.Active : null);
+
             var refusal = isPartyTurn ? encounter.ExtraActionRefusal(encounter.Active!) : null;
             extraActionButton.Disabled = !isPartyTurn || refusal is not null;
-            extraActionButton.TooltipText = refusal ?? "Gain an extra action. Hands the GM an Opportunity.";
+            extraActionButton.TooltipText = refusal ?? "Gain an extra action. Hands the GM a banked Opportunity.";
+
+            var swapRefusal = isPartyTurn ? Encounter.SwapRefusal(encounter.Active!) : null;
+            swapButton.Text = $"Swap to {character.ReadyWeapon?.Name ?? "empty hands"}";
+            swapButton.Disabled = !isPartyTurn || swapRefusal is not null;
+            swapButton.TooltipText = swapRefusal ?? "Costs a move (or an action once the move is spent). Not movement, and no Opportunity for the GM.";
+
             endTurnButton.Disabled = !isPartyTurn;
         }
 
@@ -231,7 +266,8 @@ namespace WoundBoundGame
             const string howToPlay =
                 "You are the blue token (yellow ring on your turn).\n" +
                 "• Move: click a highlighted square. Blue costs your move; amber spends your action too.\n" +
-                "• Attack: get beside a ratkin, then click it once it has a red ring.\n" +
+                "• Swap: trade the loadout in hand for the one at the ready, for a move.\n" +
+                "• Attack: click a ratkin with a red ring — in Reach for a blade, beyond Close for a bow.\n" +
                 "• End turn when you're done, and the GM moves one ratkin.";
 
             if (hovered is not { } square)
@@ -242,7 +278,7 @@ namespace WoundBoundGame
             if (encounter.At(square) is { Side: Side.Adversaries } foe)
             {
                 var stats = $"{foe.Name}: Body {foe.Body}/{foe.BodyMax} · DT {foe.DodgeThreshold} · " +
-                            $"{foe.AttackName} +{foe.AttackModifier}, {foe.DamageDiceCount}d{foe.DamageDieSides}" +
+                            $"{foe.Attack.Name} +{foe.Attack.AttackModifier}, {foe.Attack.DamageDiceCount}d{foe.Attack.DamageDieSides}" +
                             (foe.IsMinion ? "\nMinion: any hit that gets past its armour drops it." : string.Empty);
 
                 if (active is null)
@@ -250,11 +286,19 @@ namespace WoundBoundGame
                     return stats;
                 }
 
-                return stats + (encounter.CanAttack(active, foe)
-                    ? $"\nClick to attack: 2d12+{active.AttackModifier} vs DT {foe.DodgeThreshold}."
-                    : active.ActionsRemaining == 0
-                        ? "\nNo action left to attack with — spend Stamina for another, or end your turn."
-                        : "\nOut of reach — move next to it first.");
+                var plan = encounter.PlanAttack(active, foe);
+                if (!plan.CanAttack)
+                {
+                    return stats + $"\n{plan.Refusal}";
+                }
+
+                var damage = plan.DamageDieSides is { } die
+                    ? $"1d{die}+{active.Attack.DamageModifier}"
+                    : $"no die, just +{active.Attack.DamageModifier}";
+                return stats + (active.ActionsRemaining > 0
+                    ? $"\nClick to attack: 2d12+{active.Attack.AttackModifier} vs DT {plan.DodgeThreshold}, {damage}."
+                    : "\nNo action left to attack with — spend Stamina for another, or end your turn.") +
+                    (active.Attack.IsRanged ? $"\n{plan.Note}" : string.Empty);
             }
 
             if (active is not null && encounter.At(square) is null)
@@ -303,11 +347,20 @@ namespace WoundBoundGame
             hoverLabel = WrappingLabel(column);
             hoverLabel.AddThemeColorOverride("font_color", new Color(0.75f, 0.75f, 0.8f));
 
-            var buttons = new HBoxContainer();
-            buttons.AddThemeConstantOverride("separation", 8);
+            var buttons = new HFlowContainer();
+            buttons.AddThemeConstantOverride("h_separation", 8);
+            buttons.AddThemeConstantOverride("v_separation", 8);
             column.AddChild(buttons);
 
-            extraActionButton = new Button { Text = "Spend 1 Stamina: extra action" };
+            swapButton = new Button();
+            swapButton.Pressed += () =>
+            {
+                encounter.TrySwapLoadout();
+                Refresh();
+            };
+            buttons.AddChild(swapButton);
+
+            extraActionButton = new Button { Text = "+1 action (1 Stamina)" };
             extraActionButton.Pressed += () =>
             {
                 encounter.TryBuyExtraAction();
@@ -326,6 +379,40 @@ namespace WoundBoundGame
             var restartButton = new Button { Text = "Restart" };
             restartButton.Pressed += StartEncounter;
             buttons.AddChild(restartButton);
+
+            reactionBox = new PanelContainer { Visible = false };
+            reactionBox.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+            {
+                BgColor = new Color(0.35f, 0.12f, 0.10f),
+                ContentMarginLeft = 10, ContentMarginRight = 10, ContentMarginTop = 8, ContentMarginBottom = 8,
+            });
+            column.AddChild(reactionBox);
+
+            var reactionColumn = new VBoxContainer();
+            reactionColumn.AddThemeConstantOverride("separation", 8);
+            reactionBox.AddChild(reactionColumn);
+
+            reactionLabel = WrappingLabel(reactionColumn);
+
+            var reactionButtons = new HBoxContainer();
+            reactionButtons.AddThemeConstantOverride("separation", 8);
+            reactionColumn.AddChild(reactionButtons);
+
+            var dodgeButton = new Button { Text = "Panic dodge (1 Stamina)" };
+            dodgeButton.Pressed += () =>
+            {
+                encounter.RespondToReaction(dodge: true);
+                Refresh();
+            };
+            reactionButtons.AddChild(dodgeButton);
+
+            var takeItButton = new Button { Text = "Take the hit" };
+            takeItButton.Pressed += () =>
+            {
+                encounter.RespondToReaction(dodge: false);
+                Refresh();
+            };
+            reactionButtons.AddChild(takeItButton);
 
             logLabel = new RichTextLabel
             {

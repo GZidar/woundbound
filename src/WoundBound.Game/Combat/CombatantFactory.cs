@@ -13,34 +13,31 @@ namespace WoundBound.Game.Combat
     public static class CombatantFactory
     {
         /// <summary>
-        /// A player character fighting with their first equipped weapon (unarmed without one) in
-        /// their equipped armour.
+        /// A player character in their equipped armour, fighting with whichever loadout is in hand.
+        /// The build is kept, not copied, so a swap mid-fight changes what they attack with.
         /// </summary>
         public static Combatant FromCharacter(CharacterBuild build, GridPosition position)
         {
-            var stats = CharacterCalculator.Calculate(build);
-            var weapon = build.Weapons.FirstOrDefault(w => w.IsEquipped) ?? WeaponCalculator.Unarmed();
-            var armour = build.Armour.FirstOrDefault(a => a.IsEquipped)?.Weight ?? ArmourWeight.None;
+            var loadout = InventoryCalculator.ValidateEquippedLoadout(build);
+            if (!loadout.IsValid)
+            {
+                throw new ArgumentException($"{build.CharacterName} can't fight like that: {string.Join(" ", loadout.Errors)}", nameof(build));
+            }
 
-            var attackModifier = CharacterCalculator.WeaponAttackBonus(build, weapon)
-                ?? throw new ArgumentException("A character needs a Class Principle before it can attack.", nameof(build));
+            var stats = CharacterCalculator.Calculate(build);
+            var armour = build.Armour.FirstOrDefault(a => a.IsEquipped)?.Weight ?? ArmourWeight.None;
 
             return new Combatant
             {
                 Name = build.CharacterName,
                 Side = Side.Party,
+                Build = build,
                 Position = position,
                 BodyMax = stats.BodyWoundPool,
                 Body = build.Play.CurrentBodyWounds ?? stats.BodyWoundPool,
                 IsStable = build.Play.IsStable,
                 DodgeThreshold = stats.DodgeThreshold,
-                AttackName = weapon.Name,
-                AttackModifier = attackModifier,
-                DamageDiceCount = 1,
-                DamageDieSides = DiceNotation.ParseSides(WeaponCalculator.BaseDamageDie(weapon.Weight)),
-                DamageModifier = build.GetModifier(WeaponCalculator.DamageAbilityFor(weapon.Grip)),
                 Armour = armour,
-                Reach = WeaponCalculator.CharacterReach(weapon),
                 Speed = Speed.Normal,
                 StaminaMax = stats.Stamina,
                 Stamina = build.Play.CurrentStamina ?? stats.Stamina,
@@ -57,13 +54,15 @@ namespace WoundBound.Game.Combat
             BodyMax = info.BodyMax,
             Body = info.BodyMax,
             DodgeThreshold = info.DodgeThreshold,
-            AttackName = info.AttackName,
-            AttackModifier = info.AttackModifier,
-            DamageDiceCount = info.DamageDiceCount,
-            DamageDieSides = DiceNotation.ParseSides(info.DamageDie),
-            DamageModifier = info.DamageModifier,
+            StatblockAttack = new AttackProfile(
+                Name: info.AttackName,
+                AttackModifier: info.AttackModifier,
+                DamageDiceCount: info.DamageDiceCount,
+                DamageDieSides: DiceNotation.ParseSides(info.DamageDie),
+                DamageModifier: info.DamageModifier,
+                Reach: info.Reach,
+                Weapon: null),
             Armour = info.Armour,
-            Reach = info.Reach,
             Speed = info.Speed,
             IsMinion = info.Role == AdversaryRole.Minion,
             StaminaMax = info.Stamina,
@@ -71,8 +70,23 @@ namespace WoundBound.Game.Combat
             TacticalSpendsPerRound = CharacterCalculator.TacticalSpendsPerRound(info.Tier),
         };
 
-        /// <summary>A catalogue weapon, equipped in hand.</summary>
-        public static WeaponDefinition EquippedWeapon(StartingWeaponInfo info) => new()
+        /// <summary>A catalogue weapon in the loadout in hand (Core Rules §15, "Equipped Items").</summary>
+        public static WeaponDefinition InHand(StartingWeaponInfo info)
+        {
+            var weapon = FromCatalogue(info);
+            weapon.IsEquipped = true;
+            return weapon;
+        }
+
+        /// <summary>A catalogue weapon in the loadout at the ready — on the body, a swap away.</summary>
+        public static WeaponDefinition AtTheReady(StartingWeaponInfo info)
+        {
+            var weapon = FromCatalogue(info);
+            weapon.IsAtReady = true;
+            return weapon;
+        }
+
+        private static WeaponDefinition FromCatalogue(StartingWeaponInfo info) => new()
         {
             Name = info.Name,
             IsRanged = info.IsRanged,
@@ -84,7 +98,6 @@ namespace WoundBound.Game.Combat
             CanBeThrown = info.CanBeThrown,
             TwoHanded = info.TwoHanded,
             Unwieldy = info.Unwieldy,
-            IsEquipped = true,
         };
     }
 }

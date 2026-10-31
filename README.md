@@ -37,18 +37,33 @@ opening Godot lives in `src/`.
 
 ## The first slice
 
-The Dumb Fighter of Core Rules §12 (longsword, light armour) against three Bramble Ratkin from the
-starting adversaries. What it exercises, all through `WoundBound.Rules`:
+The Dumb Fighter of Core Rules §12 (light armour, longsword in hand, short bow at the ready) against
+three Bramble Ratkin from the starting adversaries. What it exercises, all through `WoundBound.Rules`:
 
 - Moves priced by distance band and Speed — up to Short for one move, Middle spends the action too.
+- Two loadouts, in hand and at the ready, swapped for a move (or an action once the move is spent).
+- Melee by Reach in squares, Unwieldy weapons included; ranged attacks by band — none at Close, the
+  target's DT raised at Middle and Long, the damage die falling off with range, and a critical's
+  bonus die still the weapon's full base die.
 - Attack rolls, 2d12 + Tier + attack stat vs Dodge Threshold, with criticals and absolute 1s/12s.
 - Weapon damage, armour absorption, the Minion rule, and a critical failure wounding the attacker.
-- Spending Stamina for an extra action, capped by Tier, and handing the GM an Opportunity — which
-  the ratkin spend on Advantage.
-- One adversary turn per character per round.
+- Tactical Stamina spends, capped by Tier: an extra action, a panic dodge, a reaction attack.
+- Panic dodge, offered after the roll and only when +2 Dodge Threshold would turn the hit; against
+  a critical it's a Riposte and the attacker takes the wound. The GM's creatures dodge too.
+- Reaction attacks against anybody leaving an enemy's reach.
+- GM Opportunities: banked from extra actions (at most 3), Immediate from reactions and Threshold
+  boosts (lapsing at the spender's next turn); spent on an extra adversary turn — on a creature that
+  can strike, ideally one that has already acted — or, with a full bank, on an attack's Advantage.
+- One owed adversary turn per character per round, the cap counted when the fight begins and never
+  falling as characters drop; at the round's end every adversary that took no turn closes in with a
+  single move.
 
-Not yet: reactions (panic dodge, Riposte), manoeuvres, Pack Tactics, multiple party members
-choosing their own order, obstacles.
+The GM's adversaries are played simply for now — each goes for the nearest character. Smarter
+adversary behaviour is planned.
+
+Not yet: manoeuvres, Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting,
+shields, Standing Your Ground (Dodge / Grounded / Resolute actions), multiple party members choosing
+their own order, obstacles, movement paths (a move is a hop from square to square).
 
 ## Updating the rules
 

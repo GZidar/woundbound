@@ -11,8 +11,9 @@ namespace WoundBound.Game.Combat
         public const int BoardHeight = 8;
 
         /// <summary>
-        /// The Dumb Fighter of Core Rules §12, with a longsword and light armour from the starting
-        /// gear — the same build the Rules tests check against the book's worked numbers.
+        /// The Dumb Fighter of Core Rules §12 — the same build the Rules tests check against the
+        /// book's worked numbers — in light armour, longsword in hand and a short bow slung at the
+        /// ready for whatever he can't walk up to.
         /// </summary>
         public static CharacterBuild DumbFighter(GameData data) => new()
         {
@@ -29,7 +30,11 @@ namespace WoundBound.Game.Combat
                 [Ability.Focus] = 0,
                 [Ability.Presence] = 1,
             },
-            Weapons = { CombatantFactory.EquippedWeapon(data.Weapon("Longsword")) },
+            Weapons =
+            {
+                CombatantFactory.InHand(data.Weapon("Longsword")),
+                CombatantFactory.AtTheReady(data.Weapon("Short Bow")),
+            },
             Armour = { new ArmourDefinition { Name = "Leather jerkin", Weight = ArmourWeight.Light, IsEquipped = true } },
         };
 
