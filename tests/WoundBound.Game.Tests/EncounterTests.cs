@@ -1,0 +1,200 @@
+using WoundBound.Game.Combat;
+using WoundBound.Rules.Enums;
+
+namespace WoundBound.Game.Tests;
+
+public class EncounterTests
+{
+    private static readonly Game.Data.GameData Data = TestData.Load();
+
+    private static (Encounter Encounter, Combatant Fighter, List<Combatant> Ratkin) Fight(params int[] dice)
+    {
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice));
+        var fighter = encounter.Combatants.Single(c => c.Side == Side.Party);
+        var ratkin = encounter.Combatants.Where(c => c.Side == Side.Adversaries).ToList();
+        return (encounter, fighter, ratkin);
+    }
+
+    /// <summary>Stages the fighter beside a ratkin, with the turn's move and action both still unspent.</summary>
+    private static Combatant StandBeside(Combatant fighter, Combatant ratkin)
+    {
+        fighter.Position = new GridPosition(ratkin.Position.X - 1, ratkin.Position.Y);
+        return ratkin;
+    }
+
+    [Fact]
+    public void DumbFighter_FightsWithTheNumbersTheRulesDerive()
+    {
+        var (_, fighter, _) = Fight();
+
+        // Core Rules §12: Body 7. DT = 11 + Tier 1 + Agility 2. A Martial character attacks with
+        // Strength: Tier 1 + Strength 3. A longsword is Medium (d6) and Power, so +Strength damage.
+        Assert.Equal(7, fighter.BodyMax);
+        Assert.Equal(14, fighter.DodgeThreshold);
+        Assert.Equal(4, fighter.AttackModifier);
+        Assert.Equal(6, fighter.DamageDieSides);
+        Assert.Equal(3, fighter.DamageModifier);
+        Assert.Equal(ArmourWeight.Light, fighter.Armour);
+        Assert.Equal(1, fighter.Reach);
+        Assert.Equal(1, fighter.TacticalSpendsPerRound);
+    }
+
+    [Fact]
+    public void Ratkin_ComeFromTheStartingAdversariesStatblock()
+    {
+        var (_, _, ratkin) = Fight();
+
+        Assert.Equal(3, ratkin.Count);
+        Assert.All(ratkin, r =>
+        {
+            Assert.True(r.IsMinion);
+            Assert.Equal(11, r.DodgeThreshold);
+            Assert.Equal(4, r.DamageDieSides);
+        });
+    }
+
+    [Fact]
+    public void AMove_UpToShortCostsOneMove_AndFurtherSpendsTheAction()
+    {
+        var (encounter, fighter, _) = Fight();
+
+        // At Normal Speed, Short (up to 4 squares) is one move; Middle (5–8) is two (Core Rules §9).
+        Assert.Equal(1, encounter.MoveCostTo(fighter, new GridPosition(5, 4)));
+        Assert.Equal(2, encounter.MoveCostTo(fighter, new GridPosition(6, 4)));
+
+        Assert.True(encounter.TryMove(new GridPosition(6, 4)));
+        Assert.False(fighter.HasMove);
+        Assert.Equal(0, fighter.ActionsRemaining);
+    }
+
+    [Fact]
+    public void AHit_ThatGetsPastArmour_RemovesAMinionOutright()
+    {
+        // 6+5 +4 = 15 vs DT 11; damage d6 = 1, +3.
+        var (encounter, fighter, ratkin) = Fight(6, 5, 1);
+        var target = StandBeside(fighter, ratkin.Single(r => r.Name == "Ratkin Sneak"));
+
+        var outcome = encounter.TryAttack(target)!;
+
+        Assert.True(outcome.Roll.Success);
+        Assert.Equal(4, outcome.Dealt);
+        Assert.True(target.IsOutOfFight);
+        Assert.Equal(0, target.Body);
+    }
+
+    [Fact]
+    public void AMiss_DealsNothing()
+    {
+        // 2+3 +4 = 9 vs DT 11.
+        var (encounter, fighter, ratkin) = Fight(2, 3);
+        var target = StandBeside(fighter, ratkin[1]);
+
+        var outcome = encounter.TryAttack(target)!;
+
+        Assert.False(outcome.Roll.Success);
+        Assert.Equal(0, outcome.Dealt);
+        Assert.False(target.IsOutOfFight);
+    }
+
+    [Fact]
+    public void ACriticalHit_DealsTheMaximumPlusAnExtraDie()
+    {
+        // 5+5 is critical and 14 beats DT 11: max d6 (6) + extra d6 (2) + 3 = 11.
+        var (encounter, fighter, ratkin) = Fight(5, 5, 2);
+        var target = StandBeside(fighter, ratkin[1]);
+
+        var outcome = encounter.TryAttack(target)!;
+
+        Assert.True(outcome.Roll.IsCritical);
+        Assert.Equal(11, outcome.RolledDamage);
+    }
+
+    [Fact]
+    public void ACriticalMiss_WoundsTheAttacker()
+    {
+        // A double one is an absolute failure, and a critical one (Core Rules §10).
+        var (encounter, fighter, ratkin) = Fight(1, 1);
+        var target = StandBeside(fighter, ratkin[1]);
+
+        var outcome = encounter.TryAttack(target)!;
+
+        Assert.True(outcome.AttackerWounded);
+        Assert.Equal(6, fighter.Body);
+    }
+
+    [Fact]
+    public void ARatkinBite_IsReducedByTheFightersLightArmour()
+    {
+        // Fighter ends turn without acting. A ratkin closes and bites: 9+6 +0 = 15 vs DT 14, d4 = 3,
+        // and light armour absorbs 1 (Core Rules §9, "Armour").
+        var (encounter, fighter, _) = Fight(9, 6, 3);
+        Assert.True(encounter.TryMove(new GridPosition(4, 4)));
+        encounter.EndTurn();
+
+        Assert.Equal(EncounterPhase.AdversaryTurn, encounter.Phase);
+        encounter.RunAdversaryTurn();
+
+        Assert.Equal(5, fighter.Body);
+    }
+
+    [Fact]
+    public void TheGm_TakesOneAdversaryTurnPerCharacter_ThenANewRoundBegins()
+    {
+        // Three ratkin, one fighter: one adversary turn a round (Core Rules §9). The fighter stays
+        // out of reach, so the ratkin only move, and no dice are rolled.
+        var (encounter, _, ratkin) = Fight();
+        encounter.EndTurn();
+        var before = ratkin.Select(r => r.Position).ToList();
+
+        encounter.RunAdversaryTurn();
+
+        Assert.Equal(1, ratkin.Select(r => r.Position).Zip(before).Count(p => p.First != p.Second));
+        Assert.Equal(2, encounter.Round);
+        Assert.Equal(EncounterPhase.PartyTurn, encounter.Phase);
+    }
+
+    [Fact]
+    public void BuyingAnExtraAction_CostsStamina_FeedsTheGm_AndIsLimitedByTier()
+    {
+        var (encounter, fighter, _) = Fight();
+        var stamina = fighter.Stamina;
+
+        Assert.True(encounter.TryBuyExtraAction());
+        Assert.Equal(stamina - 1, fighter.Stamina);
+        Assert.Equal(2, fighter.ActionsRemaining);
+        Assert.Equal(1, encounter.GmOpportunities);
+
+        // T1 allows one tactical spend a round (Core Rules §6, "Stamina Limit").
+        Assert.NotNull(encounter.ExtraActionRefusal(fighter));
+        Assert.False(encounter.TryBuyExtraAction());
+    }
+
+    [Fact]
+    public void TheGm_SpendsAnOpportunityForAdvantage()
+    {
+        // Ratkin rolls three dice and keeps 8+7; drops the 2. 15 vs DT 14 hits; d4 = 1, absorbed.
+        var (encounter, fighter, _) = Fight(2, 8, 7, 1);
+        Assert.True(encounter.TryBuyExtraAction());
+        Assert.True(encounter.TryMove(new GridPosition(4, 4)));
+        encounter.EndTurn();
+
+        encounter.RunAdversaryTurn();
+
+        Assert.Equal(0, encounter.GmOpportunities);
+        Assert.Equal(7, fighter.Body);
+    }
+
+    [Fact]
+    public void DroppingEveryRatkin_WinsTheFight()
+    {
+        var (encounter, _, ratkin) = Fight();
+        foreach (var r in ratkin)
+        {
+            r.Body = 0;
+        }
+
+        encounter.EndTurn();
+
+        Assert.Equal(EncounterPhase.Victory, encounter.Phase);
+    }
+}

@@ -1,0 +1,28 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+
+  <PropertyGroup>
+    <!-- Godot defaults to an older .NET; the Rules library targets net10.0, so the game does too. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <RootNamespace>WoundBoundGame</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\src\WoundBound.Game\WoundBound.Game.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\range-bands.json" />
+    <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-adversaries.json" />
+    <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-weapons.json" />
+  </ItemGroup>
+
+  <!-- The catalogues live in the submodule, outside res://, where Godot can't see them. Copy them
+       in on every build so the game always runs on the same data the session tracker does; the
+       copies are gitignored, so the submodule stays the only place they're edited. -->
+  <Target Name="CopyRulesData" BeforeTargets="BeforeBuild">
+    <Copy SourceFiles="@(RulesData)" DestinationFolder="$(MSBuildProjectDirectory)\data\rules" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

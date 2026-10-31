@@ -1,0 +1,3 @@
+[submodule "external/WoundBound"]
+	path = external/WoundBound
+	url = https://gzidar@dev.azure.com/gzidar/Wound%20Bound%20Session%20Tracker/_git/Wound%20Bound%20Session%20Tracker

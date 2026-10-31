@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WoundBound.Game.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The rules engine, consumed straight from the submodule so every formula the game uses is
+         the one the session tracker's tests already prove. -->
+    <ProjectReference Include="..\..\external\WoundBound\src\WoundBound.Rules\WoundBound.Rules.csproj" />
+  </ItemGroup>
+
+</Project>

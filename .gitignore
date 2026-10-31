@@ -23,3 +23,13 @@ mono_crash.*.json
 *.exe
 # Uncomment if your project does not version PCK files as runtime dependencies.
 # *.pck
+
+# .NET
+bin/
+obj/
+.vs/
+*.user
+TestResults/
+
+# Catalogues copied in from the submodule at build time (see game/WoundBoundGame.csproj)
+game/data/rules/
