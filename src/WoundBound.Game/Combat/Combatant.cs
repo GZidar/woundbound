@@ -98,9 +98,12 @@ namespace WoundBound.Game.Combat
         public bool IsOutOfFight => IsUnconscious || (Side == Side.Party ? BodyStatus != BodyStatus.Healthy : Body <= 0);
 
         /// <summary>Whether a melee blow could land on <paramref name="square"/> — within Reach, and not inside an Unwieldy haft.</summary>
-        public bool CanReach(GridPosition square)
+        public bool CanReach(GridPosition square) => CanReachFrom(Position, square);
+
+        /// <summary>Whether a melee blow from <paramref name="from"/>, were this creature standing there, could land on <paramref name="square"/>.</summary>
+        public bool CanReachFrom(GridPosition from, GridPosition square)
         {
-            var distance = Position.DistanceTo(square);
+            var distance = from.DistanceTo(square);
             return distance <= Reach && !(Attack.IsUnwieldy && distance <= 1);
         }
     }

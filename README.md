@@ -58,8 +58,22 @@ three Bramble Ratkin from the starting adversaries. What it exercises, all throu
   falling as characters drop; at the round's end every adversary that took no turn closes in with a
   single move.
 
-The GM's adversaries are played simply for now — each goes for the nearest character. Smarter
-adversary behaviour is planned.
+## The GM brain
+
+Every choice the rules leave to the GM goes through `IGmBrain` (`src/WoundBound.Game/Combat/Gm/`):
+- who takes an owed turn
+- whether to buy an extra turn with an Opportunity
+- each step of an adversary's turn (move, attack, with or without Advantage, or end)
+- whether to make a reaction attack or panic dodge
+- where idle adversaries close in at the round's end
+
+The `Encounter` owns the rules. It asks the brain, checks the answer, and carries it out, so a brain
+can never break a rule. An illegal answer throws. Brains see the fight through `GmView`, which
+answers rule questions ("could I hit them from there?") but can't change anything. A turn is asked
+for one step at a time, so a brain can re-plan after a dodge or a Riposte.
+
+`SimpleGmBrain` is the placeholder: everything goes for the nearest character. Pass a different
+brain to `Encounter` (or `SampleEncounters.FighterVersusRatkin`) to change how the GM plays.
 
 Not yet: manoeuvres, Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting,
 shields, Standing Your Ground (Dodge / Grounded / Resolute actions), multiple party members choosing

@@ -1,3 +1,4 @@
+using WoundBound.Game.Combat.Gm;
 using WoundBound.Rules.Calculation;
 using WoundBound.Rules.Catalog;
 using WoundBound.Rules.Enums;
@@ -87,13 +88,22 @@ namespace WoundBound.Game.Combat
         private EncounterPhase phaseBeforeReaction;
         private Action<bool>? resumeAfterReaction;
 
-        public Encounter(int width, int height, IEnumerable<Combatant> combatants, RangeBandTables bands, IDiceRoller dice)
+        /// <summary>The extra turn the GM chose to buy in this gap, decided when the gap was opened.</summary>
+        private Combatant? extraTurnChosen;
+
+        private readonly IGmBrain gm;
+        private readonly GmView view;
+
+        /// <param name="gm">Who plays the GM's side. Defaults to <see cref="SimpleGmBrain"/>.</param>
+        public Encounter(int width, int height, IEnumerable<Combatant> combatants, RangeBandTables bands, IDiceRoller dice, IGmBrain? gm = null)
         {
             Width = width;
             Height = height;
             this.combatants = combatants.ToList();
             this.bands = bands;
             this.dice = dice;
+            this.gm = gm ?? new SimpleGmBrain();
+            view = new GmView(this);
 
             StartRound();
         }
@@ -162,10 +172,13 @@ namespace WoundBound.Game.Combat
         /// action left to make it with. A blade asks about Reach, in squares; a bow asks about the
         /// band, which moves the Dodge Threshold and the damage die (Core Rules §9, "Weapon Range").
         /// </summary>
-        public AttackPlan PlanAttack(Combatant attacker, Combatant target)
+        public AttackPlan PlanAttack(Combatant attacker, Combatant target) => PlanAttackFrom(attacker, attacker.Position, target);
+
+        /// <summary>As <see cref="PlanAttack"/>, as though <paramref name="attacker"/> stood on <paramref name="from"/>.</summary>
+        internal AttackPlan PlanAttackFrom(Combatant attacker, GridPosition from, Combatant target)
         {
             var attack = attacker.Attack;
-            var distance = attacker.Position.DistanceTo(target.Position);
+            var distance = from.DistanceTo(target.Position);
 
             if (!attack.IsRanged)
             {
@@ -399,10 +412,11 @@ namespace WoundBound.Game.Combat
             {
                 owedInGap--;
                 adversaryTurnsRemaining--;
-                actor = ChooseOwedActor();
+                actor = CheckAdversary(gm.ChooseOwedTurn(view), "an owed turn");
             }
-            else if (ChooseExtraTurnActor() is { } bought)
+            else if (extraTurnChosen is { } bought)
             {
+                extraTurnChosen = null;
                 Write($"The GM spends {SpendOpportunity()} Opportunity on an extra turn for {bought.Name}.");
                 actor = bought;
                 extraTurn = true;
@@ -505,7 +519,11 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            if (owedInGap > 0 || ChooseExtraTurnActor() is not null)
+            extraTurnChosen = owedInGap == 0 && GmOpportunities > 0 && gm.ChooseExtraTurn(view) is { } bought
+                ? CheckAdversary(bought, "an extra turn")
+                : null;
+
+            if (owedInGap > 0 || extraTurnChosen is not null)
             {
                 Phase = EncounterPhase.AdversaryTurn;
                 return;
@@ -529,128 +547,113 @@ namespace WoundBound.Game.Combat
         /// <summary>
         /// "Adversaries that didn't act close in" (Core Rules §9): after the GM's last turn of the
         /// round, each adversary that took no turn may take one move — no action, nothing riding on
-        /// it — and it isn't a turn. The GM walks each toward the nearest character, nearest first,
-        /// and leaves where it is any that can already strike.
+        /// it — and it isn't a turn. The GM brain picks who goes where, one at a time.
         /// </summary>
         private void CloseIn()
         {
-            var idle = Fighting(Side.Adversaries)
-                .Where(a => !a.HasActedThisRound)
-                .OrderBy(a => NearestTarget(a).Position.DistanceTo(a.Position))
-                .ToList();
+            var idle = Fighting(Side.Adversaries).Where(a => !a.HasActedThisRound).ToList();
 
-            foreach (var adversary in idle)
+            while (idle.Count > 0 && gm.NextCloseIn(view, idle) is { } closeIn)
             {
-                var target = NearestTarget(adversary);
-                if (adversary.CanReach(target.Position))
+                var adversary = closeIn.Adversary;
+                if (!idle.Remove(adversary))
                 {
-                    continue;
+                    throw new InvalidOperationException($"The GM brain closed in with {adversary.Name}, which took a turn this round or has already moved.");
                 }
 
-                var destination = StrikeSquare(adversary, target)
-                    ?? SquaresWithin(adversary, 1).Keys
-                        .Where(square => square.DistanceTo(target.Position) < adversary.Position.DistanceTo(target.Position))
-                        .OrderBy(square => square.DistanceTo(target.Position))
-                        .ThenBy(square => square.DistanceTo(adversary.Position))
-                        .Select(square => (GridPosition?)square)
-                        .FirstOrDefault();
-
-                if (destination is not { } square)
+                if (PriceOfMove(adversary, closeIn.Square) is not { } cost || cost > 1)
                 {
-                    continue;
+                    throw new InvalidOperationException($"The GM brain closed {adversary.Name} in to {closeIn.Square}, which isn't a single free move away.");
                 }
 
-                // A move is a straight hop in the slice; heading for the nearest character never
-                // leaves a character's reach, so no reaction is drawn (PC reaction attacks aren't in yet).
+                // A move is a straight hop in the slice. A character's reaction attack against an
+                // adversary leaving their reach isn't in yet, so none is drawn here.
                 var from = adversary.Position;
-                adversary.Position = square;
-                var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(square));
-                Write($"{adversary.Name} didn't act this round, and closes in {from.DistanceTo(square)} square(s) ({band}).");
+                adversary.Position = closeIn.Square;
+                var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(closeIn.Square));
+                Write($"{adversary.Name} didn't act this round, and closes in {from.DistanceTo(closeIn.Square)} square(s) ({band}).");
             }
         }
 
-        /// <summary>
-        /// The GM's side of the table, played simply: whoever can already strike a character, or
-        /// else whoever is closest to doing so, goes for the nearest character — stepping into reach
-        /// with the move and keeping the action for the blow when it can, and spending both on
-        /// closing the distance when it can't.
-        /// </summary>
-        private Combatant ChooseOwedActor()
-        {
-            var targets = Fighting(Side.Party).ToList();
-            return Fighting(Side.Adversaries)
-                .OrderBy(a => CanStrikeThisTurn(a) ? 0 : 1)
-                .ThenBy(a => targets.Min(t => a.Position.DistanceTo(t.Position)))
-                .First();
-        }
+        private Combatant CheckAdversary(Combatant chosen, string forWhat) =>
+            chosen.Side == Side.Adversaries && !chosen.IsOutOfFight && combatants.Contains(chosen)
+                ? chosen
+                : throw new InvalidOperationException($"The GM brain chose {chosen.Name} for {forWhat}, but it isn't an adversary still fighting.");
 
         /// <summary>
-        /// Who the GM would buy an extra turn for, if anybody. GM Reference §7: spend on
-        /// overextension, not on openings — so only on an adversary that can strike a character on
-        /// that turn, preferring one that has already acted, since chaining two turns back to back
-        /// is the strongest use of one. Immediate Opportunities are spent first, since they lapse.
+        /// One adversary's turn: a move and an action, spent however the GM brain chooses, a step
+        /// at a time. Each step is checked against the rules before it happens.
         /// </summary>
-        private Combatant? ChooseExtraTurnActor()
-        {
-            if (GmOpportunities == 0)
-            {
-                return null;
-            }
-
-            var targets = Fighting(Side.Party).ToList();
-            return Fighting(Side.Adversaries)
-                .Where(CanStrikeThisTurn)
-                .OrderBy(a => a.HasActedThisRound ? 0 : 1)
-                .ThenBy(a => targets.Min(t => a.Position.DistanceTo(t.Position)))
-                .FirstOrDefault();
-        }
-
         private void TakeAdversaryTurn(Combatant actor, bool allowOpportunityBonus, Action done)
         {
-            var target = NearestTarget(actor);
-
             Active = actor;
             actor.HasMove = true;
             actor.ActionsRemaining = 1;
 
-            if (!actor.CanReach(target.Position))
+            // The Opportunity bonus goes to "an adversary yet to act this round" (Core Rules §9).
+            var turn = new GmTurn(actor, isExtraTurn: !allowOpportunityBonus,
+                bonusAvailable: allowOpportunityBonus && !actor.HasActedThisRound && GmOpportunities > 0);
+
+            TakeStep(turn, done);
+        }
+
+        private void TakeStep(GmTurn turn, Action done)
+        {
+            var actor = turn.Actor;
+
+            if (CheckForEnd() || actor.IsOutOfFight)
             {
-                var squares = SquaresWithin(actor, MovesAvailable(actor))
-                    .Select(o => (Square: o.Key, Cost: o.Value))
-                    .ToList();
-
-                (GridPosition Square, int Cost)? strikeFrom = StrikeSquare(actor, target) is { } strike ? (strike, 1) : null;
-                (GridPosition Square, int Cost)? closeIn = squares.Count > 0
-                    ? squares.OrderBy(o => o.Square.DistanceTo(target.Position)).ThenBy(o => o.Cost).First()
-                    : null;
-
-                if ((strikeFrom ?? closeIn) is { } move)
-                {
-                    Move(actor, move.Square, move.Cost);
-                }
-            }
-
-            if (CanAttack(actor, target))
-            {
-                // The Opportunity bonus goes to "an adversary yet to act this round" (Core Rules §9).
-                // An extra turn is usually worth more, so the GM only reaches for the bonus when the
-                // bank is full and another banked Opportunity would be wasted.
-                var bonus = allowOpportunityBonus && !actor.HasActedThisRound && BankedOpportunities >= MaxBankedOpportunities;
-                ResolveAttack(actor, target, asReaction: false, bonus, _ =>
-                {
-                    FinishTurn(actor);
-                    done();
-                });
+                FinishTurn(actor);
+                done();
                 return;
             }
 
-            if (actor.HasMove)
-            {
-                Write($"{actor.Name} holds its ground.");
-            }
+            // Every step spends a move or an action, and an illegal one throws, so a turn always ends.
+            turn.BonusAvailable &= GmOpportunities > 0;
+            var step = gm.NextStep(view, turn);
+            turn.Steps++;
 
-            FinishTurn(actor);
-            done();
+            switch (step)
+            {
+                case GmStep.Move move:
+                    if (MoveCostTo(actor, move.Square) is not { } cost)
+                    {
+                        throw new InvalidOperationException($"The GM brain moved {actor.Name} to {move.Square}, which it can't reach with what it has left.");
+                    }
+
+                    // An adversary leaving a character's reach would draw a reaction attack here,
+                    // once characters can make them.
+                    Move(actor, move.Square, cost);
+                    turn.HasMoved = true;
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Attack attack:
+                    if (!CanAttack(actor, attack.Target))
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} attack {attack.Target.Name}, which it can't do now.");
+                    }
+
+                    if (attack.WithAdvantage && !turn.BonusAvailable)
+                    {
+                        throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s bonus, which this turn can't take.");
+                    }
+
+                    turn.HasAttacked = true;
+                    turn.BonusAvailable &= !attack.WithAdvantage;
+                    ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done));
+                    return;
+
+                default:
+                    if (!turn.HasAttacked && actor.HasMove)
+                    {
+                        Write($"{actor.Name} holds its ground.");
+                    }
+
+                    FinishTurn(actor);
+                    done();
+                    return;
+            }
         }
 
         /// <summary>
@@ -670,6 +673,12 @@ namespace WoundBound.Game.Combat
 
                 if (TacticalSpendRefusal(enemy) is not null || !PlanAttack(enemy, mover).CanAttack)
                 {
+                    continue;
+                }
+
+                if (enemy.Side == Side.Adversaries && !gm.StrikesAtLeaver(view, enemy, mover))
+                {
+                    Write($"{mover.Name} leaves {enemy.Name}'s reach, and it lets them go.");
                     continue;
                 }
 
@@ -747,8 +756,14 @@ namespace WoundBound.Game.Combat
 
             if (target.Side == Side.Adversaries)
             {
-                // The GM spends its creature's Stamina to turn any hit it can. A Minion dropped by any
-                // blow that lands has every reason to; and its spend hands nobody an Opportunity.
+                // The GM brain decides whether its creature spends the Stamina. An adversary's spend
+                // hands nobody an Opportunity.
+                if (!gm.PanicDodges(view, new PendingReaction(target, attacker, roll, plan.DodgeThreshold)))
+                {
+                    then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged: false));
+                    return;
+                }
+
                 PayTacticalSpend(target, CombatActionCatalog.ReactionStaminaCost);
                 Write($"{target.Name} panic dodges (1 Stamina).");
                 then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged: true));
@@ -926,30 +941,8 @@ namespace WoundBound.Game.Combat
             return false;
         }
 
-        private Combatant NearestTarget(Combatant actor) =>
-            Fighting(actor.Side == Side.Party ? Side.Adversaries : Side.Party).MinBy(t => actor.Position.DistanceTo(t.Position))!;
-
-        /// <summary>Whether <paramref name="adversary"/> could hit a character on a fresh turn: from where it stands, or after a single move.</summary>
-        private bool CanStrikeThisTurn(Combatant adversary)
-        {
-            var target = NearestTarget(adversary);
-            return adversary.CanReach(target.Position) || StrikeSquare(adversary, target) is not null;
-        }
-
-        /// <summary>The nearest square one move away from which <paramref name="actor"/> can strike <paramref name="target"/>, leaving the action for the blow.</summary>
-        private GridPosition? StrikeSquare(Combatant actor, Combatant target)
-        {
-            var origin = actor.Position;
-            return SquaresWithin(actor, 1).Keys
-                .Where(square => square.DistanceTo(target.Position) <= actor.Reach
-                                 && !(actor.Attack.IsUnwieldy && square.DistanceTo(target.Position) <= 1))
-                .OrderBy(square => square.DistanceTo(origin))
-                .Select(square => (GridPosition?)square)
-                .FirstOrDefault();
-        }
-
         /// <summary>Every free square <paramref name="mover"/> could reach for at most <paramref name="moves"/> moves, with the price of each.</summary>
-        private Dictionary<GridPosition, int> SquaresWithin(Combatant mover, int moves)
+        internal Dictionary<GridPosition, int> SquaresWithin(Combatant mover, int moves)
         {
             var squares = new Dictionary<GridPosition, int>();
             for (var y = 0; y < Height; y++)
