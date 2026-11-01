@@ -406,6 +406,32 @@ namespace WoundBound.Game.Combat
                 setting: LongreachCrossing, environment: data.Environment);
         }
 
+        /// <summary>
+        /// The Ferry Shrine ambush with the Quickstart's own five caught mid-ford — Salla, Drovan,
+        /// Joren, Mirella and Elthric — against one Skirmisher each: three Reedmarsh Skulkers and two
+        /// Bandit Ambushers. The Skulkers have no Cowardice, so this one is fought out.
+        /// </summary>
+        public static Encounter FerryShrineWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var skulker = data.Adversary("Reedmarsh Skulker");
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(13, 7)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(14, 8)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(12, 9)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(12, 8)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(11, 7)),
+                CombatantFactory.FromAdversary(skulker, "Skulker by the arch", new GridPosition(19, 5)),
+                CombatantFactory.FromAdversary(skulker, "Skulker in the reeds", new GridPosition(20, 11)),
+                CombatantFactory.FromAdversary(skulker, "Skulker on the bank", new GridPosition(17, 13)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the arch", new GridPosition(21, 9)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: LongreachCrossing, environment: data.Environment);
+        }
+
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
         public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {
