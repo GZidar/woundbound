@@ -70,6 +70,13 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Whether the adversary pays 1 Stamina to go on holding the spell it Sustains.</summary>
         bool Sustains(BattleView view, PendingReaction reaction) => reaction.Defender.Stamina > 1;
+
+        /// <summary>
+        /// How much of the <see cref="PendingReaction.ImpactWounds"/> about to land on the adversary
+        /// <see cref="PendingReaction.Attacker"/> its ally <see cref="PendingReaction.Defender"/> Shelters, as
+        /// Soul — a foe built with the rule (GM Reference §2). By default, none.
+        /// </summary>
+        int ShelterAmount(BattleView view, PendingReaction reaction) => 0;
     }
 
     /// <summary>One thing an adversary does on its turn.</summary>
@@ -87,7 +94,8 @@ namespace WoundBound.Game.Combat.Brains
         /// an Opportunity on the attack's bonus — allowed only when <see cref="GmTurn.BonusAvailable"/>.
         /// </summary>
         /// <param name="With">Which attack line; null for whichever does most from where it stands.</param>
-        public sealed record Attack(Combatant Target, bool WithAdvantage = false, AttackProfile? With = null) : GmStep;
+        /// <param name="Manoeuvre">A manoeuvre its Attack line gives it, declared with the blow (GM Reference §2).</param>
+        public sealed record Attack(Combatant Target, bool WithAdvantage = false, AttackProfile? With = null, Manoeuvre? Manoeuvre = null) : GmStep;
 
         /// <summary>
         /// Take the Dodge, Grounded or Resolute action (Core Rules §10, "Standing Your Ground"):
@@ -120,6 +128,15 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Move to <paramref name="Square"/> hauling whoever it holds — a move dearer, and rolled for.</summary>
         public sealed record Drag(GridPosition Square) : GmStep;
 
+
+        /// <summary>Buy an Exploit, for a foe built with them (GM Reference §2): 1 Stamina, and no Opportunity for anybody.</summary>
+        public sealed record Exploit(Rules.Enums.NimbleExploit Which) : GmStep;
+
+        /// <summary>Raise the shield in hand over itself, with the action.</summary>
+        public sealed record RaiseShield : GmStep;
+
+        /// <summary>Take up the weapon a Disarm knocked to its feet, with the action.</summary>
+        public sealed record TakeUpWeapon : GmStep;
 
         /// <summary>Spend the action trying to break the hold it's in.</summary>
         public sealed record BreakFree : GmStep;

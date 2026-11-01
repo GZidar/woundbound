@@ -73,6 +73,12 @@ namespace WoundBound.Game.Combat.Brains
             return reaction.ImpactWounds >= left && reaction.Defender.Soul > reaction.ImpactWounds;
         }
 
+        /// <summary>
+        /// How much of it <see cref="PendingReaction.Defender"/> Shelters — "any part of it" (Core Rules §3):
+        /// 0 for none. By default, all of it if <see cref="Shelters"/> says so.
+        /// </summary>
+        int ShelterAmount(BattleView view, PendingReaction reaction) => Shelters(view, reaction) ? reaction.ImpactWounds : 0;
+
         /// <summary>Whether to pay 1 Stamina to go on holding the spell the character Sustains.</summary>
         bool Sustains(BattleView view, PendingReaction reaction) => reaction.Defender.Stamina > 2;
     }
@@ -110,6 +116,9 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Spend the action trying to break a hold.</summary>
         public sealed record BreakFree : PartyStep;
+
+        /// <summary>Take up the weapon a Disarm knocked to their feet, with the action.</summary>
+        public sealed record TakeUpWeapon : PartyStep;
 
         /// <summary>Help an adjacent ally, or Harry an adjacent enemy.</summary>
         public sealed record Aid(CombatAction Action, Combatant Target) : PartyStep;

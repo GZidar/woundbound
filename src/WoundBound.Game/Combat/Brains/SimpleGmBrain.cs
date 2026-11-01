@@ -13,7 +13,7 @@ namespace WoundBound.Game.Combat.Brains
         public virtual Combatant ChooseOwedTurn(BattleView view)
         {
             var targets = view.Characters.ToList();
-            return view.Adversaries
+            return view.YetToAct
                 .OrderBy(a => a.IsBroken ? 1 : CanStrikeThisTurn(view, a) ? 0 : 2)
                 .ThenBy(a => targets.Min(t => a.Position.DistanceTo(t.Position)))
                 .First();
@@ -28,7 +28,7 @@ namespace WoundBound.Game.Combat.Brains
         {
             var targets = view.Characters.ToList();
             return view.Adversaries
-                .Where(a => !a.IsBroken && CanStrikeThisTurn(view, a))
+                .Where(a => a.CanTakeExtraTurn && !a.IsBroken && CanStrikeThisTurn(view, a))
                 .OrderBy(a => a.HasActedThisRound ? 0 : 1)
                 .ThenBy(a => targets.Min(t => a.Position.DistanceTo(t.Position)))
                 .FirstOrDefault();

@@ -535,6 +535,116 @@ namespace WoundBound.Game.Combat
                 setting: HedgeRoad, environment: data.Environment);
         }
 
+        /// <summary>
+        /// The Grey Lanterns — a rival company of five, built exactly as the party is, from the same
+        /// character rules, and fighting for the GM: "build a creature from any rule in this system"
+        /// (GM Reference §2). Every rule but Interrupt travels, so they manoeuvre, Slip, Shelter, heal
+        /// and cast back — a fight with the back-and-forth T1 statblocks are built not to give.
+        /// </summary>
+        public static Encounter RivalBand(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            Combatant Rival(CharacterBuild build, int x, int y) => CombatantFactory.FromCharacter(build, new GridPosition(x, y), Side.Adversaries);
+
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(3, 7)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(2, 11)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(2, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(1, 8)),
+                Rival(BrannocVey(data), 13, 8),
+                Rival(HeskMarrow(data), 13, 10),
+                Rival(IlseVarrow(data), 14, 6),
+                Rival(AldousCrane(data), 16, 9),
+                Rival(SedgeOfTheFen(data), 16, 11),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: HedgeRoad, environment: data.Environment);
+        }
+
+        private static Dictionary<Ability, int> Array(int str, int agi, int intl, int vit, int foc, int pre) => new()
+        {
+            [Ability.Strength] = str, [Ability.Agility] = agi, [Ability.Intellect] = intl,
+            [Ability.Vitality] = vit, [Ability.Focus] = foc, [Ability.Presence] = pre,
+        };
+
+        /// <summary>Brannoc Vey, Martial Warrior: a war flail — Ring, Disarm and Sunder — and chainmail.</summary>
+        public static CharacterBuild BrannocVey(GameData data) => new()
+        {
+            CharacterName = "Brannoc Vey",
+            ClassPrinciple = ClassPrinciple.Martial,
+            SecondaryWound = WoundType.Body,
+            Tier = Tier.T1,
+            AbilityModifiers = Array(str: 3, agi: 2, intl: 0, vit: 1, foc: -1, pre: 1),
+            Weapons = { CombatantFactory.InHand(data.Weapon("War Flail")) },
+            Armour = { new ArmourDefinition { Name = "Chainmail", Weight = ArmourWeight.Medium, IsEquipped = true } },
+        };
+
+        /// <summary>Hesk Marrow, Martial Templar: a mace — Topple and Ring — a round shield, and chainmail; Shelters the company.</summary>
+        public static CharacterBuild HeskMarrow(GameData data) => new()
+        {
+            CharacterName = "Hesk Marrow",
+            ClassPrinciple = ClassPrinciple.Martial,
+            SecondaryWound = WoundType.Soul,
+            Tier = Tier.T1,
+            AbilityModifiers = Array(str: 3, agi: 1, intl: 0, vit: 2, foc: -1, pre: 1),
+            Weapons = { CombatantFactory.InHand(data.Weapon("Mace")) },
+            Shields = { CombatantFactory.ShieldInHand("Round shield", ShieldWeight.Medium) },
+            Armour = { new ArmourDefinition { Name = "Chainmail", Weight = ArmourWeight.Medium, IsEquipped = true } },
+        };
+
+        /// <summary>Ilse Varrow, Nimble Rogue: rapier and leather, Slip and Precise — and Shelter.</summary>
+        public static CharacterBuild IlseVarrow(GameData data) => new()
+        {
+            CharacterName = "Ilse Varrow",
+            ClassPrinciple = ClassPrinciple.Nimble,
+            SecondaryWound = WoundType.Soul,
+            Tier = Tier.T1,
+            AbilityModifiers = Array(str: 1, agi: 3, intl: 1, vit: 2, foc: -1, pre: 0),
+            Weapons = { CombatantFactory.InHand(data.Weapon("Rapier")) },
+            Armour = { new ArmourDefinition { Name = "Leather", Weight = ArmourWeight.Light, IsEquipped = true } },
+        };
+
+        /// <summary>Father Aldous Crane, Spiritual Priest: Mending Light to keep the company standing, Smite, Scourging Light and Blessing.</summary>
+        public static CharacterBuild AldousCrane(GameData data) => new()
+        {
+            CharacterName = "Aldous Crane",
+            ClassPrinciple = ClassPrinciple.Spiritual,
+            SecondaryWound = WoundType.Soul,
+            Tier = Tier.T1,
+            AbilityModifiers = Array(str: -1, agi: 0, intl: 1, vit: 2, foc: 1, pre: 3),
+            Weapons = { CombatantFactory.InHand(data.Weapon("Club")) },
+            Armour = { new ArmourDefinition { Name = "Leather", Weight = ArmourWeight.Light, IsEquipped = true } },
+            Spells = { MendingLight, data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Blessing") },
+        };
+
+        /// <summary>A Divine Heal by touch — one ally's wounds closed over in light.</summary>
+        public static SpellDefinition MendingLight => new()
+        {
+            Name = "Mending Light",
+            Source = MagicSource.DivineMagic,
+            SpellTier = Tier.T1,
+            SpellType = SpellType.Heal,
+            Target = SpellTarget.One,
+            Shape = SpellShape.None,
+            Size = SpellSize.Small,
+            Range = SpellRange.Touch,
+            Notes = "A hand laid on a wound, and light where the blood was.",
+        };
+
+        /// <summary>Sedge of the Fen, Cerebral Blood Mage: Mind Spike, Mind Storm over a crowd, Charm, and Blood Mist when Mind runs dry.</summary>
+        public static CharacterBuild SedgeOfTheFen(GameData data) => new()
+        {
+            CharacterName = "Sedge of the Fen",
+            ClassPrinciple = ClassPrinciple.Cerebral,
+            SecondaryWound = WoundType.Body,
+            Tier = Tier.T1,
+            AbilityModifiers = Array(str: -1, agi: 1, intl: 1, vit: 2, foc: 3, pre: 0),
+            Weapons = { CombatantFactory.InHand(data.Weapon("Dagger")) },
+            Spells = { data.Spell("Mind Spike"), data.Spell("Mind Storm"), data.Spell("Charm"), data.Spell("Blood Mist") },
+        };
+
         /// <summary>A road in daylight between two hedgerows of rough going.</summary>
         public static Setting HedgeRoad { get; } = Setting.Daylight with
         {

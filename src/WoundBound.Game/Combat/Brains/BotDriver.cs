@@ -46,6 +46,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Shelters given.</summary>
         public int Shelters { get; internal set; }
 
+        /// <summary>Wounds taken as Soul through Shelters.</summary>
+        public int ShelteredWounds { get; internal set; }
+
         /// <summary>Spells cast.</summary>
         public int Casts { get; internal set; }
 
@@ -100,6 +103,17 @@ namespace WoundBound.Game.Combat.Brains
                     if (!encounter.RespondToLeaver(response))
                     {
                         throw Refused($"{response} for {leaving.Defender.Name}", $"the options were {string.Join(", ", leaving.Options ?? [])}");
+                    }
+
+                    return true;
+
+                case EncounterPhase.AwaitingReaction when encounter.Pending is { Kind: ReactionKind.Shelter } shelter:
+                    var taking = Math.Clamp(party.ShelterAmount(encounter.View, shelter), 0, shelter.ImpactWounds);
+                    Tally.Shelters += taking > 0 ? 1 : 0;
+                    Tally.ShelteredWounds += taking;
+                    if (!encounter.RespondToShelter(taking))
+                    {
+                        throw Refused($"a Shelter for {shelter.Defender.Name}", null);
                     }
 
                     return true;
@@ -179,6 +193,7 @@ namespace WoundBound.Game.Combat.Brains
                 PartyStep.Control control => Count(encounter.TryControl(control.Action, control.Target), () => Tally.Manoeuvres++),
                 PartyStep.StandUp => Count(encounter.TryStandUp(), () => Tally.StandUps++),
                 PartyStep.BreakFree => encounter.TryBreakFree(),
+                PartyStep.TakeUpWeapon => encounter.TryTakeUpWeapon(),
                 PartyStep.LetGo => encounter.TryLetGo(),
                 PartyStep.RegainFooting => encounter.TryRegainFooting(),
                 PartyStep.Aid aid => Count(encounter.TryAid(aid.Action, aid.Target), () => Tally.Aids++),
@@ -198,6 +213,7 @@ namespace WoundBound.Game.Combat.Brains
                     PartyStep.Control control => Encounter.ControlRefusal(character, control.Action, control.Target),
                     PartyStep.StandUp => Encounter.StandUpRefusal(character),
                     PartyStep.BreakFree => Encounter.BreakFreeRefusal(character),
+                    PartyStep.TakeUpWeapon => Encounter.TakeUpRefusal(character),
                     PartyStep.LetGo => "they're holding nobody",
                     PartyStep.RegainFooting => Encounter.RegainFootingRefusal(character),
                     PartyStep.Aid aid => Encounter.AidRefusal(character, aid.Action, aid.Target),

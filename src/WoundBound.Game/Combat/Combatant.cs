@@ -223,10 +223,27 @@ namespace WoundBound.Game.Combat
         /// <summary>What this creature attacks with first — for a character, whatever is in hand; for a foe, its first attack line.</summary>
         public AttackProfile Attack => Build is { } build
             ? AttackProfile.ForWeapon(build, InHandWeapon)
-            : StatblockAttack ?? throw new InvalidOperationException($"{Name} has neither a character sheet nor a statblock attack.");
+            : (StatblockLinesNow.Count > 0 ? StatblockLinesNow[0] : null) ?? throw new InvalidOperationException($"{Name} has neither a character sheet nor a statblock attack.");
 
         /// <summary>Every attack it could make: a character's weapon in hand, or each of a foe's attack lines.</summary>
-        public IReadOnlyList<AttackProfile> Attacks => Build is not null ? [Attack] : StatblockAttacks;
+        public IReadOnlyList<AttackProfile> Attacks => Build is not null ? [Attack] : StatblockLinesNow;
+
+        /// <summary>A foe's attack lines as it stands: a Disarmed foe has lost its weapon lines, and punches with its own Attack bonus.</summary>
+        private IReadOnlyList<AttackProfile> StatblockLinesNow
+        {
+            get
+            {
+                if (!IsDisarmed || StatblockAttack is not { } first)
+                {
+                    return StatblockAttacks;
+                }
+
+                var kept = StatblockAttacks.Where(a => !IsWieldedLine(a.Name)).ToList();
+                return kept.Count > 0
+                    ? kept
+                    : [first with { Name = "Unarmed", DamageDiceCount = 1, DamageDieSides = 4, Weapon = null, Reach = first.OwnReach }];
+            }
+        }
 
         /// <summary>The attack it threatens its Reach with: the first melee line, or the first line of any kind if it has no melee one.</summary>
         public AttackProfile MeleeAttack => Attacks.FirstOrDefault(a => !a.IsRanged) ?? Attack;
@@ -240,7 +257,42 @@ namespace WoundBound.Game.Combat
         /// <summary>The weapon at the ready (Core Rules §15, "Equipped Items"), a swap away.</summary>
         public WeaponDefinition? ReadyWeapon => Build is { } build ? InventoryCalculator.ReadyWeapons(build).FirstOrDefault() : null;
 
-        public required ArmourWeight Armour { get; init; }
+        /// <summary>The armour worn — lowered a type, for the rest of the combat, by a Sunder (Core Rules §9, "The Manoeuvres").</summary>
+        public required ArmourWeight Armour { get; set; }
+
+        /// <summary>Has been Sundered this combat — armour dented or a shield split over it: "only once per combat".</summary>
+        public bool HasBeenSundered { get; internal set; }
+
+        /// <summary>
+        /// The manoeuvres a generic foe's Attack line gives it — "may attempt Topple (ST) as a
+        /// manoeuvre" — which it may use without being Martial (GM Reference §2, "Borrowing").
+        /// </summary>
+        public IReadOnlyList<WeaponManoeuvre> StatblockManoeuvres { get; init; } = [];
+
+        /// <summary>The weapon a Disarm knocked from this creature's hand, lying where it fell; null if none.</summary>
+        public WeaponDefinition? DroppedWeapon { get; internal set; }
+
+        /// <summary>The square <see cref="DroppedWeapon"/> lies on — at the creature's feet when it fell.</summary>
+        public GridPosition? DroppedAt { get; internal set; }
+
+        /// <summary>A generic foe disarmed of its wielded weapon: its weapon lines are gone until it takes the weapon up.</summary>
+        public bool IsDisarmed => conditions.Contains(CharacterCondition.Disarmed);
+
+        /// <summary>
+        /// Has a weapon in hand a Disarm could take: a character's weapon in hand, or a foe's melee
+        /// line made with a blade, a club or a bow — not a bite, a claw or a fist.
+        /// </summary>
+        public bool WieldsWeapon => Build is not null
+            ? InHandWeapon is not null
+            : !IsDisarmed && StatblockAttacks.Any(a => IsWieldedLine(a.Name));
+
+        /// <summary>Whether a statblock attack line is made with something held, which can be knocked away.</summary>
+        public static bool IsWieldedLine(string name)
+        {
+            var n = name.ToLowerInvariant();
+            return new[] { "sword", "maul", "cudgel", "shiv", "axe", "spear", "club", "dagger", "knife", "hammer", "mace", "staff", "flail", "halberd", "bow", "sling", "blade", "rapier", "pick", "whip" }
+                .Any(n.Contains);
+        }
 
         /// <summary>How far it threatens with a blade — the ground a reaction attack covers (Core Rules §9, "Reach"). A bow threatens what the body does.</summary>
         public int Reach => Build is not null ? Attack.Reach : MeleeAttack.IsRanged ? OwnReach : MeleeAttack.Reach;
@@ -393,6 +445,12 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Has Sheltered somebody this round.</summary>
         public bool HasShelteredThisRound { get; internal set; }
+
+        /// <summary>Has taken an extra turn bought with a GM Opportunity this round — one a round, for anything but a Solo.</summary>
+        public bool HasTakenExtraTurnThisRound { get; internal set; }
+
+        /// <summary>Whether a GM Opportunity may buy this adversary another turn now: one a round, though a Solo may take more (GM Reference §3).</summary>
+        public bool CanTakeExtraTurn => Side == Side.Adversaries && !IsOutOfFight && (Role == Rules.Enums.AdversaryRole.Solo || !HasTakenExtraTurnThisRound);
 
         /// <summary>A Nimble character: free footwork, and the Exploits (Core Rules §3, "Exploit").</summary>
         public bool IsNimble => Build?.ClassPrinciple == ClassPrinciple.Nimble;

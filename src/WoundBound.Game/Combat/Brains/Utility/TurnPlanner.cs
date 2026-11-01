@@ -13,6 +13,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         StandGround,
         StandUp,
         BreakFree,
+        TakeUpWeapon,
         BuyExtraAction,
         RegainFooting,
         Cast,
@@ -27,7 +28,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
     public sealed record Option(OptionKind Kind, double Score, string Why,
         GridPosition? Square = null, Combatant? Target = null, AttackProfile? With = null,
         CombatAction? Action = null, ControlAction? Control = null, bool WithAdvantage = false, SpellCast? Cast = null,
-        Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null);
+        Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null, OptionKind? Then = null);
 
     /// <summary>
     /// Runs through everything a creature could do with what it has left of its turn — every
@@ -58,11 +59,68 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <param name="bonusAvailable">An attack this turn may spend a GM Opportunity on Advantage.</param>
         /// <param name="bankFull">The GM's bank is full, so an Opportunity unspent is one wasted.</param>
         /// <param name="stillToAct">Allies who'll act before this creature does again — the ones Help and a Trip set up.</param>
+        /// <param name="interrupting">The declared action this turn is taken inside, for an Interrupt: what lands on its maker, or takes its target out of reach, is worth what it spares.</param>
         public List<Option> Options(Combatant actor, bool hasMove, int actions, bool real,
-            bool bonusAvailable = false, bool bankFull = false, IReadOnlyCollection<Combatant>? stillToAct = null)
+            bool bonusAvailable = false, bool bankFull = false, IReadOnlyCollection<Combatant>? stillToAct = null, Interruption? interrupting = null)
+        {
+            var options = OptionsHere(actor, hasMove, actions, real, bonusAvailable, bankFull, stillToAct);
+            return interrupting is null ? options : options.Select(o => o with { Score = o.Score + Spared(actor, o, interrupting) }).ToList();
+        }
+
+        /// <summary>
+        /// What an option taken inside an Interrupt spares of the declared action (Core Rules §3): its
+        /// maker dropped first, all of it; landed on, the difference Disadvantage makes; its target —
+        /// the one choosing — out of its reach, all of it, the action left with nothing to do.
+        /// </summary>
+        public double Spared(Combatant actor, Option option, Interruption interrupting)
+        {
+            var foe = interrupting.Actor;
+            var victim = interrupting.Against is { Side: Side.Party } v ? v : actor;
+            if (foe.IsOutOfFight || foe.IsBroken)
+            {
+                return 0;
+            }
+
+            var harm = foe.Attacks.Select(a => assess.Blow(foe, a, victim, a.DamageDieSides, victim.DodgeThreshold)).MaxBy(b => b.ExpectedDealt);
+            var harmDis = foe.Attacks.Select(a => assess.Blow(foe, a, victim, a.DamageDieSides, victim.DodgeThreshold, disadvantage: true)).Max(b => b.ExpectedDealt);
+            var perWound = assess.PerWound(victim);
+            var whole = Math.Max(harm.ExpectedDealt, assess.Threat(foe)) * perWound;
+
+            // The one it's aimed at, out of a blade's reach — nothing left to do.
+            if (victim == actor && option.Square is { } square && !foe.HasRangedAttack && foe.Spells.Count == 0
+                && !BattleView.CanReachFrom(foe, foe.Position, square))
+            {
+                return whole;
+            }
+
+            var kind = option.Kind == OptionKind.Move ? option.Then : option.Kind;
+            if (option.Target != foe || kind is not (OptionKind.Attack or OptionKind.Control or OptionKind.Cast or OptionKind.Exploit))
+            {
+                return 0;
+            }
+
+            var from = option.Square ?? actor.Position;
+            var (land, kill) = kind switch
+            {
+                OptionKind.Control => (assess.ControlChance(actor, foe), 0.0),
+                OptionKind.Cast => (0.6, 0.0),
+                _ => assess.BestAttack(actor, from, foe).With is { } with
+                    ? assess.Blow(actor, with, foe, with.DamageDieSides, foe.DodgeThreshold) is var b ? (b.Hit, b.Kill) : (0, 0)
+                    : (0, 0),
+            };
+
+            var caught = foe.Role == AdversaryRole.Solo ? 0 : (harm.ExpectedDealt - harmDis) * perWound;
+            return kill * whole + (land - kill) * caught;
+        }
+
+        private List<Option> OptionsHere(Combatant actor, bool hasMove, int actions, bool real,
+            bool bonusAvailable, bool bankFull, IReadOnlyCollection<Combatant>? stillToAct)
         {
             var options = new List<Option>();
-            var care = skill.Care * Assessor.RiskAppetite(actor);
+
+            // A standoff wears caution down: each quiet round, the blows a square invites matter less
+            // than ending it — somebody has to close.
+            var care = skill.Care * Assessor.RiskAppetite(actor) / (1 + View.QuietRounds);
             var here = actor.Position;
 
             // Its footing back first: no action does anything else until then.
@@ -104,7 +162,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     foreach (var act in Actions(actor, square, real && !moved, bonusAvailable, bankFull, stillToAct, care))
                     {
                         var score = standing + act.Score;
-                        options.Add(first is null ? act with { Score = score } : first with { Score = score, Why = $"{first.Why}, then {act.Why}" });
+                        options.Add(first is null ? act with { Score = score } : first with { Score = score, Why = $"{first.Why}, then {act.Why}", Target = act.Target, Then = act.Kind });
                     }
                 }
 
@@ -142,7 +200,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             // Standing ground: +2 DT at the price of the move, and Disadvantage on the blow.
-            if (skill.UsesTricks && hasMove && actions > 0 && !actor.HasMovedThisTurn
+            if (skill.UsesTricks && hasMove && actions > 0 && !actor.HasMovedThisTurn && View.QuietRounds == 0
                 && (!real || BattleView.StandGroundRefusal(actor, CombatAction.Dodge) is null))
             {
                 var braced = Position(actor, here) - care * assess.Exposure(actor, here, extraDodge: 2);
@@ -158,6 +216,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             IReadOnlyCollection<Combatant>? stillToAct, double care)
         {
             var enemies = View.EnemiesOf(actor).ToList();
+            var spendCost = SpendCostFor(actor);
 
             // The defenceless are still to be finished — the default goal is to kill.
             var targets = actor.Side == Side.Adversaries
@@ -174,7 +233,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
                 if (target.IsDefenceless)
                 {
-                    worth = Math.Min(worth, 0.3 * assess.Value(target));
+                    // Finishing the fallen is the last thing on the list: a fraction of a blow at anyone still standing.
+                    worth = Math.Min(worth, Math.Min(0.1 * assess.Value(target), 1.0));
                 }
 
                 var advantage = false;
@@ -229,7 +289,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         var cleave = new Manoeuvre(WeaponManoeuvre.Cleave, second.Who);
                         if (!checkRules || BattleView.ManoeuvreRefusal(actor, target, cleave) is null)
                         {
-                            yield return new Option(OptionKind.Attack, worth + 0.8 * second.Worth - 1.0, $"Cleave through {target.Name} into {second.Who.Name}",
+                            yield return new Option(OptionKind.Attack, worth + 0.8 * second.Worth - spendCost, $"Cleave through {target.Name} into {second.Who.Name}",
                                 Target: target, With: with, Manoeuvre: cleave);
                         }
                     }
@@ -241,9 +301,35 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     if (!checkRules || BattleView.ManoeuvreRefusal(actor, target, topple) is null)
                     {
                         var toppled = TripWorth(actor, target, stillToAct);
-                        yield return new Option(OptionKind.Attack, worth + toppled - 1.0, $"Topple {target.Name}", Target: target, With: with, Manoeuvre: topple);
+                        yield return new Option(OptionKind.Attack, worth + toppled - spendCost, $"Topple {target.Name}", Target: target, With: with, Manoeuvre: topple);
                     }
                 }
+
+                var takes = assess.ManoeuvreChance(actor, with, target, at, target.StabilityThreshold);
+                foreach (var (kind, gain) in new[]
+                {
+                    (WeaponManoeuvre.Disarm, takes * DisarmWorth(actor, target, stillToAct)),
+                    (WeaponManoeuvre.Sunder, SunderWorth(actor, with, target, at, takes)),
+                    (WeaponManoeuvre.Ring, assess.ManoeuvreChance(actor, with, target, at, target.ResolveThreshold ?? 99) * RingWorth(target, stillToAct)),
+                })
+                {
+                    if (!permitted.Contains(kind) || gain <= 0)
+                    {
+                        continue;
+                    }
+
+                    var manoeuvre = new Manoeuvre(kind);
+                    if (!checkRules || BattleView.ManoeuvreRefusal(actor, target, manoeuvre) is null)
+                    {
+                        yield return new Option(OptionKind.Attack, worth + gain - spendCost, $"{kind} {target.Name}", Target: target, With: with, Manoeuvre: manoeuvre);
+                    }
+                }
+            }
+
+            // A weapon knocked to the ground: taking it up is an action, and ends being Off-guard.
+            if (actor.DroppedWeapon is not null && actor.DroppedAt == at && (!checkRules || BattleView.TakeUpRefusal(actor) is null))
+            {
+                yield return new Option(OptionKind.TakeUpWeapon, 0.8 + 1.5 * assess.Threat(actor), $"take up the {actor.DroppedWeapon.Name}");
             }
 
             foreach (var cast in spells.Options(actor, at, checkRules, care, skill.UsesTricks))
@@ -346,6 +432,60 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var helpers = (stillToAct ?? []).Count(a => a != actor && (View.PlanAttack(a, target).CanAttack || View.StrikeSquare(a, target) is not null));
             return assess.ControlChance(actor, target) * (0.12 * assess.Value(target) * helpers + 0.15 * assess.Threat(target) * assess.PerWound(actor));
+        }
+
+        /// <summary>
+        /// What a manoeuvre's Stamina costs: the Stamina, and for the party the Opportunity it banks
+        /// the GM — an adversary's spend hands nobody anything (GM Reference §9).
+        /// </summary>
+        private double SpendCostFor(Combatant actor) => actor.Side == Side.Party ? 1.0 : 0.6;
+
+        /// <summary>
+        /// A Disarm: the target Off-guard — easier to hit for everyone still to act, worse at hitting
+        /// back — until it spends an action taking the weapon up, the turn's harm it doesn't do.
+        /// </summary>
+        private double DisarmWorth(Combatant actor, Combatant target, IReadOnlyCollection<Combatant>? stillToAct)
+        {
+            if (!target.WieldsWeapon || target.IsMinion || target.IsOffGuard)
+            {
+                return 0;
+            }
+
+            var helpers = (stillToAct ?? []).Count(a => a != actor && (View.PlanAttack(a, target).CanAttack || View.StrikeSquare(a, target) is not null));
+            return 0.08 * assess.Value(target) * helpers + 0.6 * assess.Threat(target) * assess.PerWound(actor);
+        }
+
+        /// <summary>
+        /// A Sunder: on a hit, a type of armour gone for the rest of the fight — a wound more through
+        /// on every blow this side lands on it from here; on a miss only the raised shield caused, the
+        /// shield split, its Dodge Threshold gone for good.
+        /// </summary>
+        private double SunderWorth(Combatant actor, AttackProfile with, Combatant target, GridPosition at, double takes)
+        {
+            if (target.HasBeenSundered || target.IsMinion)
+            {
+                return 0;
+            }
+
+            var attackers = View.EnemiesOf(target).Count(e => !e.IsOutOfFight);
+            var armourGain = target.Armour == ArmourWeight.None ? 0
+                : takes * Math.Min(Assessor.Horizon, target.Body / 4.0 + 1) * attackers * 0.5 * assess.PerWound(target);
+            var shieldGain = target.ShieldBonus > 0
+                ? assess.ShieldBreakChance(actor, with, target, at) * target.ShieldBonus * 0.06 * assess.Value(target) * attackers
+                : 0;
+            return armourGain + shieldGain;
+        }
+
+        /// <summary>A Ring: no panic dodge, no shield raised, no extra action from the target until its next turn — worth the blows still to come at it.</summary>
+        private double RingWorth(Combatant target, IReadOnlyCollection<Combatant>? stillToAct)
+        {
+            if (target.IsRinged || target.ResolveThreshold is null || target.Stamina <= 1 || BattleView.TacticalSpendRefusal(target) is not null)
+            {
+                return 0;
+            }
+
+            var blows = 1 + (stillToAct ?? []).Count(a => a.Side != target.Side);
+            return 0.05 * assess.Value(target) * blows;
         }
 
         /// <summary>A Grab is worth most against something running, or that mustn't get away; otherwise a little, for pinning it.</summary>

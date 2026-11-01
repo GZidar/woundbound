@@ -1,6 +1,7 @@
 using WoundBound.Rules.Calculation;
 using WoundBound.Rules.Catalog;
 using WoundBound.Rules.Enums;
+using WoundBound.Rules.Models;
 
 namespace WoundBound.Game.Combat
 {
@@ -68,6 +69,13 @@ namespace WoundBound.Game.Combat
                 return false;
             }
 
+            BuyExploit(character, exploit);
+            return true;
+        }
+
+        /// <summary>Pays for <paramref name="exploit"/> and holds it, for a character or a foe built with it.</summary>
+        private void BuyExploit(Combatant character, NimbleExploit exploit)
+        {
             PayTacticalSpend(character, CombatActionCatalog.ReactionStaminaCost);
             switch (exploit)
             {
@@ -88,17 +96,22 @@ namespace WoundBound.Game.Combat
                 NimbleExploit.Precise => "the next attack finds the gap: Direct, and Vitality on its damage.",
                 _ => "the next attack comes with Advantage.",
             });
-            return true;
         }
 
         /// <summary>The manoeuvres the game knows how to resolve.</summary>
-        private static readonly WeaponManoeuvre[] Resolved = [WeaponManoeuvre.Cleave, WeaponManoeuvre.Topple, WeaponManoeuvre.Ring, WeaponManoeuvre.Hook];
+        private static readonly WeaponManoeuvre[] Resolved = Enum.GetValues<WeaponManoeuvre>();
 
-        /// <summary>The manoeuvres <paramref name="attacker"/>'s weapon in hand permits: Martial, a melee weapon, by its Edge, Grip, Reach and weight.</summary>
+        /// <summary>
+        /// The manoeuvres <paramref name="attacker"/> may declare: a Martial character's weapon in hand
+        /// permits them by its Edge, Grip, Reach and weight; a generic foe has whatever its Attack line
+        /// names, while it still has a melee line to swing (GM Reference §2).
+        /// </summary>
         public static IReadOnlyList<WeaponManoeuvre> ManoeuvresOf(Combatant attacker) =>
-            attacker.IsMartial && attacker.InHandWeapon is { IsRanged: false } weapon
-                ? WeaponCalculator.ManoeuvresFor(weapon)
-                : [];
+            attacker.Build is null
+                ? attacker.MeleeAttack.IsRanged ? [] : attacker.StatblockManoeuvres
+                : attacker.IsMartial && attacker.InHandWeapon is { IsRanged: false } weapon
+                    ? WeaponCalculator.ManoeuvresFor(weapon)
+                    : [];
 
         /// <summary>
         /// Why <paramref name="attacker"/> can't declare <paramref name="manoeuvre"/> with an attack at
@@ -106,7 +119,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public static string? ManoeuvreRefusal(Combatant attacker, Combatant target, Manoeuvre manoeuvre)
         {
-            if (!attacker.IsMartial)
+            if (attacker.Build is not null && !attacker.IsMartial)
             {
                 return "Only a Martial character can attempt a manoeuvre.";
             }
@@ -137,6 +150,16 @@ namespace WoundBound.Game.Combat
                 return "A Swarm has no footing to take.";
             }
 
+            if (manoeuvre.Kind == WeaponManoeuvre.Disarm && !target.WieldsWeapon)
+            {
+                return $"{target.Name} has no weapon in hand to lose.";
+            }
+
+            if (manoeuvre.Kind == WeaponManoeuvre.Sunder && target.HasBeenSundered)
+            {
+                return $"{target.Name} has already been Sundered this combat.";
+            }
+
             return TacticalSpendRefusal(attacker);
         }
 
@@ -154,11 +177,19 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            var shieldBroke = false;
             if (roll.Success != true || target.IsOutOfFight)
             {
-                Write($"The {manoeuvre.Kind} comes to nothing — a blow that never lands moves nobody.");
-                then();
-                return;
+                // Sunder alone acts on a miss: where the shield raised over the target is all that
+                // stopped the blow, the shield takes it instead (Core Rules §9, "The Manoeuvres").
+                if (manoeuvre.Kind != WeaponManoeuvre.Sunder || target.IsOutOfFight || !ShieldAloneStopped(target, outcome))
+                {
+                    Write($"The {manoeuvre.Kind} comes to nothing — a blow that never lands moves nobody.");
+                    then();
+                    return;
+                }
+
+                shieldBroke = true;
             }
 
             var (threshold, label, kind) = manoeuvre.Kind == WeaponManoeuvre.Ring
@@ -178,6 +209,19 @@ namespace WoundBound.Game.Combat
 
                 switch (manoeuvre.Kind)
                 {
+                    case WeaponManoeuvre.Sunder when shieldBroke:
+                        Write($"Sunder: {total} against {label} {against} — only the shield stopped the blow, and the shield pays for it.");
+                        BreakShield(target);
+                        then();
+                        return;
+                    case WeaponManoeuvre.Sunder:
+                        Sunder(target, total, label, against);
+                        then();
+                        return;
+                    case WeaponManoeuvre.Disarm:
+                        Write($"Disarm: {total} against {label} {against} — {Disarm(target)}");
+                        then();
+                        return;
                     case WeaponManoeuvre.Topple:
                         target.SetCondition(CharacterCondition.Prone, true);
                         Write($"{manoeuvre.Kind}: {total} against {label} {against} — {target.Name} goes down, Prone.");
@@ -211,6 +255,144 @@ namespace WoundBound.Game.Combat
             }
 
             Resolve(false);
+        }
+
+        /// <summary>
+        /// Whether the Sunder that missed <paramref name="target"/> would have hit with no shield over
+        /// them: the total reaches the Dodge Threshold it was turned by, less the shield's own
+        /// contribution and nothing else's (Core Rules §9, "The Manoeuvres").
+        /// </summary>
+        private static bool ShieldAloneStopped(Combatant target, AttackOutcome outcome)
+        {
+            var shield = target.ShieldBonus;
+            return shield > 0 && outcome.Roll.Total >= outcome.Plan.DodgeThreshold + outcome.Boost - shield;
+        }
+
+        /// <summary>A Sunder that hit: the target's worn armour drops one type for the rest of the combat.</summary>
+        private void Sunder(Combatant target, int total, string label, int against)
+        {
+            if (target.Armour == ArmourWeight.None)
+            {
+                Write($"Sunder: {total} against {label} {against} — but {target.Name} wears nothing to break.");
+                return;
+            }
+
+            var was = target.Armour;
+            target.Armour = was - 1;
+            target.HasBeenSundered = true;
+            Write($"Sunder: {total} against {label} {against} — {target.Name}'s {was} armour is battered down to " +
+                  $"{(target.Armour == ArmourWeight.None ? "nothing" : target.Armour.ToString())} for the rest of the fight.");
+        }
+
+        /// <summary>
+        /// The shield raised over <paramref name="target"/> — whoever bears it — broken one type,
+        /// permanently: Heavy to Medium, Medium to Light, and a Light one split and dropped. The
+        /// reduced bonus counts from now. It spends the target's one Sunder.
+        /// </summary>
+        private void BreakShield(Combatant target)
+        {
+            target.HasBeenSundered = true;
+            var bearer = target.CoveredBy.MaxBy(c => InventoryCalculator.ShieldDodgeThresholdBonus(c.Weight)).Bearer;
+            if (bearer.InHandShield is not { } shield)
+            {
+                return;
+            }
+
+            if (shield.Weight == ShieldWeight.Light)
+            {
+                bearer.Build!.Shields.Remove(shield);
+                foreach (var covered in combatants)
+                {
+                    covered.CoveredBy.RemoveAll(c => c.Bearer == bearer);
+                }
+
+                Write($"{bearer.Name}'s {shield.Name} splits apart and is dropped — {target.Name} is DT {target.DodgeThreshold} now.");
+                return;
+            }
+
+            shield.Weight--;
+            foreach (var covered in combatants)
+            {
+                for (var i = 0; i < covered.CoveredBy.Count; i++)
+                {
+                    if (covered.CoveredBy[i].Bearer == bearer)
+                    {
+                        covered.CoveredBy[i] = (bearer, shield.Weight);
+                    }
+                }
+            }
+
+            Write($"{bearer.Name}'s {shield.Name} cracks, down to {shield.Weight} for good — {target.Name} is DT {target.DodgeThreshold} now.");
+        }
+
+        /// <summary>
+        /// Knocks the weapon from <paramref name="target"/>'s hand to the ground at their feet: Disarmed,
+        /// and so Off-guard, until they take it up — an action — or swap another into hand (Core Rules §9, "Conditions").
+        /// </summary>
+        private string Disarm(Combatant target)
+        {
+            target.SetCondition(CharacterCondition.Disarmed, true);
+            target.DroppedAt = target.Position;
+            if (target.Build is { } build && target.InHandWeapon is { } weapon)
+            {
+                build.Weapons.Remove(weapon);
+                target.DroppedWeapon = weapon;
+                return $"{target.Name}'s {weapon.Name} goes spinning to the ground at their feet. Disarmed, and Off-guard.";
+            }
+
+            var line = target.StatblockAttacks.FirstOrDefault(a => Combatant.IsWieldedLine(a.Name));
+            target.DroppedWeapon = new WeaponDefinition { Name = line?.Name ?? "weapon" };
+            return $"{target.Name}'s {target.DroppedWeapon.Name} is knocked from its grip. Disarmed, and Off-guard.";
+        }
+
+        /// <summary>Why <paramref name="taker"/> can't take up their dropped weapon now, or null if they can: standing over it, with an action.</summary>
+        public static string? TakeUpRefusal(Combatant taker) =>
+            taker.DroppedWeapon is null ? "There's no dropped weapon to take up."
+            : taker.IsOutOfFight ? "Out of the fight."
+            : taker.DroppedAt != taker.Position ? "The weapon lies where it fell — stand over it to take it up."
+            : taker.ActionsRemaining <= 0 ? "Taking a weapon up costs an action."
+            : null;
+
+        /// <summary>Takes up the dropped weapon — an action — and ends Disarmed (Core Rules §9, "Conditions").</summary>
+        private void TakeUp(Combatant taker)
+        {
+            taker.ActionsRemaining--;
+            var weapon = taker.DroppedWeapon!;
+            if (taker.Build is { } build)
+            {
+                // Back in hand — in place of whatever was put there since, if the hands are full.
+                var inHand = InventoryCalculator.InHandWeapons(build);
+                var hands = inHand.Sum(w => InventoryCalculator.FillsBothHands(w) ? 2 : 1) + InventoryCalculator.InHandShields(build).Count
+                            + (InventoryCalculator.FillsBothHands(weapon) ? 2 : 1);
+                if (hands > 2)
+                {
+                    foreach (var held in inHand)
+                    {
+                        held.IsEquipped = false;
+                        held.IsAtReady = true;
+                    }
+                }
+
+                weapon.IsEquipped = true;
+                build.Weapons.Add(weapon);
+            }
+
+            taker.DroppedWeapon = null;
+            taker.DroppedAt = null;
+            taker.SetCondition(CharacterCondition.Disarmed, false);
+            Write($"{taker.Name} takes up their {weapon.Name} again.");
+        }
+
+        /// <summary>The party's active character takes up their dropped weapon (Core Rules §9, "Disarmed").</summary>
+        public bool TryTakeUpWeapon()
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } taker || TakeUpRefusal(taker) is not null)
+            {
+                return false;
+            }
+
+            TakeUp(taker);
+            return true;
         }
 
         /// <summary>

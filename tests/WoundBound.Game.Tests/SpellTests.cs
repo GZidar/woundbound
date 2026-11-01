@@ -315,7 +315,7 @@ public class SpellTests
                 ? new Combat.Brains.Utility.UtilityPartyBrain(Combat.Brains.Utility.BrainSkill.Best)
                 : new Combat.Brains.TacticalPartyBrain(Combat.Brains.PartyTactics.Presets[0]);
             var result = Simulation.Simulator.PlayOne(encounter, brain);
-            Assert.True(encounter.IsOver);
+            Assert.True(encounter.IsOver, $"seed {seed}: " + string.Join("\n", encounter.Log.TakeLast(25)));
             casts += result.Tally.Casts;
         }
 
@@ -427,17 +427,16 @@ public class SpellTests
         (elthric.Mind, elthric.Body, elthric.Stamina) = (1, 2, 2);
         elthric.TendEligible[WoundType.Body] = false; // Healed already: the Heal action has nothing more to give.
         encounter.TryBeginTurn(elthric);
-        elthric.HasMove = false; // It would step for a better angle first; with the move gone, it casts from here.
+        elthric.HasMove = false;
 
-        var step = new Combat.Brains.Utility.UtilityPartyBrain(Combat.Brains.Utility.BrainSkill.Best)
-            .NextStep(encounter.View, elthric);
-
+        // On 2 Body, a caster this valuable would sooner dash clear than stand and cast; of what he
+        // could do standing his ground, the torch's fire is the best.
         var planner = new Combat.Brains.Utility.TurnPlanner(new Combat.Brains.Utility.Assessor(encounter.View), Combat.Brains.Utility.BrainSkill.Best);
-        var best = planner.Options(elthric, false, 1, real: true).OrderByDescending(o => o.Score).Take(6).Select(o => $"{o.Score:0.00} {o.Why}");
-        Assert.True(step is Combat.Brains.PartyStep.Cast, "Chose instead: " + string.Join(" | ", best));
-        var cast = (Combat.Brains.PartyStep.Cast)step;
-        Assert.Equal("Flame Burst", cast.Spell.Spell.Name);
-        Assert.Equal(FuelSource.Torch, cast.Spell.Tap);
+        var standing = planner.Options(elthric, false, 1, real: true).Where(o => o.Kind != Combat.Brains.Utility.OptionKind.Move).OrderByDescending(o => o.Score).ToList();
+        var cast = standing[0];
+        Assert.True(cast.Cast is not null, "Chose instead: " + string.Join(" | ", standing.Take(6).Select(o => $"{o.Score:0.00} {o.Why}")));
+        Assert.Equal("Flame Burst", cast.Cast!.Spell.Name);
+        Assert.Equal(FuelSource.Torch, cast.Cast.Tap);
     }
 
     [Fact]

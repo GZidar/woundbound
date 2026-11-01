@@ -8,7 +8,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// as its <see cref="BrainSkill"/> lets it. The default goal is to kill the party; a creature
     /// that has broken runs, as the simple GM's do.
     /// </summary>
-    public class UtilityGmBrain : SimpleGmBrain
+    public class UtilityGmBrain : SimpleGmBrain, IGmBrain
     {
         private readonly Random random;
 
@@ -45,14 +45,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         public override Combatant ChooseOwedTurn(BattleView view)
         {
-            var candidates = view.Adversaries.ToList();
+            var candidates = view.YetToAct.ToList();
             return Choose.Pick(candidates, a => FreshTurnWorth(view, a), Skill, random);
         }
 
         /// <summary>Buys an extra turn where one is worth more than an Opportunity kept.</summary>
         public override Combatant? ChooseExtraTurn(BattleView view)
         {
-            var best = view.Adversaries.Where(a => !a.IsBroken)
+            var best = view.Adversaries.Where(a => a.CanTakeExtraTurn && !a.IsBroken)
                 .Select(a => (Adversary: a, Worth: FreshTurnWorth(view, a)))
                 .OrderByDescending(x => x.Worth)
                 .FirstOrDefault();
@@ -79,7 +79,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
             return choice.Kind switch
             {
                 OptionKind.Move => new GmStep.Move(choice.Square!.Value),
-                OptionKind.Attack => new GmStep.Attack(choice.Target!, choice.WithAdvantage && turn.BonusAvailable, choice.With),
+                OptionKind.Attack => new GmStep.Attack(choice.Target!, choice.WithAdvantage && turn.BonusAvailable, choice.With, choice.Manoeuvre),
+                OptionKind.TakeUpWeapon => new GmStep.TakeUpWeapon(),
+                OptionKind.Exploit => new GmStep.Exploit(choice.Exploit!.Value),
+                OptionKind.RaiseShield => new GmStep.RaiseShield(),
                 OptionKind.Cast => new GmStep.Cast(choice.Cast!),
                 OptionKind.Control => new GmStep.Control(choice.Control!.Value, choice.Target!),
                 OptionKind.Aid => new GmStep.Aid(choice.Action!.Value, choice.Target!),
@@ -99,6 +102,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public override bool PanicDodges(BattleView view, PendingReaction reaction) => WorthAvoiding(view, reaction);
 
         public override bool StandsFirm(BattleView view, PendingReaction reaction) => reaction.Defender.Stamina > 0;
+
+        /// <summary>A foe built with Shelter weighs it as a character would.</summary>
+        public int ShelterAmount(BattleView view, PendingReaction reaction) => Sheltering.Amount(new Assessor(view), reaction);
 
         /// <summary>Spends the Stamina when the blow it turns is worth more than keeping it.</summary>
         private static bool WorthAvoiding(BattleView view, PendingReaction reaction)
@@ -190,7 +196,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var planner = Planner(view, out var assess);
             var stillToAct = view.PartyStillToAct;
-            var options = planner.Options(character, character.HasMove, character.ActionsRemaining, real: true, stillToAct: stillToAct);
+            var options = planner.Options(character, character.HasMove, character.ActionsRemaining, real: true, stillToAct: stillToAct,
+                interrupting: view.Interrupting);
 
             // Out of actions: another, for Stamina, if the best thing it would buy is worth the
             // Stamina and the Opportunity it hands the GM.
@@ -226,6 +233,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.StandGround => new PartyStep.StandGround(choice.Action!.Value),
                 OptionKind.StandUp => new PartyStep.StandUp(),
                 OptionKind.BreakFree => new PartyStep.BreakFree(),
+                OptionKind.TakeUpWeapon => new PartyStep.TakeUpWeapon(),
                 OptionKind.RegainFooting => new PartyStep.RegainFooting(),
                 _ => PartyStep.End,
             };
@@ -284,46 +292,74 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private static bool CanSpare(Combatant c) => c.Stamina - 1 >= StaminaReserve;
 
         /// <summary>
-        /// Interrupts where the turn taken now does more than the same turn later: the declared action
-        /// caught mid-motion — about a third of its harm spared, or all of it if the blow could drop its
-        /// maker first — worth more than the Mind it costs.
+        /// Interrupts where the turn taken now beats the same turn taken later by more than the Mind it
+        /// costs: the best plan with what it spares of the declared action counted — its maker dropped
+        /// or caught mid-motion, or its target stepped out of reach — against the best plan without.
+        /// A turn that only acts earlier, and touches the declared action not at all, isn't worth it.
         /// </summary>
         public bool Interrupts(BattleView view, PendingReaction reaction)
         {
             var me = reaction.Defender;
-            var foe = reaction.Attacker;
-            if (me.Mind < 2 || foe.IsBroken)
+            if (me.Mind < 2 || reaction.Attacker.IsBroken)
             {
                 return false;
             }
 
-            var assess = new Assessor(view);
-            var squares = view.SquaresWithin(me, 1).Keys.Append(me.Position);
-            var (hit, kill) = squares
-                .Select(sq => assess.BestAttack(me, sq, foe))
-                .Where(b => b.With is not null)
-                .Select(b => (b.Worth, b.With!))
-                .Select(b => (Hit: b.Worth, Kill: Math.Min(1, b.Worth / Math.Max(0.1, assess.Value(foe)))))
-                .DefaultIfEmpty((0, 0))
-                .MaxBy(b => b.Hit);
-            if (hit <= 0)
-            {
-                return false;
-            }
+            var planner = Planner(view, out var assess);
+            var interruption = new Interruption(reaction.Attacker, reaction.Against);
+            var options = planner.Options(me, hasMove: true, actions: 1, real: false, stillToAct: view.PartyStillToAct);
+            var plain = options.Select(o => o.Score).DefaultIfEmpty(0).Max();
+            var now = options.Select(o => o.Score + planner.Spared(me, o, interruption)).DefaultIfEmpty(0).Max();
 
-            var victim = reaction.Against is { Side: Side.Party } v ? v : me;
-            var spared = assess.Threat(foe) * assess.PerWound(victim) * (0.35 + 0.65 * kill);
-            return spared > 0.7;
+            // The Mind it costs — dear to a caster whose spells run on it — and a turn spent before
+            // the round has shown what it most needs.
+            var mindIsFuel = me.Spells.Count > 0 && me.Build?.ClassPrinciple == ClassPrinciple.Cerebral;
+            var cost = (mindIsFuel ? 0.8 : 0.3) * assess.PerWound(me) + 0.4;
+            return now - plain > cost;
         }
 
-        /// <summary>Shelters an ally a hit would drop, or a caster the party can't afford to lose, where Soul can take it.</summary>
-        public bool Shelters(BattleView view, PendingReaction reaction)
+        public bool Shelters(BattleView view, PendingReaction reaction) => ShelterAmount(view, reaction) > 0;
+
+        public int ShelterAmount(BattleView view, PendingReaction reaction) => Sheltering.Amount(new Assessor(view), reaction);
+    }
+
+    /// <summary>
+    /// How much of a blow to Shelter — "any part of it" (Core Rules §3) — weighed wound by wound: each
+    /// one spared the ally is worth what a wound to them is, and keeping them on their feet is worth a
+    /// great deal more; each one taken costs the shelterer Soul, which is dear only to a caster whose
+    /// spells run on it, or as the track runs low enough to Numb them.
+    /// </summary>
+    public static class Sheltering
+    {
+        public static int Amount(Assessor assess, PendingReaction reaction)
         {
             var ally = reaction.Attacker;
             var me = reaction.Defender;
+            var incoming = reaction.ImpactWounds;
             var left = reaction.DamageType == WoundType.Body ? ally.Body : ally.Track(reaction.DamageType).Current;
-            var drops = reaction.ImpactWounds >= left;
-            return me.Soul > reaction.ImpactWounds && (drops || (ally.HasCastSpell && reaction.ImpactWounds >= 3));
+            var soulIsFuel = me.Spells.Count > 0 && me.Build?.ClassPrinciple == ClassPrinciple.Spiritual;
+            var perSoul = (soulIsFuel ? 0.8 : 0.3) * assess.PerWound(me);
+            var perAllyWound = assess.PerWound(ally) * (reaction.DamageType == WoundType.Body ? 1 : 0.7);
+            var dropWorth = 0.6 * assess.Value(ally);
+
+            var best = (Take: 0, Net: 0.0);
+            for (var take = 1; take <= incoming && take < me.Soul; take++)
+            {
+                // Keep two Soul in hand unless it's the last wound between the ally and the floor.
+                var keepsAlly = incoming >= left && incoming - take < left;
+                if (me.Soul - take < 2 && !keepsAlly)
+                {
+                    break;
+                }
+
+                var net = take * (perAllyWound - perSoul) + (keepsAlly ? dropWorth : 0) - (me.Soul - take <= 1 ? 0.5 * perSoul : 0);
+                if (net > best.Net)
+                {
+                    best = (take, net);
+                }
+            }
+
+            return best.Net >= 0.5 ? best.Take : 0;
         }
     }
 }

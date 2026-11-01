@@ -16,7 +16,8 @@ namespace WoundBound.Game.Combat
         /// A player character in their equipped armour, fighting with whichever loadout is in hand.
         /// The build is kept, not copied, so a swap mid-fight changes what they attack with.
         /// </summary>
-        public static Combatant FromCharacter(CharacterBuild build, GridPosition position)
+        /// <param name="side">Whose side they fight on: a rival band built like characters fights for the GM (GM Reference §2).</param>
+        public static Combatant FromCharacter(CharacterBuild build, GridPosition position, Side side = Side.Party)
         {
             var loadout = InventoryCalculator.ValidateEquippedLoadout(build);
             if (!loadout.IsValid)
@@ -30,7 +31,7 @@ namespace WoundBound.Game.Combat
             return new Combatant
             {
                 Name = build.CharacterName,
-                Side = Side.Party,
+                Side = side,
                 Build = build,
                 Position = position,
                 BodyMax = stats.BodyWoundPool,
@@ -92,6 +93,7 @@ namespace WoundBound.Game.Combat
                 Armour = foe.Armour, InnateSpeed = foe.InnateSpeed, IsSwarm = foe.IsSwarm, Role = foe.Role, Morale = foe.Morale,
                 SkillBonusFor = foe.SkillBonusFor, IsMinion = foe.IsMinion, StaminaMax = foe.StaminaMax, Stamina = foe.Stamina,
                 TacticalSpendsPerRound = foe.TacticalSpendsPerRound,
+                StatblockManoeuvres = foe.StatblockManoeuvres,
                 Tier = info.Tier,
                 Casting = casting,
                 StatblockSpells = spells,
@@ -163,7 +165,24 @@ namespace WoundBound.Game.Combat
             Stamina = info.Stamina,
             TacticalSpendsPerRound = CharacterCalculator.TacticalSpendsPerRound(info.Tier),
             Tier = info.Tier,
+            StatblockManoeuvres = ManoeuvresIn(info.AttackEffect),
         };
+
+        /// <summary>
+        /// The manoeuvres an Attack line's effect gives the creature — "may attempt Topple (ST) as a
+        /// manoeuvre" — each named one it can declare with that blow (GM Reference §2).
+        /// </summary>
+        public static IReadOnlyList<WeaponManoeuvre> ManoeuvresIn(string? effect)
+        {
+            if (string.IsNullOrWhiteSpace(effect) || !effect.Contains("manoeuvre", StringComparison.OrdinalIgnoreCase))
+            {
+                return [];
+            }
+
+            return Enum.GetValues<WeaponManoeuvre>()
+                .Where(m => System.Text.RegularExpressions.Regex.IsMatch(effect, $@"\b{m}\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                .ToList();
+        }
 
         /// <summary>
         /// One attack line of a statblock. A line made with a bow, crossbow or sling is a shot, and

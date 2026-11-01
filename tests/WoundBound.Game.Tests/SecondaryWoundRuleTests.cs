@@ -90,4 +90,41 @@ public class SecondaryWoundRuleTests
         Assert.True(joren.HasShelteredThisRound);
         Assert.Equal(0, encounter.GmOpportunities);
     }
+
+    [Fact]
+    public void Shelter_MayTakeAnyPartOfIt_AndTheAllyTakesTheRest()
+    {
+        // The same blow, 4 past Mirella's leather: Joren takes 3 of it, as in the Core Rules example, and she takes 1.
+        var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(2, 4));
+        var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 6));
+        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(3, 4));
+        var encounter = Fight([10, 9, 5], mirella, joren, bandit);
+
+        encounter.TryBeginTurn(joren);
+        encounter.EndTurn();
+        encounter.RunAdversaryTurn();
+
+        Assert.False(encounter.RespondToShelter(5));
+        Assert.True(encounter.RespondToShelter(3));
+
+        Assert.Equal(mirella.BodyMax - 1, mirella.Body);
+        Assert.Equal(joren.SoulMax - 3, joren.Soul);
+        Assert.Contains(encounter.Log, l => l.Contains("taking 3 of the 4"));
+    }
+
+    [Fact]
+    public void TheBrain_SheltersJustEnoughToKeepAnAllyStanding()
+    {
+        // Mirella on 2 Body with 4 coming: taking 3 leaves her on 1, and keeps two of Joren's Soul spare.
+        var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(2, 4));
+        var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 6));
+        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(3, 4));
+        var encounter = Fight([], mirella, joren, bandit);
+        mirella.Body = 2;
+        var offer = new PendingReaction(ReactionKind.Shelter, joren, mirella, null, 0, "", ImpactWounds: 4);
+
+        var taking = new Game.Combat.Brains.Utility.UtilityPartyBrain().ShelterAmount(encounter.View, offer);
+
+        Assert.InRange(taking, 3, Math.Min(4, joren.Soul - 1));
+    }
 }

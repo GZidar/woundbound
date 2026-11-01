@@ -145,6 +145,6 @@ public class EnemyCasterTests
         public override Combat.Brains.GmCloseIn? NextCloseIn(Combat.Brains.BattleView view, IReadOnlyList<Combatant> stillIdle) => null;
 
         public override Combatant ChooseOwedTurn(Combat.Brains.BattleView view) =>
-            view.Adversaries.FirstOrDefault(a => a.Spells.Contains(cast.Spell)) ?? base.ChooseOwedTurn(view);
+            view.YetToAct.FirstOrDefault(a => a.Spells.Contains(cast.Spell)) ?? base.ChooseOwedTurn(view);
     }
 }

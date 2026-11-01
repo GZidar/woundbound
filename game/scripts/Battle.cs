@@ -140,6 +140,7 @@ namespace WoundBoundGame
         private readonly Dictionary<ControlAction, Button> controlButtons = new();
         private Button standUpButton = null!;
         private Button breakFreeButton = null!;
+        private Button takeUpButton = null!;
         private Button letGoButton = null!;
         private HFlowContainer leaverButtons = null!;
         private string leaverButtonsFor = string.Empty;
@@ -298,7 +299,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -813,6 +814,7 @@ namespace WoundBoundGame
                 6 => SampleEncounters.PartyVersusAmbush(data, Dice(), PickedGm()),
                 7 => SampleEncounters.FighterVersusRatkin(data, Dice(), PickedGm()),
                 8 => SampleEncounters.HedgeWitchesToll(data, Dice(), PickedGm()),
+                9 => SampleEncounters.RivalBand(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
             encounter.Logged += OnLogged;
@@ -1117,6 +1119,8 @@ namespace WoundBoundGame
             var me = isPartyTurn ? encounter.Active : null;
             standUpButton.Disabled = me is null || Encounter.StandUpRefusal(me) is not null;
             breakFreeButton.Disabled = me is null || Encounter.BreakFreeRefusal(me) is not null;
+            takeUpButton.Visible = me?.DroppedWeapon is not null;
+            takeUpButton.Disabled = me is null || Encounter.TakeUpRefusal(me) is not null;
             letGoButton.Disabled = me?.Holding is null;
 
             endTurnButton.Disabled = !isPartyTurn;
@@ -1507,6 +1511,14 @@ namespace WoundBoundGame
             };
             buttons.AddChild(breakFreeButton);
 
+            takeUpButton = new Button { Text = "Take up weapon", TooltipText = "Your action: pick up the weapon a Disarm knocked to your feet, and stop being Off-guard.", Visible = false };
+            takeUpButton.Pressed += () =>
+            {
+                encounter.TryTakeUpWeapon();
+                Refresh();
+            };
+            buttons.AddChild(takeUpButton);
+
             letGoButton = new Button { Text = "Let go", TooltipText = "Release whoever you're holding. Free." };
             letGoButton.Pressed += () =>
             {
@@ -1569,7 +1581,7 @@ namespace WoundBoundGame
                 exploitButtons[exploit] = button;
             }
 
-            foreach (var kind in new[] { WeaponManoeuvre.Cleave, WeaponManoeuvre.Topple, WeaponManoeuvre.Ring, WeaponManoeuvre.Hook })
+            foreach (var kind in new[] { WeaponManoeuvre.Cleave, WeaponManoeuvre.Topple, WeaponManoeuvre.Ring, WeaponManoeuvre.Hook, WeaponManoeuvre.Disarm, WeaponManoeuvre.Sunder })
             {
                 var button = new Button
                 {
@@ -1610,6 +1622,7 @@ namespace WoundBoundGame
             fightPicker.AddItem("Roadside ambush (party of three)");
             fightPicker.AddItem("The Dumb Fighter v three ratkin");
             fightPicker.AddItem("The hedge-witches' toll (enemy casters)");
+            fightPicker.AddItem("The Grey Lanterns: a rival company of five");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 

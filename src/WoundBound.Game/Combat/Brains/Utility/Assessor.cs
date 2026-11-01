@@ -32,6 +32,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
     {
         private readonly BattleView view;
         private readonly Dictionary<Combatant, double> threat = new();
+        private readonly Dictionary<Combatant, double> support = new();
 
         public Assessor(BattleView view)
         {
@@ -52,7 +53,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public double Value(Combatant c)
         {
-            var value = 0.5 + Threat(c) * Horizon;
+            var value = 0.5 + (Threat(c) + Support(c)) * Horizon;
             if (c.HasCastSpell)
             {
                 value *= 2.5;
@@ -103,9 +104,54 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var absorbs = (spell.DamageType ?? WoundType.Body) == WoundType.Body
                     ? InventoryCalculator.ArmourAbsorbedAgainst(e.Armour, WoundType.Body, isDirect: false)
                     : 0;
-                best = Math.Max(best, Odds.Of(bonus, e.DodgeThreshold).Success * Math.Max(0, dice - absorbs));
+                // An area spell lands on more than one: about as many as a caster can count on catching.
+                var caught = spell.Target == SpellTarget.Many ? AreaCatch : 1;
+                best = Math.Max(best, Odds.Of(bonus, e.DodgeThreshold).Success * Math.Max(0, dice - absorbs) * caught);
             }
 
+            return best;
+        }
+
+        /// <summary>How many an area spell is reckoned to catch, for what its caster is worth.</summary>
+        public const double AreaCatch = 1.8;
+
+        /// <summary>
+        /// What <paramref name="c"/> does for its own side in a turn besides harm, in the same wounds'
+        /// worth: a Heal's dice put back on whoever needs them — keeping the fighters standing to
+        /// hit — and a Control, Buff, Bane or Bind's turns taken from the other side. A healer is
+        /// worth putting down for the wounds they'd undo.
+        /// </summary>
+        public double Support(Combatant c)
+        {
+            if (support.TryGetValue(c, out var known))
+            {
+                return known;
+            }
+
+            // A caster shows what they are by casting; until then they're reckoned like anybody else.
+            if (!c.HasCastSpell)
+            {
+                support[c] = 0;
+                return 0;
+            }
+
+            double best = 0;
+            var hurtAllies = view.AlliesOf(c).Count(a => a != c && a.Body < a.BodyMax);
+            foreach (var spell in c.Spells)
+            {
+                var worth = spell.SpellType switch
+                {
+                    SpellType.Heal => (SpellCalculator.HealHarmDiceCount(spell.SpellTier) * (DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target)) + 1) / 2.0
+                                       + (c.Build is { } b ? SpellCalculator.GraceBonus(b, spell) : 0))
+                                      * (spell.Target == SpellTarget.Many ? AreaCatch : 1) * (hurtAllies > 0 ? 1 : 0.6),
+                    SpellType.Control => 1.5,
+                    SpellType.Buff or SpellType.Bane or SpellType.Motion => 0.8,
+                    _ => 0,
+                };
+                best = Math.Max(best, worth);
+            }
+
+            support[c] = best;
             return best;
         }
 
@@ -304,6 +350,31 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var threshold = againstDodgeToo ? Math.Max(target.DodgeThreshold, target.StabilityThreshold) : target.StabilityThreshold;
             return Odds.Of(actor.UnarmedAttackModifier, threshold + answer, actor.IsHelped,
                 actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried).Success;
+        }
+
+        /// <summary>
+        /// The chance a manoeuvre declared with <paramref name="with"/> takes: one total that must hit
+        /// the Dodge Threshold and meet <paramref name="threshold"/> too — each with the +2 the target
+        /// can buy after seeing it, where it has the Stamina.
+        /// </summary>
+        public double ManoeuvreChance(Combatant actor, AttackProfile with, Combatant target, GridPosition from, int threshold)
+        {
+            var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
+            var plan = view.PlanAttackFrom(actor, with, from, target);
+            var dodge = plan.CanAttack ? plan.DodgeThreshold : target.DodgeThreshold;
+            return Odds.Of(with.AttackModifier, Math.Max(dodge, threshold + answer), actor.IsHelped,
+                actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried).Success;
+        }
+
+        /// <summary>The chance a Sunder misses only because of the shield over <paramref name="target"/> — and still meets its Stability Threshold — splitting the shield.</summary>
+        public double ShieldBreakChance(Combatant actor, AttackProfile with, Combatant target, GridPosition from)
+        {
+            var plan = view.PlanAttackFrom(actor, with, from, target);
+            var dodge = plan.CanAttack ? plan.DodgeThreshold : target.DodgeThreshold;
+            var disadvantage = actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried;
+            var reachesBare = Odds.Of(with.AttackModifier, Math.Max(dodge - target.ShieldBonus, target.StabilityThreshold), actor.IsHelped, disadvantage).Success;
+            var hits = Odds.Of(with.AttackModifier, Math.Max(dodge, target.StabilityThreshold), actor.IsHelped, disadvantage).Success;
+            return Math.Max(0, reachesBare - hits);
         }
 
         /// <summary>

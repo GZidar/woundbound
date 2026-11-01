@@ -22,16 +22,25 @@ namespace WoundBound.Game.Combat.Brains
 
         public int Round => encounter.Round;
 
+        /// <summary>Whole rounds gone by with nobody hurt or healed.</summary>
+        public int QuietRounds => encounter.QuietRounds;
+
         public IReadOnlyList<Combatant> Combatants => encounter.Combatants;
 
         /// <summary>The GM's creatures still fighting.</summary>
         public IEnumerable<Combatant> Adversaries => encounter.Fighting(Side.Adversaries);
+
+        /// <summary>The adversaries still fighting that haven't had their turn this round — the ones an owed turn can go to.</summary>
+        public IEnumerable<Combatant> YetToAct => Adversaries.Where(a => !a.HasActedThisRound);
 
         /// <summary>The party still fighting.</summary>
         public IEnumerable<Combatant> Characters => encounter.Fighting(Side.Party);
 
         /// <summary>The party members yet to take a turn this round.</summary>
         public IReadOnlyList<Combatant> PartyStillToAct => encounter.PartyStillToAct;
+
+        /// <summary>The declared action the turn under way Interrupted, if it's an Interrupt's turn.</summary>
+        public Interruption? Interrupting => encounter.Interrupting;
 
         public int BankedOpportunities => encounter.BankedOpportunities;
 
@@ -101,6 +110,10 @@ namespace WoundBound.Game.Combat.Brains
         public AttackPlan PlanAttackFrom(Combatant attacker, GridPosition from, Combatant target) =>
             encounter.PlanAttackFrom(attacker, from, target);
 
+        /// <summary>One particular attack line, as though <paramref name="attacker"/> stood on <paramref name="from"/>.</summary>
+        public AttackPlan PlanAttackFrom(Combatant attacker, AttackProfile with, GridPosition from, Combatant target) =>
+            encounter.PlanAttackWith(attacker, with, from, target);
+
         /// <summary>Whether a melee blow from <paramref name="from"/> could land on <paramref name="square"/>.</summary>
         public static bool CanReachFrom(Combatant attacker, GridPosition from, GridPosition square) =>
             attacker.CanReachFrom(from, square);
@@ -108,6 +121,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Everybody still fighting on the other side from <paramref name="combatant"/>.</summary>
         public IEnumerable<Combatant> EnemiesOf(Combatant combatant) =>
             encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party);
+
+        /// <summary>Everybody still fighting on <paramref name="combatant"/>'s own side, themselves included.</summary>
+        public IEnumerable<Combatant> AlliesOf(Combatant combatant) => encounter.Fighting(combatant.Side);
 
         /// <summary>The closest enemy still fighting, or null if there's nobody left.</summary>
         public Combatant? NearestEnemy(Combatant combatant) =>
@@ -161,6 +177,8 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Why <paramref name="combatant"/> can't try to break free now, or null if they can.</summary>
         public static string? BreakFreeRefusal(Combatant combatant) => Encounter.BreakFreeRefusal(combatant);
+
+        public static string? TakeUpRefusal(Combatant combatant) => Encounter.TakeUpRefusal(combatant);
 
         /// <summary>What casting <paramref name="cast"/> now would come to, turn and all, or why it can't be cast.</summary>
         public CastPlan PlanCast(Combatant caster, SpellCast cast) => encounter.PlanCast(caster, cast);

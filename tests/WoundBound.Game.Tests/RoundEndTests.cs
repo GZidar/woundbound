@@ -102,10 +102,11 @@ public class RoundEndTests
         encounter.RunAdversaryTurn();
 
         Assert.Contains(encounter.Log, line => line == "The Other Fighter has no turn to take.");
-        // Both turns go to the Biter: it runs in on the first, and bites (2+3, a miss) on the second.
+        // The two turns go to two different ratkin — each adversary takes one turn a round — and
+        // the third, which took none, closes in at the round's end.
         Assert.Single(encounter.Log, line => line.StartsWith("Ratkin Biter moves "));
-        Assert.Single(encounter.Log, line => line.StartsWith("Ratkin Biter attacks "));
-        Assert.Equal(2, encounter.Log.Count(line => line.Contains("closes in")));
+        Assert.Single(encounter.Log, line => line.StartsWith("Ratkin Sneak moves "));
+        Assert.Single(encounter.Log, line => line.Contains("closes in"));
         Assert.Equal(2, encounter.Round);
         Assert.Equal(2, encounter.AdversaryTurnsPerRound);
     }

@@ -150,7 +150,10 @@ namespace WoundBound.Game.Combat.Brains
                 return new PartyStep.Attack(target);
             }
 
-            if (Tactics.HuntRunners && Runners(view, character).FirstOrDefault() is { } quarry)
+            // A chase that has gone a couple of rounds without anybody landing a blow isn't closing:
+            // a runner at the same Speed keeps its lead, so let it go (longer for one that mustn't escape).
+            if (Tactics.HuntRunners && Runners(view, character).FirstOrDefault() is { } quarry
+                && view.QuietRounds < (view.MustNotEscape(quarry) ? 4 : 2))
             {
                 nearest = quarry;
             }
@@ -169,6 +172,13 @@ namespace WoundBound.Game.Combat.Brains
             if (character.ActionsRemaining == 0)
             {
                 return ShouldBuyAnotherSwing(view, character) ? new PartyStep.BuyExtraAction() : PartyStep.End;
+            }
+
+            // Only runners left, and the chase isn't closing: stand and let them go.
+            if (view.EnemiesOf(character).All(e => e.IsBroken) && view.QuietRounds >= 2
+                && !view.EnemiesOf(character).Any(e => view.MustNotEscape(e) && view.QuietRounds < 4))
+            {
+                return PartyStep.End;
             }
 
             return character.Attack.IsRanged

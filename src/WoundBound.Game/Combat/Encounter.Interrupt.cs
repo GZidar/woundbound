@@ -4,6 +4,13 @@ using WoundBound.Rules.Enums;
 namespace WoundBound.Game.Combat
 {
     /// <summary>
+    /// An adversary's declared action a character has Interrupted: <paramref name="Actor"/>, about to act
+    /// at <paramref name="Against"/>. A turn that lands on the actor puts it at Disadvantage; one that
+    /// takes its target out of reach may leave it nothing to do (Core Rules §3, "Interrupt").
+    /// </summary>
+    public sealed record Interruption(Combatant Actor, Combatant? Against);
+
+    /// <summary>
     /// The two Secondary Wound rules that answer the GM: Interrupt (Mind), a turn taken inside the
     /// GM's when an adversary declares an action; and Shelter (Soul), an ally's damage taken as Soul
     /// (Core Rules §3, "Secondary Wound Rules").
@@ -80,6 +87,9 @@ namespace WoundBound.Game.Combat
                 });
         }
 
+        /// <summary>The declared action the party turn under way was taken inside of, if it's an Interrupt's.</summary>
+        public Interruption? Interrupting { get; private set; }
+
         /// <summary>Who the action being declared is aimed at, for the Interrupt prompt.</summary>
         private Combatant? lastDeclaredTarget;
 
@@ -98,8 +108,10 @@ namespace WoundBound.Game.Combat
             Write($"{interrupter.Name} Interrupts {actor.Name} — 1 Mind{(backlash ? ", Backlashed onto Body" : string.Empty)} — and takes their turn now.");
 
             var before = Snapshot(actor);
+            Interrupting = new Interruption(actor, lastDeclaredTarget);
             interruptResume = () =>
             {
+                Interrupting = null;
                 if (!actor.IsOutOfFight && Snapshot(actor) != before)
                 {
                     if (actor.Role == AdversaryRole.Solo)
@@ -130,7 +142,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void Shelter(Combatant hurt, int amount, WoundType type, Action<int> then)
         {
-            if (amount <= 0 || hurt.Side != Side.Party)
+            if (amount <= 0)
             {
                 then(amount);
                 return;
@@ -152,21 +164,45 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            shelterTaking = null;
             OfferReaction(new PendingReaction(ReactionKind.Shelter, shelterer, hurt, null, 0,
-                    $"{amount} {type} is about to land on {hurt.Name}. {shelterer.Name} may Shelter them — take it as Soul instead, once this round.",
+                    $"{amount} {type} is about to land on {hurt.Name}. {shelterer.Name} may Shelter them — take any part of it as Soul instead, once this round.",
                     ImpactWounds: amount, DamageType: type),
                 takes =>
                 {
-                    if (!takes)
+                    var taking = takes ? Math.Clamp(shelterTaking ?? amount, 1, amount) : 0;
+                    shelterTaking = null;
+                    if (taking == 0)
                     {
                         OfferShelter(hurt, amount, type, shelterers, then);
                         return;
                     }
 
                     shelterer.HasShelteredThisRound = true;
-                    Write($"{shelterer.Name} Shelters {hurt.Name}, and takes the {amount} {type} as Soul.");
-                    Wound(shelterer, WoundType.Soul, amount, direct: true, () => then(0));
+                    Write(taking == amount
+                        ? $"{shelterer.Name} Shelters {hurt.Name}, and takes the {amount} {type} as Soul."
+                        : $"{shelterer.Name} Shelters {hurt.Name}, taking {taking} of the {amount} {type} as Soul.");
+                    // Straight onto the shelterer's Soul — what they took for somebody else isn't theirs to pass on.
+                    Land(shelterer, WoundType.Soul, taking, 0, () => then(amount - taking));
                 });
+        }
+
+        /// <summary>How much of the blow the Shelter being answered takes; null for all of it.</summary>
+        private int? shelterTaking;
+
+        /// <summary>
+        /// Answers a Shelter on offer with how much of the damage to take — "any part of it" (Core Rules
+        /// §3): 0 declines it, and the next Soul-secondary ally in reach is asked.
+        /// </summary>
+        public bool RespondToShelter(int amount)
+        {
+            if (Pending is not { Kind: ReactionKind.Shelter } pending || amount < 0 || amount > pending.ImpactWounds)
+            {
+                return false;
+            }
+
+            shelterTaking = amount;
+            return RespondToReaction(amount > 0);
         }
     }
 }

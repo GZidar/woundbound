@@ -455,6 +455,11 @@ namespace WoundBound.Game.Combat
 
         public int Round { get; private set; }
 
+        /// <summary>Whole rounds gone by with nobody on either side hurt or healed: a standoff.</summary>
+        public int QuietRounds { get; private set; }
+
+        private int woundsAtRoundStart = -1;
+
         public EncounterPhase Phase { get; private set; }
 
         /// <summary>Whoever is taking a turn. Null between turns and once the fight is over.</summary>
@@ -1029,6 +1034,13 @@ namespace WoundBound.Game.Combat
             var takenUp = swapper.InHandWeapon?.Name ?? "empty hands";
 
             Write($"{swapper.Name} swaps loadouts — {putAway} away, {takenUp} in hand — for {paidWith}.");
+            if (swapper.IsDisarmed && swapper.InHandWeapon is not null)
+            {
+                // "A loadout at the ready can still be swapped into hand for a move" — the dropped one stays where it fell.
+                swapper.SetCondition(CharacterCondition.Disarmed, false);
+                Write($"{swapper.Name} is armed again, and no longer Off-guard.");
+            }
+
             CheckHolds();
             return true;
         }
@@ -1280,11 +1292,16 @@ namespace WoundBound.Game.Combat
                 owedInGap--;
                 adversaryTurnsRemaining--;
                 actor = CheckAdversary(gm.ChooseOwedTurn(view), "an owed turn");
+                if (actor.HasActedThisRound)
+                {
+                    throw new InvalidOperationException($"The GM brain gave {actor.Name} a second owed turn this round; only an Opportunity buys one.");
+                }
             }
             else if (extraTurnChosen is { } bought)
             {
                 extraTurnChosen = null;
                 Write($"The GM spends {SpendOpportunity()} Opportunity on an extra turn for {bought.Name}.");
+                bought.HasTakenExtraTurnThisRound = true;
                 actor = bought;
                 extraTurn = true;
             }
@@ -1306,6 +1323,11 @@ namespace WoundBound.Game.Combat
             Round++;
             Write($"— Round {Round} —");
 
+            // How long since anybody was hurt — what tells a brain a standoff has set in.
+            var wounds = combatants.Sum(c => c.Body + c.Mind + c.Soul);
+            QuietRounds = wounds == woundsAtRoundStart ? QuietRounds + 1 : 0;
+            woundsAtRoundStart = wounds;
+
             foreach (var combatant in combatants)
             {
                 combatant.TacticalSpendsThisRound = 0;
@@ -1313,6 +1335,7 @@ namespace WoundBound.Game.Combat
                 combatant.HasOverclockedThisRound = false;
                 combatant.HasSacrificedThisRound = false;
                 combatant.HasShelteredThisRound = false;
+                combatant.HasTakenExtraTurnThisRound = false;
                 combatant.HasUsedFreeStep = false;
                 combatant.IsSlipping = false;
             }
@@ -1452,9 +1475,22 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            extraTurnChosen = owedInGap == 0 && GmOpportunities > 0 && gm.ChooseExtraTurn(view) is { } bought
+            // Each adversary takes one turn a round: with every one still fighting already acted, the
+            // turns still owed have nobody to take them — "fewer adversaries, fewer turns" (Core Rules §9).
+            if (owedInGap > 0 && !Fighting(Side.Adversaries).Any(a => !a.HasActedThisRound))
+            {
+                Write("Every adversary still fighting has had its turn this round.");
+                adversaryTurnsRemaining = 0;
+                owedInGap = 0;
+            }
+
+            extraTurnChosen = owedInGap == 0 && GmOpportunities > 0 && view.Adversaries.Any(a => a.CanTakeExtraTurn) && gm.ChooseExtraTurn(view) is { } bought
                 ? CheckAdversary(bought, "an extra turn")
                 : null;
+            if (extraTurnChosen is { CanTakeExtraTurn: false } again)
+            {
+                throw new InvalidOperationException($"The GM brain bought {again.Name} a second extra turn this round; an Opportunity buys only one, unless it's a Solo.");
+            }
 
             if (owedInGap > 0 || extraTurnChosen is not null)
             {
@@ -1658,11 +1694,17 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s bonus, which this turn can't take.");
                     }
 
+                    if (attack.Manoeuvre is { } gmManoeuvre && ManoeuvreRefusal(actor, attack.Target, gmManoeuvre) is { } noManoeuvre)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} {gmManoeuvre.Kind} {attack.Target.Name}: {noManoeuvre}");
+                    }
+
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !attack.WithAdvantage;
-                    Declare(actor, $"{(attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack).Name} at {attack.Target.Name}", attack.Target,
+                    Declare(actor, $"{(attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack).Name} at {attack.Target.Name}"
+                                   + (attack.Manoeuvre is { } declaredManoeuvre ? $", to {declaredManoeuvre.Kind}" : string.Empty), attack.Target,
                         () => CanAttack(actor, attack.Target) && (attack.With is not { } with || PlanAttackWith(actor, with, actor.Position, attack.Target).CanAttack),
-                        () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done), attack.With),
+                        () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done), attack.With, manoeuvre: attack.Manoeuvre),
                         () => TakeStep(turn, done));
                     return;
 
@@ -1747,6 +1789,37 @@ namespace WoundBound.Game.Combat
                     }
 
                     StandUp(actor);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Exploit exploit:
+                    if (ExploitRefusal(actor, exploit.Which) is { } noExploit)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} buy {exploit.Which}: {noExploit}");
+                    }
+
+                    BuyExploit(actor, exploit.Which);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.RaiseShield:
+                    if (ShieldRefusal(actor, null) is { } noShield)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} raise a shield: {noShield}");
+                    }
+
+                    actor.ActionsRemaining--;
+                    RaiseShield(actor, actor, reactive: false);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.TakeUpWeapon:
+                    if (TakeUpRefusal(actor) is { } cannotTakeUp)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} take up its weapon: {cannotTakeUp}");
+                    }
+
+                    TakeUp(actor);
                     TakeStep(turn, done);
                     return;
 
@@ -2207,7 +2280,11 @@ namespace WoundBound.Game.Combat
             {
                 PayTacticalSpend(attacker, CombatActionCatalog.ReactionStaminaCost);
                 Write($"{attacker.Name} declares {declared.Kind}" + (declared.Second is { } second ? $", sweeping on into {second.Name}" : string.Empty) + $" (1 Stamina, {attacker.Stamina} left).");
-                GrantBankedOpportunity();
+                if (attacker.Side == Side.Party)
+                {
+                    // An adversary's spend hands the GM nothing (GM Reference §9).
+                    GrantBankedOpportunity();
+                }
                 var finished = then;
                 then = outcome => ApplyManoeuvre(attacker, target, declared, outcome, () => finished(outcome));
             }
@@ -2559,10 +2636,12 @@ namespace WoundBound.Game.Combat
                     ReactionKind.StandFirm or ReactionKind.BraceResolve => gm.StandsFirm(view, offer),
                     ReactionKind.Backlash => gm.Backlashes(view, offer),
                     ReactionKind.Sustain => gm.Sustains(view, offer),
+                    ReactionKind.Shelter => (shelterTaking = Math.Clamp(gm.ShelterAmount(view, offer), 0, offer.ImpactWounds)) > 0,
+                    ReactionKind.Interrupt => false,
                     _ => gm.ArrestsShove(view, offer),
                 };
 
-                if (takes && offer.Kind != ReactionKind.Backlash)
+                if (takes && !IsFreeChoice(offer.Kind))
                 {
                     // An adversary's spend hands the GM nothing, a held spell's included (GM Reference §9).
                     PayTacticalSpend(defender, offer.Kind == ReactionKind.Sustain ? SpellCalculator.SustainStaminaCost : CombatActionCatalog.ReactionStaminaCost);
