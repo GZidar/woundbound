@@ -1,7 +1,7 @@
 // Bot v bot: plays a sample fight many times over with each way of playing the party, the GM's
 // brain held fixed, and prints how each one fared.
 //
-//   dotnet run --project tools/WoundBound.Sim -- [--fight signpost|signpost4|party|solo] [--gm simple|tripping] [--fights 1000] [--seed 1]
+//   dotnet run --project tools/WoundBound.Sim -- [--fight signpost|signpost4|party|solo] [--gm simple|tripping|best|balanced|poor] [--party all|presets|utility] [--fights 1000] [--seed 1]
 //
 //   signpost (the default): the Dumb Fighter, Salla Rinehart and Drovan Thale v the Quickstart's
 //     signpost bandits, who break and run; the lantern-bearer mustn't get away.
@@ -11,17 +11,30 @@
 //
 //   simple (the default GM): everything goes for the nearest character.
 //   tripping: as simple, but a creature that isn't a Minion trips a character its pack can also reach.
+//   best / balanced / poor: the utility GM, weighing every option, at that skill.
+//
+//   The party: every fixed-tactic preset and the utility party at each skill (all, the default),
+//   only the presets, or only the utility party.
 
 using WoundBound.Game.Combat;
 using WoundBound.Game.Combat.Brains;
+using WoundBound.Game.Combat.Brains.Utility;
 using WoundBound.Game.Data;
 using WoundBound.Game.Simulation;
 
 var fights = Option("--fights", 1000);
 var seed = Option("--seed", 1);
 var which = Text("--fight", "signpost");
-var tripping = Text("--gm", "simple") == "tripping";
-IGmBrain Gm() => tripping ? new TrippingGmBrain() : new SimpleGmBrain();
+var gmName = Text("--gm", "simple")!;
+var seats = Text("--party", "all");
+IGmBrain Gm() => gmName switch
+{
+    "tripping" => new TrippingGmBrain(),
+    "best" => new UtilityGmBrain(BrainSkill.Best),
+    "balanced" => new UtilityGmBrain(BrainSkill.Balanced),
+    "poor" => new UtilityGmBrain(BrainSkill.Poor),
+    _ => new SimpleGmBrain(),
+};
 
 var data = GameData.Load(file => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", file)));
 Encounter Stage(IDiceRoller dice) => which switch
@@ -41,10 +54,21 @@ var fight = which switch
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 
-Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {(tripping ? "tripping" : "simple")}.");
+Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}.");
 Console.WriteLine();
 
-var reports = tactics.Select(t => Simulator.Run(Stage, () => new TacticalPartyBrain(t), fights, seed)).ToList();
+var parties = new List<Func<IPartyBrain>>();
+if (seats is "all" or "presets")
+{
+    parties.AddRange(tactics.Select(t => (Func<IPartyBrain>)(() => new TacticalPartyBrain(t))));
+}
+
+if (seats is "all" or "utility")
+{
+    parties.AddRange(BrainSkill.Levels.Select(level => (Func<IPartyBrain>)(() => new UtilityPartyBrain(level))));
+}
+
+var reports = parties.Select(p => Simulator.Run(Stage, p, fights, seed)).ToList();
 Console.WriteLine(Simulator.Table(reports));
 Console.WriteLine();
 Console.WriteLine("Obj% is fights with every objective met. Body left and Up (characters still standing) are averaged over wins only.");

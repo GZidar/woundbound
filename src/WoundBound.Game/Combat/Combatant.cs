@@ -180,13 +180,28 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public CharacterBuild? Build { get; init; }
 
-        /// <summary>A generic foe's attack line. Unused where there is a <see cref="Build"/>.</summary>
-        internal AttackProfile? StatblockAttack { get; init; }
+        /// <summary>
+        /// A generic foe's attack lines, the first first — "a creature with more than one attack
+        /// takes a row for each, the second beginning <i>or</i>" (GM Reference §9). Unused where
+        /// there is a <see cref="Build"/>.
+        /// </summary>
+        internal IReadOnlyList<AttackProfile> StatblockAttacks { get; init; } = [];
 
-        /// <summary>What this creature attacks with right now — for a character, whatever is in hand.</summary>
+        private AttackProfile? StatblockAttack => StatblockAttacks.Count > 0 ? StatblockAttacks[0] : null;
+
+        /// <summary>What this creature attacks with first — for a character, whatever is in hand; for a foe, its first attack line.</summary>
         public AttackProfile Attack => Build is { } build
             ? AttackProfile.ForWeapon(build, InHandWeapon)
             : StatblockAttack ?? throw new InvalidOperationException($"{Name} has neither a character sheet nor a statblock attack.");
+
+        /// <summary>Every attack it could make: a character's weapon in hand, or each of a foe's attack lines.</summary>
+        public IReadOnlyList<AttackProfile> Attacks => Build is not null ? [Attack] : StatblockAttacks;
+
+        /// <summary>The attack it threatens its Reach with: the first melee line, or the first line of any kind if it has no melee one.</summary>
+        public AttackProfile MeleeAttack => Attacks.FirstOrDefault(a => !a.IsRanged) ?? Attack;
+
+        /// <summary>Whether any of its attacks is a shot — a creature that can fight from a distance.</summary>
+        public bool HasRangedAttack => Attacks.Any(a => a.IsRanged);
 
         /// <summary>The weapon in hand; null when fighting unarmed or for a generic foe.</summary>
         public WeaponDefinition? InHandWeapon => Build is { } build ? InventoryCalculator.InHandWeapons(build).FirstOrDefault() : null;
@@ -196,7 +211,8 @@ namespace WoundBound.Game.Combat
 
         public required ArmourWeight Armour { get; init; }
 
-        public int Reach => Attack.Reach;
+        /// <summary>How far it threatens with a blade — the ground a reaction attack covers (Core Rules §9, "Reach"). A bow threatens what the body does.</summary>
+        public int Reach => Build is not null ? Attack.Reach : MeleeAttack.IsRanged ? OwnReach : MeleeAttack.Reach;
 
         /// <summary>The creature's own Speed — Normal for every player character, the statblock's for a foe.</summary>
         public Speed InnateSpeed { get; init; } = Speed.Normal;
@@ -215,7 +231,7 @@ namespace WoundBound.Game.Combat
         /// Shove pushes (Core Rules §9, "Grab, Shove, Trip and Drag"). 1 for a character; a foe's
         /// statblock Reach, which is its own.
         /// </summary>
-        public int OwnReach => Build is not null ? WeaponCalculator.DefaultOwnReach : StatblockAttack?.Reach ?? WeaponCalculator.DefaultOwnReach;
+        public int OwnReach => Build is not null ? WeaponCalculator.DefaultOwnReach : StatblockAttack?.OwnReach ?? WeaponCalculator.DefaultOwnReach;
 
         /// <summary>
         /// What a Grab, Shove, Trip or break-free adds to its 2d12: an unarmed attack's Tier + stat
@@ -276,6 +292,15 @@ namespace WoundBound.Game.Combat
         public bool IsOutOfFight => IsUnconscious || HasFled || HasSurrendered
             || (Side == Side.Party ? BodyStatus != BodyStatus.Healthy : Body <= 0);
 
+        /// <summary>
+        /// Has cast a spell in this fight — which is how a caster gives themselves away, and why
+        /// the other side goes for them first from then on. Nothing casts yet.
+        /// </summary>
+        public bool HasCastSpell { get; internal set; }
+
+        /// <summary>The statblock's Role, for a foe; null for a character.</summary>
+        public Rules.Enums.AdversaryRole? Role { get; init; }
+
         /// <summary>When this creature stops being willing to fight; null for one that never will.</summary>
         public Morale? Morale { get; init; }
 
@@ -295,7 +320,7 @@ namespace WoundBound.Game.Combat
         public bool CanReachFrom(GridPosition from, GridPosition square)
         {
             var distance = from.DistanceTo(square);
-            return distance <= Reach && !(Attack.IsUnwieldy && distance <= 1);
+            return distance <= Reach && !(MeleeAttack.IsUnwieldy && distance <= 1);
         }
     }
 }

@@ -19,6 +19,12 @@ namespace WoundBound.Game.Combat
         int Reach,
         WeaponDefinition? Weapon)
     {
+        /// <summary>
+        /// The reach of the body behind the attack — a statblock's Reach line, whatever the line
+        /// is made with. Set for a foe's attack lines, where a shot's own <see cref="Reach"/> is the
+        /// body's too; a character's is always 1 (Core Rules §9, "Reach").
+        /// </summary>
+        public int OwnReach { get; init; } = Rules.Calculation.WeaponCalculator.DefaultOwnReach;
         public bool IsRanged => Weapon?.IsRanged == true;
 
         /// <summary>Can't strike an adjacent target at all (Core Rules §9, "Weapons").</summary>
@@ -52,12 +58,14 @@ namespace WoundBound.Game.Combat
     /// <param name="DodgeThreshold">The target's Dodge Threshold with the range modifier added.</param>
     /// <param name="DamageDieSides">The die a hit rolls at this distance; null where range has taken it away entirely.</param>
     /// <param name="Note">How the distance shaped the attack, for the player — the range band, or the melee reach.</param>
+    /// <param name="Profile">Which of the attacker's attacks this is.</param>
     public sealed record AttackPlan(
         string? Refusal,
         int DodgeThreshold,
         int RangeDodgeModifier,
         int? DamageDieSides,
-        string Note)
+        string Note,
+        AttackProfile? Profile = null)
     {
         public bool CanAttack => Refusal is null;
     }

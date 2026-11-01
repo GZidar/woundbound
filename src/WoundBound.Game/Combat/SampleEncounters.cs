@@ -158,11 +158,13 @@ namespace WoundBound.Game.Combat
         public static StartingAdversaryInfo RoadsideBandit { get; } = QuickstartBandit("Roadside Bandit", "Rusty Sword", die: "d6", damageModifier: 0);
 
         /// <summary>
-        /// The Quickstart Adventure's Bandit Ambusher. His Worn Crossbow isn't here — statblock
-        /// ranged attacks aren't modelled yet — so he fights with the Rusty Knife his statblock
-        /// gives him for close work.
+        /// The Quickstart Adventure's Bandit Ambusher: a Worn Crossbow (+2, 1d6), "or Rusty Knife"
+        /// (+2, 1d4+2) for when somebody gets close.
         /// </summary>
-        public static StartingAdversaryInfo BanditAmbusher { get; } = QuickstartBandit("Bandit Ambusher", "Rusty Knife", die: "d4", damageModifier: 2);
+        public static StartingAdversaryInfo BanditAmbusher { get; } = QuickstartBandit("Bandit Ambusher", "Worn Crossbow", die: "d6", damageModifier: 0) with
+        {
+            MoreAttacks = [new StartingAttackInfo("Rusty Knife", Modifier: 2, DamageDiceCount: 1, DamageDie: "d4", DamageModifier: 2)],
+        };
 
         private static StartingAdversaryInfo QuickstartBandit(string name, string attack, string die, int damageModifier) => new(
             ContentSource: "quickstart",

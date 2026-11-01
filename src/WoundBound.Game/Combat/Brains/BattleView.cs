@@ -1,3 +1,5 @@
+using WoundBound.Rules.Enums;
+
 namespace WoundBound.Game.Combat.Brains
 {
     /// <summary>
@@ -47,6 +49,13 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>What the fight is about besides dropping everybody.</summary>
         public IReadOnlyList<Objective> Objectives => encounter.Objectives;
+
+        /// <summary>One of <paramref name="attacker"/>'s attacks from <paramref name="from"/>, at <paramref name="target"/> standing on <paramref name="targetAt"/>.</summary>
+        public AttackPlan PlanAttackWith(Combatant attacker, AttackProfile attack, GridPosition from, Combatant target, GridPosition? targetAt = null) =>
+            encounter.PlanAttackWith(attacker, attack, from, target, targetAt);
+
+        /// <summary>The most squares <paramref name="speed"/> covers for <paramref name="moves"/> moves.</summary>
+        public int SquaresFor(Speed speed, int moves) => encounter.SquaresFor(speed, moves);
 
         /// <summary>Squares from <paramref name="square"/> to the nearest character still fighting.</summary>
         public int DistanceToNearestCharacter(GridPosition square) =>

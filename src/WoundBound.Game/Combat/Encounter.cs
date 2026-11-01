@@ -162,6 +162,21 @@ namespace WoundBound.Game.Combat
         public bool IsWithinLongOfParty(GridPosition square) =>
             Fighting(Side.Party).Any(c => RangeBandCalculator.BandForSquares(bands, c.Position.DistanceTo(square)) is not null);
 
+        /// <summary>The most squares <paramref name="speed"/> covers for <paramref name="moves"/> moves, by the band prices (Core Rules §9, "Speed").</summary>
+        public int SquaresFor(Speed speed, int moves)
+        {
+            var best = 0;
+            for (var squares = 1; squares <= LongRangeSquares; squares++)
+            {
+                if (RangeBandCalculator.MoveCost(bands, squares, speed) is { } cost && cost <= moves)
+                {
+                    best = squares;
+                }
+            }
+
+            return best;
+        }
+
         /// <summary>The furthest a band reaches, in squares — Long's 16.</summary>
         public int LongRangeSquares => bands.Bands.Max(b => b.MaxSquares);
 
@@ -499,11 +514,29 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public AttackPlan PlanAttack(Combatant attacker, Combatant target) => PlanAttackFrom(attacker, attacker.Position, target);
 
-        /// <summary>As <see cref="PlanAttack"/>, as though <paramref name="attacker"/> stood on <paramref name="from"/>.</summary>
+        /// <summary>
+        /// As <see cref="PlanAttack"/>, as though <paramref name="attacker"/> stood on
+        /// <paramref name="from"/> — with whichever of its attacks would do the most from there: a
+        /// foe with a bow and a knife shoots at range and stabs up close (GM Reference §9).
+        /// </summary>
         internal AttackPlan PlanAttackFrom(Combatant attacker, GridPosition from, Combatant target)
         {
-            var attack = attacker.Attack;
-            var distance = from.DistanceTo(target.Position);
+            var plans = attacker.Attacks.Select(a => PlanAttackWith(attacker, a, from, target)).ToList();
+            return plans.Where(p => p.CanAttack).MaxBy(p => ExpectedPerHit(p)) ?? plans[0];
+
+            static double ExpectedPerHit(AttackPlan p) =>
+                (p.DamageDieSides is { } sides ? p.Profile!.DamageDiceCount * (sides + 1) / 2.0 : 0) + p.Profile!.DamageModifier
+                + p.Profile.AttackModifier - p.DodgeThreshold;
+        }
+
+        /// <summary>
+        /// One particular attack of <paramref name="attacker"/>'s, made from <paramref name="from"/>
+        /// at <paramref name="target"/> — standing where it is, or on <paramref name="targetAt"/>,
+        /// for a brain weighing where somebody might be shot from next turn.
+        /// </summary>
+        internal AttackPlan PlanAttackWith(Combatant attacker, AttackProfile attack, GridPosition from, Combatant target, GridPosition? targetAt = null)
+        {
+            var distance = from.DistanceTo(targetAt ?? target.Position);
 
             if (!attack.IsRanged)
             {
@@ -513,7 +546,7 @@ namespace WoundBound.Game.Combat
                 }
 
                 return distance <= attack.Reach
-                    ? new AttackPlan(null, target.DodgeThreshold, 0, attack.DamageDieSides, $"Melee, within Reach {attack.Reach}.")
+                    ? new AttackPlan(null, target.DodgeThreshold, 0, attack.DamageDieSides, $"Melee, within Reach {attack.Reach}.", attack)
                     : Refused($"Out of reach — the {attack.Name} reaches {attack.Reach} square(s) and they're {distance} away.");
             }
 
@@ -532,11 +565,15 @@ namespace WoundBound.Game.Combat
                     Refusal: null,
                     DodgeThreshold: target.DodgeThreshold + shot.DodgeThresholdModifier,
                     RangeDodgeModifier: shot.DodgeThresholdModifier,
-                    DamageDieSides: shot.DamageDie is { } die ? DiceNotation.ParseSides(die) : null,
-                    Note: shot.Summary)
+                    // A statblock's own die holds at Close and Short; past that the weapon's falls off.
+                    DamageDieSides: shot.DamageDie is { } die
+                        ? attacker.Build is null && shot.DodgeThresholdModifier == 0 ? attack.DamageDieSides : DiceNotation.ParseSides(die)
+                        : null,
+                    Note: shot.Summary,
+                    Profile: attack)
                 : Refused(shot.Summary);
 
-            static AttackPlan Refused(string why) => new(why, 0, 0, null, why);
+            AttackPlan Refused(string why) => new(why, 0, 0, null, why, attack);
         }
 
         /// <summary>
@@ -1212,7 +1249,8 @@ namespace WoundBound.Game.Combat
 
 
                 case GmStep.Attack attack:
-                    if (!CanAttack(actor, attack.Target))
+                    if (!CanAttack(actor, attack.Target)
+                        || (attack.With is { } line && (!actor.Attacks.Contains(line) || !PlanAttackWith(actor, line, actor.Position, attack.Target).CanAttack)))
                     {
                         throw new InvalidOperationException($"The GM brain had {actor.Name} attack {attack.Target.Name}, which it can't do now.");
                     }
@@ -1224,7 +1262,7 @@ namespace WoundBound.Game.Combat
 
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !attack.WithAdvantage;
-                    ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done));
+                    ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done), attack.With);
                     return;
 
                 case GmStep.Control control:
@@ -1602,9 +1640,11 @@ namespace WoundBound.Game.Combat
         /// its own creatures — and then damage lands less what armour absorbs (Core Rules §4), with
         /// a critical's consequences either way (Core Rules §10).
         /// </summary>
-        private void ResolveAttack(Combatant attacker, Combatant target, bool asReaction, bool opportunityBonus, Action<AttackOutcome> then)
+        /// <param name="with">Which of the attacker's attacks; null for whichever does most from where it stands.</param>
+        private void ResolveAttack(Combatant attacker, Combatant target, bool asReaction, bool opportunityBonus, Action<AttackOutcome> then,
+            AttackProfile? with = null)
         {
-            var plan = PlanAttack(attacker, target);
+            var plan = with is null ? PlanAttack(attacker, target) : PlanAttackWith(attacker, with, attacker.Position, target);
 
             if (opportunityBonus)
             {
@@ -1626,7 +1666,8 @@ namespace WoundBound.Game.Combat
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
                 .ToList();
-            var roll = RollCalculator.Resolve(rolled, attacker.Attack.AttackModifier, plan.DodgeThreshold, advantage, disadvantage);
+            var attack = plan.Profile ?? attacker.Attack;
+            var roll = RollCalculator.Resolve(rolled, attack.AttackModifier, plan.DodgeThreshold, advantage, disadvantage);
 
             if (!asReaction)
             {
@@ -1644,7 +1685,7 @@ namespace WoundBound.Game.Combat
             {
                 OfferReaction(
                     new PendingReaction(ReactionKind.RaiseShield, target, attacker, roll, plan.DodgeThreshold,
-                        $"{attacker.Name}'s {attacker.Attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
+                        $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
                         $"Raising the shield now (1 Stamina, +{shieldGain}, and it stays up) would make it miss.",
                         Bonus: shieldGain),
                     raised =>
@@ -1667,7 +1708,7 @@ namespace WoundBound.Game.Combat
 
             OfferReaction(
                 new PendingReaction(ReactionKind.PanicDodge, target, attacker, roll, plan.DodgeThreshold,
-                    $"{attacker.Name}'s {attacker.Attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
+                    $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
                     "A panic dodge (1 Stamina, +2) would make it miss."),
                 dodged => then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
                     dodged ? ThresholdModifierCalculator.ReactionBonus : 0, dodged ? "panic dodge" : null)));
@@ -2287,7 +2328,7 @@ namespace WoundBound.Game.Combat
 
             if (roll.Success == true)
             {
-                rolledDamage = RollDamage(attacker.Attack, plan, roll.IsCritical);
+                rolledDamage = RollDamage(plan.Profile ?? attacker.Attack, plan, roll.IsCritical);
                 absorbed = Math.Min(rolledDamage,
                     InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false));
                 dealt = rolledDamage - absorbed;
@@ -2491,7 +2532,7 @@ namespace WoundBound.Game.Combat
             var range = outcome.Plan.RangeDodgeModifier > 0 ? $" (+{outcome.Plan.RangeDodgeModifier} for range)" : string.Empty;
             var dodge = outcome.Dodged ? $" (+{outcome.Boost} {outcome.BoostedBy})" : string.Empty;
             var verb = outcome.AsReaction ? "strikes at" : "attacks";
-            var line = $"{outcome.Attacker.Name} {verb} {outcome.Target.Name} with {outcome.Attacker.Attack.Name}: " +
+            var line = $"{outcome.Attacker.Name} {verb} {outcome.Target.Name} with {(outcome.Plan.Profile ?? outcome.Attacker.Attack).Name}: " +
                        $"({dice}){sign}{Math.Abs(roll.Modifier)} = {roll.Total} vs DT {roll.Threshold}{range}{dodge}{advantage}";
 
             if (roll.Success == true)

@@ -43,9 +43,8 @@ Pick one on the battle screen:
 - **Signpost ambush:** the Quickstart Adventure's own (Blood and Vintage, "Roadside Ambush"), for a
   table of three — the lantern-bearer under the signpost, an ambusher on the ridge and another in the
   trees, all Skirmishers with Cowardice. The objective: take the lantern-bearer, since a captured
-  bandit can be made to talk. The ambushers' crossbows wait for statblock ranged attacks, so they use
-  the knives their statblock gives them for close work; the night, the lights and the opening volley
-  aren't in yet.
+  bandit can be made to talk. The ambushers shoot their crossbows and draw knives up close; the night,
+  the lights and the opening volley aren't in yet.
 - **Signpost ambush, four players:** the book's table of four — Joren Blacke (Martial Templar,
   battle axe and buckler, chainmail) joins the party, and a second Roadside Bandit waits round the
   corner ("two of each").
@@ -142,8 +141,40 @@ can never break a rule. An illegal answer throws. Brains see the fight through `
 answers rule questions ("could I hit them from there?") but can't change anything. A turn is asked
 for one step at a time, so a brain can re-plan after a dodge or a Riposte.
 
-`SimpleGmBrain` is the placeholder: everything goes for the nearest character. Pass a different
-brain to `Encounter` (or `SampleEncounters.FighterVersusRatkin`) to change how the GM plays.
+### Brains that weigh every option
+
+`UtilityGmBrain` and `UtilityPartyBrain` (`Combat/Brains/Utility/`) are the real players. Before every
+decision — whose turn, each step of it, every reaction — they run through everything that could be
+done and take the option that does the most for their side:
+
+- **The options** (`TurnPlanner`): every square the creature could stand on with what it has left, and
+  from each every blow or shot with each attack line, Grab, Trip, Help, Harry, Heal, shield raised or
+  ground stood; a full dash; or holding. Options from where it stands are checked against the rules
+  first, so a brain never picks something the Encounter would refuse.
+- **The score** (`Assessor`): exact dice odds (`Odds` — every combination of 2d12, or three dice for
+  Advantage or Disadvantage, put through the rules, absolutes included), the defender's reaction if
+  they can afford one, expected wounds after armour, and the chance of dropping the target — each
+  wound valued at the harm its owner does per wound of Body, so wounds dealt and wounds taken trade
+  evenly. Less the blows a square invites before the creature's next turn, and the reaction blows
+  drawn getting there.
+- **Goals and roles:** the default goal is to kill the other side; anybody who has cast a spell is
+  worth two and a half times as much to put down (nothing casts yet). A Skirmisher with a shot would
+  rather stand at Short and out of reach and values shooting; a Brute would rather be toe to toe and
+  barely minds what it walks into; a Minion is reckless; casters and supports keep clear. A broken
+  creature runs.
+- **The dial** (`BrainSkill`): Best always takes the top score; Balanced picks loosely near the top;
+  Poor picks loosely, barely minds where it stands, and never reaches past a plain blow. An encounter
+  is made harder or easier by the skill its GM plays at. On the battle screen, **GM plays** sets it,
+  and the party bot can be set to the same brain at any skill.
+
+`SimpleGmBrain` is the old placeholder — everything goes for the nearest character — kept as a
+baseline, along with the fixed party tactics below.
+
+Statblock attacks: a foe has every attack line on its statblock ("…, or Thrown Dagger"), and a line
+made with a bow, crossbow or sling is a shot under the ordinary range rules (GM Reference §9), with
+the statblock's own to-hit and die. It strikes with whichever line does most from where it stands —
+the Bandit Ambusher shoots at range and draws its knife up close. A thrown weapon still fights as a
+melee one.
 
 Not yet for fleeing: the GM's creatures reacting to a leaver with anything but a strike; Frightened;
 terrain to run into, round or behind.
@@ -151,14 +182,12 @@ terrain to run into, round or behind.
 `TrippingGmBrain` is a second baseline: a creature that isn't a Minion trips a character its pack can
 also reach before swinging.
 
-Not yet: Drag, and Grab/Shove/Trip taken as a reaction against somebody leaving your reach; the Martial
-manoeuvres (Cleave, Topple, Ring, Hook, Disarm, Sunder); Solo Resilience and Unshakable; Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting,
-shields, frights (so Resolute has nothing to resist yet), obstacles, movement
-paths (a move is a hop from square to square). Characters make no reaction attacks yet against an
-adversary leaving their reach. The Quickstart characters' class features — Nimble's free step and
-Exploits, Sacrifice, Interrupt — aren't in, and statblock ranged attacks (the Reedmarsh Skulker's
-bow) aren't modelled, so the sample fights use melee foes. The GM can't yet hold an owed turn for a
-later gap.
+Not yet: the Martial manoeuvres (Cleave, Topple, Ring, Hook, Disarm, Sunder); Solo Resilience and
+Unshakable; Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting, frights (so
+Resolute has nothing to resist yet), spells, obstacles, movement paths (a move is a hop from square to
+square). The Quickstart characters' class features — Nimble's free step and Exploits, Overclock, Grace,
+Sacrifice, Shelter, Interrupt — aren't in. The GM can't yet hold an owed turn for a later gap, buy its
+creatures extra actions, or react to a leaver with anything but a strike.
 
 ## Bot v bot
 
@@ -176,7 +205,12 @@ already strike, and otherwise whoever is nearest an enemy.
 
   ```
   dotnet run --project tools/WoundBound.Sim -- --fights 1000 --seed 1
+  dotnet run --project tools/WoundBound.Sim -- --gm best --party utility --fights 200
   ```
+
+  `--gm` picks the GM: `simple`, `tripping`, or the utility GM at `best`, `balanced` or `poor`.
+  `--party` picks who plays the party: `all` (every fixed tactic and the utility party at each skill),
+  `presets` or `utility`. The utility brains think before every step, so they run slower.
 
   The signpost ambush is the default, and the table leads with how often every objective was met;
   `--fight signpost4` the four-player signpost, `--fight party` the roadside ambush, `--fight solo` the Dumb Fighter against the ratkin, and

@@ -3,6 +3,7 @@ using System.Linq;
 using Godot;
 using WoundBound.Game.Combat;
 using WoundBound.Game.Combat.Brains;
+using WoundBound.Game.Combat.Brains.Utility;
 using WoundBound.Game.Data;
 using WoundBound.Rules.Calculation;
 using WoundBound.Rules.Catalog;
@@ -47,6 +48,16 @@ namespace WoundBoundGame
         private BotDriver? bot;
         private CheckButton botToggle = null!;
         private OptionButton tacticPicker = null!;
+        private OptionButton gmPicker = null!;
+
+        /// <summary>The GM for a new fight, from the picker: the utility GM at each skill, or the simple placeholder.</summary>
+        private IGmBrain PickedGm() => gmPicker.Selected switch
+        {
+            1 => new UtilityGmBrain(BrainSkill.Balanced, new System.Random()),
+            2 => new UtilityGmBrain(BrainSkill.Poor, new System.Random()),
+            3 => new SimpleGmBrain(),
+            _ => new UtilityGmBrain(BrainSkill.Best, new System.Random()),
+        };
         private OptionButton fightPicker = null!;
         private HFlowContainer chooseRow = null!;
         private Label partyLabel = null!;
@@ -297,10 +308,10 @@ namespace WoundBoundGame
         {
             encounter = fightPicker.Selected switch
             {
-                1 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), fourPlayers: true),
-                2 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller()),
-                3 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller()),
-                _ => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller()),
+                1 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm(), fourPlayers: true),
+                2 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller(), PickedGm()),
+                3 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller(), PickedGm()),
+                _ => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm()),
             };
             shown = null;
             Disarm();
@@ -358,7 +369,9 @@ namespace WoundBoundGame
         private void UpdateBot()
         {
             bot = botToggle.ButtonPressed
-                ? new BotDriver(encounter, new TacticalPartyBrain(PartyTactics.Presets[Mathf.Max(0, tacticPicker.Selected)]))
+                ? new BotDriver(encounter, tacticPicker.Selected < BrainSkill.Levels.Count
+                    ? new UtilityPartyBrain(BrainSkill.Levels[Mathf.Max(0, tacticPicker.Selected)], new System.Random())
+                    : new TacticalPartyBrain(PartyTactics.Presets[tacticPicker.Selected - BrainSkill.Levels.Count]))
                 : null;
         }
 
@@ -859,6 +872,11 @@ namespace WoundBoundGame
             botRow.AddChild(botToggle);
 
             tacticPicker = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            foreach (var level in BrainSkill.Levels)
+            {
+                tacticPicker.AddItem($"Weighs every option ({level.Name})");
+            }
+
             foreach (var tactic in PartyTactics.Presets)
             {
                 tacticPicker.AddItem(tactic.Name);
@@ -872,6 +890,18 @@ namespace WoundBoundGame
                 }
             };
             botRow.AddChild(tacticPicker);
+
+            var gmRow = new HBoxContainer();
+            gmRow.AddThemeConstantOverride("separation", 8);
+            column.AddChild(gmRow);
+            gmRow.AddChild(new Label { Text = "GM plays:" });
+            gmPicker = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "Takes effect from the next fight (Restart)." };
+            gmPicker.AddItem("Best — weighs every option, takes the most effective");
+            gmPicker.AddItem("Balanced — usually the best");
+            gmPicker.AddItem("Poor — loose and careless");
+            gmPicker.AddItem("Simple — goes for the nearest");
+            gmPicker.ItemSelected += _ => StartEncounter();
+            gmRow.AddChild(gmPicker);
 
             reactionBox = new PanelContainer { Visible = false };
             reactionBox.AddThemeStyleboxOverride("panel", new StyleBoxFlat

@@ -76,7 +76,8 @@ namespace WoundBound.Game.Combat.Brains
         /// Attack <paramref name="Target"/> with the action. <paramref name="WithAdvantage"/> spends
         /// an Opportunity on the attack's bonus — allowed only when <see cref="GmTurn.BonusAvailable"/>.
         /// </summary>
-        public sealed record Attack(Combatant Target, bool WithAdvantage = false) : GmStep;
+        /// <param name="With">Which attack line; null for whichever does most from where it stands.</param>
+        public sealed record Attack(Combatant Target, bool WithAdvantage = false, AttackProfile? With = null) : GmStep;
 
         /// <summary>
         /// Take the Dodge, Grounded or Resolute action (Core Rules §10, "Standing Your Ground"):
