@@ -158,7 +158,26 @@ namespace WoundBound.Game.Combat
                 new InventoryItemDefinition { Name = "Lantern", Quantity = 1, IsLit = lantern },
                 new InventoryItemDefinition { Name = "Oil (flask)", Quantity = 1 },
             },
-            Spells = { data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Vital Transfer"), data.Spell("Blessing") },
+            Spells = { data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Vital Transfer"), data.Spell("Blessing"), EyeOfEolis },
+        };
+
+        /// <summary>
+        /// The Control spell Mirella builds in Core Rules §11's Example of Play: "the Eye of Eolis
+        /// opening in the dark above him, and it knows his name" — Divine, one target, a Ray, Small,
+        /// against Resolve. Which of Fear, Confusion or Compulsion is chosen when it lands.
+        /// </summary>
+        public static SpellDefinition EyeOfEolis => new()
+        {
+            Name = "Eye of Eolis",
+            Source = MagicSource.DivineMagic,
+            SpellTier = Tier.T1,
+            SpellType = SpellType.Control,
+            Target = SpellTarget.One,
+            Shape = SpellShape.Ray,
+            Size = SpellSize.Small,
+            Range = SpellRange.Short,
+            Threshold = ThresholdType.Resolve,
+            Notes = "For a moment the target sees what Mirella sees: the Eye of Eolis opening in the dark above them, and it knows their name.",
         };
 
         /// <summary>
@@ -442,11 +461,11 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
-        /// A camp on the road at night — staged for the game, not taken from a book. Unlit, with the
-        /// party's campfire the only light: a built fire, which holds its grade out to Long, so the
-        /// camp can be seen from the dark and the dark can't be seen from the camp. The torches and
-        /// the lantern are packed away. The fire is also 2 Fuel for a Fire caster in reach of it —
-        /// spent whole, and the camp's light with it (Core Rules §14).
+        /// A camp on the road at night — staged for the game, not taken from a book. Unlit, lit by
+        /// the party's campfire — a built fire, which holds its grade out to Long, so the camp can be
+        /// seen from the dark and the dark can't be seen from the camp — and by Mirella's lantern;
+        /// the torches are packed away. The fire is also 2 Fuel for a Fire caster in reach of it,
+        /// spent whole and its light with it, leaving the lantern (Core Rules §14).
         /// </summary>
         public static Setting CampAtNight { get; } = new()
         {
@@ -473,7 +492,7 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(9, 8)),
                 CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(11, 10)),
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(10, 10)),
-                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(9, 10)),
+                CombatantFactory.FromCharacter(MirellaVask(data, lantern: true), new GridPosition(9, 10)),
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(11, 8)),
                 CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(20, 9)),
                 CombatantFactory.FromAdversary(wolf, "Wolf from the north", new GridPosition(17, 6)),

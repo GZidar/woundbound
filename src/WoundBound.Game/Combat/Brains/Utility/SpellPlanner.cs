@@ -44,6 +44,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     SpellType.Buff when usesTricks => View.PartyOnBoard.Concat(View.Adversaries)
                         .Where(c => c.Side == actor.Side && !c.IsOutOfFight)
                         .Select(c => (new SpellCast(spell) { Target = c, Threshold = ThresholdType.Dodge }, (Func<CastPlan, double>)(plan => BuffWorth(plan, care)))),
+                    SpellType.Control when usesTricks => enemies.Where(e => e.ResolveThreshold is not null && !View.IsControlled(e))
+                        .SelectMany(e => new[] { ControlEffect.Fear, ControlEffect.Compulsion }
+                            .Select(effect => (new SpellCast(spell) { Target = e, Effect = effect }, (Func<CastPlan, double>)(plan => ControlWorth(actor, effect, plan))))),
                     SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Shift => enemies.Where(e => !e.IsBroken)
                         .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => ShiftWorth(actor, plan)))),
                     _ => [],
@@ -263,6 +266,35 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var bonus = SpellCalculator.BuffMagnitude(Tier.T1);
             return 0.8 * Math.Max(care, 0.5) * (assess.Exposure(ally, ally.Position) - assess.Exposure(ally, ally.Position, extraDodge: bonus));
+        }
+
+        /// <summary>
+        /// A Control spell is worth the turns it takes off its target: the chance it lands, then about
+        /// one more for each recheck it survives, to its Tier's cap. A kneeling Compulsion takes the
+        /// whole turn; Fear takes most of a turn from a creature toe to toe with one of ours, and less
+        /// from one shooting from range — and drives off whatever must not get away, so never that.
+        /// </summary>
+        private double ControlWorth(Combatant actor, ControlEffect effect, CastPlan plan)
+        {
+            var target = plan.Targets.FirstOrDefault();
+            if (target is null || target.IsBroken || target.ResolveThreshold is not { } resolve || target.IsMinion)
+            {
+                return 0;
+            }
+
+            if (effect == ControlEffect.Fear && View.MustNotEscape(target))
+            {
+                return 0;
+            }
+
+            var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
+            var solo = target.Role == AdversaryRole.Solo;
+            var lands = Odds.Of(plan.CastBonus, resolve + answer, disadvantage: solo).Success;
+            var holds = Odds.Of(plan.CastBonus, resolve, disadvantage: solo).Success;
+            var turns = 1 + holds;
+            var engaged = View.EnemiesOf(target).Any(a => a.Position.DistanceTo(target.Position) <= target.Reach);
+            var denied = effect == ControlEffect.Compulsion ? 1.0 : engaged ? 0.8 : 0.4;
+            return lands * turns * denied * assess.Threat(target) * assess.PerWound(actor);
         }
 
         /// <summary>

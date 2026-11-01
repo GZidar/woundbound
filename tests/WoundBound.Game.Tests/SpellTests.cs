@@ -56,7 +56,7 @@ public class SpellTests
         Assert.Equal((7, 8, 4, 4, 13, 13, 11), (elthric.BodyMax, elthric.MindMax, elthric.SoulMax, elthric.StaminaMax,
             elthric.DodgeThreshold, elthric.ResolveThreshold!.Value, elthric.StabilityThreshold));
 
-        Assert.Equal(["Smite", "Scourging Light", "Vital Transfer", "Blessing"], mirella.Spells.Select(s => s.Name));
+        Assert.Equal(["Smite", "Scourging Light", "Vital Transfer", "Blessing", "Eye of Eolis"], mirella.Spells.Select(s => s.Name));
         Assert.Equal(["Mind Spike", "Foresight", "Telekinetic Shove", "Blood Mist", "Flame Burst", "Conflagration"], elthric.Spells.Select(s => s.Name));
         Assert.True(elthric.HasOverclock);
         Assert.True(mirella.HasSacrifice && elthric.HasSacrifice);
@@ -441,7 +441,7 @@ public class SpellTests
     }
 
     [Fact]
-    public void AtTheCamp_TheFireLightsTheParty_AndElthricTappingItPutsTheCampInTheDark()
+    public void AtTheCamp_TappingTheFire_LeavesOnlyMirellasLantern()
     {
         var encounter = SampleEncounters.CampfireAmbush(Data, new ScriptedDice(1, 2, 1, 2));
         var elthric = Named(encounter, "Elthric Dane");
@@ -461,10 +461,92 @@ public class SpellTests
         Assert.Null(plan.Refusal);
         Assert.Equal((SpellRange.Middle, 2, 2), (plan.Range, plan.Cost, plan.Fuel!.FromSource));
 
+        var before = encounter.VisibilityOf(wolf);
         Assert.True(encounter.TryCast(cast));
 
+        // The fire is gone; Mirella's lantern still lights the camp, but not out to the wolves.
         Assert.Empty(encounter.Fires);
-        Assert.Equal(Visibility.None, encounter.VisibilityOf(salla));
+        Assert.NotEqual(Visibility.None, encounter.VisibilityOf(salla));
+        Assert.True(encounter.VisibilityOf(wolf) > before);
+    }
+
+    /// <summary>Ends Mirella's turn and runs adversary turns until it's a character's turn to choose again.</summary>
+    private static void EndTurnAndLetTheGmAct(Encounter encounter)
+    {
+        encounter.EndTurn();
+        while (encounter.Phase == EncounterPhase.AdversaryTurn)
+        {
+            encounter.RunAdversaryTurn();
+        }
+    }
+
+    [Fact]
+    public void Fear_MakesTheTargetGiveGround_ABandATurn_WithDisadvantage()
+    {
+        // 10+8 +4 = 22 against RT 12: Frightened. At the end of Mirella's turn it's rechecked: 9+8 +4 = 21, it holds.
+        var encounter = Casters([10, 8, 9, 8], bandit: (4, 3), passiveGm: true);
+        var mirella = Named(encounter, "Mirella Vask");
+        var bandit = Named(encounter, "Bandit");
+        encounter.TryBeginTurn(mirella);
+
+        Assert.True(encounter.TryCast(new SpellCast(Spell(mirella, "Eye of Eolis")) { Target = bandit, Effect = ControlEffect.Fear }));
+        Assert.Contains(CharacterCondition.Frightened, bandit.Conditions);
+        Assert.Contains("only one at a time", encounter.PlanCastFrom(mirella, mirella.Position, new SpellCast(Spell(mirella, "Eye of Eolis")) { Target = Named(encounter, "Ambusher") }, checkTurn: false).Refusal);
+
+        // From Short it has to finish in Middle — 5 squares or more from her.
+        EndTurnAndLetTheGmAct(encounter);
+        Assert.InRange(bandit.Position.DistanceTo(mirella.Position), 5, 8);
+        Assert.True(bandit.HasWithdrawnThisTurn);
+    }
+
+    [Fact]
+    public void Fear_AtLong_DrivesTheTargetFromTheScene()
+    {
+        var encounter = Casters([10, 8, 9, 8], bandit: (12, 4), passiveGm: true);
+        var mirella = Named(encounter, "Mirella Vask");
+        var bandit = Named(encounter, "Bandit");
+        encounter.TryBeginTurn(mirella);
+        mirella.Soul = 8;
+
+        Assert.True(encounter.TryCast(new SpellCast(Spell(mirella, "Eye of Eolis")) { Target = bandit }));
+        EndTurnAndLetTheGmAct(encounter);
+
+        Assert.True(bandit.HasFled);
+        Assert.Empty(encounter.ControlsInPlay);
+    }
+
+    [Fact]
+    public void Compulsion_ToKneel_TakesTheTargetsWholeTurn()
+    {
+        var encounter = Casters([10, 8, 9, 8], bandit: (4, 5));
+        var mirella = Named(encounter, "Mirella Vask");
+        var bandit = Named(encounter, "Bandit");
+        encounter.TryBeginTurn(mirella);
+
+        Assert.True(encounter.TryCast(new SpellCast(Spell(mirella, "Eye of Eolis")) { Target = bandit, Effect = ControlEffect.Compulsion }));
+        var at = bandit.Position;
+        EndTurnAndLetTheGmAct(encounter);
+
+        Assert.Contains(encounter.Log, l => l.Contains("Bandit is Compelled, and kneels"));
+        Assert.Equal(at, bandit.Position);
+        Assert.All(encounter.Combatants.Where(c => c.Side == Side.Party), c => Assert.Equal(c.BodyMax, c.Body));
+    }
+
+    [Fact]
+    public void Confusion_TurnsTheTargetOnWhoeverIsInReach_AlliesIncluded()
+    {
+        // The bandit's only neighbour is the ambusher. Its Rusty Sword: 11+10 +2 = 23, a hit; d6 = 4, less 1 for leather.
+        var encounter = Casters([10, 8, 9, 8, 1, 11, 10, 4], bandit: (8, 8), ambusher: (9, 8), passiveGm: true);
+        var mirella = Named(encounter, "Mirella Vask");
+        var bandit = Named(encounter, "Bandit");
+        var ambusher = Named(encounter, "Ambusher");
+        ambusher.Stamina = 0;
+        encounter.TryBeginTurn(mirella);
+
+        Assert.True(encounter.TryCast(new SpellCast(Spell(mirella, "Eye of Eolis")) { Target = bandit, Effect = ControlEffect.Confusion }));
+        EndTurnAndLetTheGmAct(encounter);
+
+        Assert.Equal(ambusher.BodyMax - 3, ambusher.Body);
     }
 
     /// <summary>Everybody but <paramref name="last"/> ends their turn, and the adversaries take theirs, until it's <paramref name="last"/>'s pick next round.</summary>

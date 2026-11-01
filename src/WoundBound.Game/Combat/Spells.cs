@@ -16,6 +16,22 @@ namespace WoundBound.Game.Combat
     }
 
     /// <summary>
+    /// What a Control spell does to whoever it lands on — the caster's pick, on a success (Core Rules
+    /// §11, "Control Spells").
+    /// </summary>
+    public enum ControlEffect
+    {
+        /// <summary>Frightened: gives ground a band a turn, with Disadvantage while the source can be seen.</summary>
+        Fear,
+
+        /// <summary>Confused: its action goes on attacking a creature in reach, chosen at random — allies count.</summary>
+        Confusion,
+
+        /// <summary>Compelled: carries out the caster's one directive on each of its turns.</summary>
+        Compulsion,
+    }
+
+    /// <summary>
     /// One casting, as the caster declares it (Core Rules §11): the spell, where it goes, and the
     /// choices made in the same breath — what pays, whether it is Sustained, which Threshold a Buff
     /// or Bane moves. Range is not chosen: it is read off where the point of origin falls.
@@ -68,6 +84,15 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Where the tapped source is, when it isn't in the caster's hand.</summary>
         public GridPosition? TapAt { get; init; }
+
+        /// <summary>What a Control spell does to those it lands on. Fear unless chosen otherwise.</summary>
+        public ControlEffect Effect { get; init; } = ControlEffect.Fear;
+
+        /// <summary>
+        /// A Compulsion's directive: "attack that guard" names who; null is "drop your weapon and
+        /// kneel" — no action, no move, for as long as it holds.
+        /// </summary>
+        public Combatant? Directed { get; init; }
 
         /// <summary>A Shift's straight line, one square's step — any of the eight ways. Null drives the target straight away from the caster.</summary>
         public (int X, int Y)? Direction { get; init; }

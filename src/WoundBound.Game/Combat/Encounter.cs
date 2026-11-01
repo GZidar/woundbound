@@ -509,7 +509,7 @@ namespace WoundBound.Game.Combat
         /// it crawls.
         /// </summary>
         public static bool CanMoveItself(Combatant combatant) =>
-            !combatant.IsStandingGround && ConditionCatalog.CanMove(combatant.Conditions);
+            !combatant.IsStandingGround && !combatant.HasWithdrawnThisTurn && ConditionCatalog.CanMove(combatant.Conditions);
 
         /// <summary>
         /// Why <paramref name="combatant"/> can't take <paramref name="action"/> — Dodge, Grounded or
@@ -1191,8 +1191,14 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            EndPartyTurn(ending);
+        }
+
+        /// <summary>A character's turn over: their Control spells rechecked, then the gap the GM is owed.</summary>
+        private void EndPartyTurn(Combatant ending)
+        {
             FinishTurn(ending);
-            AfterPartyTurn();
+            RecheckControls(ending, AfterPartyTurn);
         }
 
         /// <summary>
@@ -1292,6 +1298,7 @@ namespace WoundBound.Game.Combat
             }
 
             EndSpellsOfFallenCasters(roundEnd: true);
+            AgeControls();
 
             // Everyone on the party's side keeps their place in the round, fighting or not: a
             // character with no turn to take still leaves the GM the adversary turn that follows it.
@@ -1384,7 +1391,7 @@ namespace WoundBound.Game.Combat
             next.HasActedThisRound = true;
             Phase = EncounterPhase.PartyTurn;
             Write($"{next.Name}'s turn.");
-            OfferSustain(next, () => { });
+            OfferSustain(next, () => TakeControlledTurn(next, resume: () => { }, endTurn: () => EndPartyTurn(next)));
         }
 
         private void AfterPartyTurn()
@@ -1444,7 +1451,8 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void CloseIn(List<Combatant> idle, Action done)
         {
-            idle.RemoveAll(a => a.IsOutOfFight);
+            // A creature a Control spell holds does what the spell says, not what the GM would.
+            idle.RemoveAll(a => a.IsOutOfFight || IsControlled(a));
             if (IsOver || idle.Count == 0 || gm.NextCloseIn(view, idle) is not { } closeIn)
             {
                 done();
@@ -1543,6 +1551,7 @@ namespace WoundBound.Game.Combat
             var wasStanding = combatant.StandingGround.ToList();
             combatant.ThresholdModifiers = ThresholdModifierCalculator.AtTurnStart(combatant.ThresholdModifiers);
             combatant.HasMovedThisTurn = false;
+            combatant.HasWithdrawnThisTurn = false;
 
             if (wasStanding.Count > 0)
             {
@@ -1563,7 +1572,11 @@ namespace WoundBound.Game.Combat
             var turn = new GmTurn(actor, isExtraTurn: !allowOpportunityBonus,
                 bonusAvailable: allowOpportunityBonus && !actor.HasActedThisRound && GmOpportunities > 0);
 
-            OfferSustain(actor, () => TakeStep(turn, done));
+            OfferSustain(actor, () => TakeControlledTurn(actor, () => TakeStep(turn, done), () =>
+            {
+                FinishTurn(actor);
+                RecheckControls(actor, done);
+            }));
         }
 
         private void TakeStep(GmTurn turn, Action done)
@@ -1726,7 +1739,7 @@ namespace WoundBound.Game.Combat
                     }
 
                     FinishTurn(actor);
-                    done();
+                    RecheckControls(actor, done);
                     return;
             }
         }
@@ -2439,7 +2452,8 @@ namespace WoundBound.Game.Combat
                 .Where(sq => sq != centre);
 
         /// <summary>Standing their ground or Off-guard: either puts Disadvantage on an attacker's roll (Core Rules §9, §10).</summary>
-        private static bool AttacksAtDisadvantage(Combatant attacker) => attacker.IsStandingGround || attacker.IsOffGuard;
+        private static bool AttacksAtDisadvantage(Combatant attacker) =>
+            attacker.IsStandingGround || attacker.IsOffGuard || attacker.Conditions.Contains(CharacterCondition.Frightened);
 
         /// <summary>
         /// Whether +2 to the Threshold, decided after seeing the roll, would turn this success into
@@ -2976,6 +2990,7 @@ namespace WoundBound.Game.Combat
             CheckHolds();
             CheckCover();
             EndSpellsOfFallenCasters(roundEnd: false);
+            EndControlsOfFallenCasters();
             CheckMorale();
 
             if (!Fighting(Side.Party).Any())

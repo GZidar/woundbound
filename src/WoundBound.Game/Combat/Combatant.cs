@@ -349,6 +349,12 @@ namespace WoundBound.Game.Combat
         /// <summary>Has used Sacrifice this round.</summary>
         public bool HasSacrificedThisRound { get; internal set; }
 
+        /// <summary>
+        /// Has given ground this turn, Frightened — and can't come back: closing again would spend a
+        /// move it must still finish further out for, which it can't do twice (Core Rules §9).
+        /// </summary>
+        public bool HasWithdrawnThisTurn { get; internal set; }
+
         /// <summary>Lanterns tapped for a spell: cold and intact, needing a flask of Oil before they'll light again (Core Rules §14).</summary>
         internal HashSet<InventoryItemDefinition> DrainedLanterns { get; } = new();
 

@@ -74,7 +74,12 @@ namespace WoundBound.Game.Combat
                 }
             }
 
-            if (spell.SpellType is SpellType.Control or SpellType.Illusion or SpellType.Utility)
+            if (spell.SpellType == SpellType.Control && HasControlActive(caster))
+            {
+                return CastPlan.Refused($"{caster.Name} already has a Control spell holding somebody — only one at a time.");
+            }
+
+            if (spell.SpellType is SpellType.Illusion or SpellType.Utility)
             {
                 return CastPlan.Refused($"{spell.SpellType} spells aren't in the game yet.");
             }
@@ -270,6 +275,15 @@ namespace WoundBound.Game.Combat
 
                     break;
 
+                case SpellType.Control:
+                    caught = caught.Where(c => c.ResolveThreshold is not null && !c.IsOutOfFight).ToList();
+                    if (cast.Effect == ControlEffect.Compulsion && cast.Directed is { } directed && (directed.HasFled || !directed.OccupiesSquare))
+                    {
+                        return CastPlan.Refused($"{directed.Name} isn't there to be attacked.");
+                    }
+
+                    break;
+
                 case SpellType.Motion when motion == MotionKind.Bind && spell.SpellTier != Tier.T1:
                     return CastPlan.Refused("Only a T1 Bind — Slowed — is in the game yet.");
             }
@@ -307,7 +321,7 @@ namespace WoundBound.Game.Combat
                 wounds--;
             }
 
-            var rolls = spell.SpellType == SpellType.Harm || (spell.SpellType == SpellType.Motion && motion != MotionKind.Quicken);
+            var rolls = spell.SpellType is SpellType.Harm or SpellType.Control || (spell.SpellType == SpellType.Motion && motion != MotionKind.Quicken);
             if (cast.Sacrifice && SacrificeRefusal(caster) is { } noSacrifice)
             {
                 return CastPlan.Refused(noSacrifice);
@@ -472,6 +486,9 @@ namespace WoundBound.Game.Combat
                 case SpellType.Heal:
                     CastHeal(caster, cast, plan);
                     Finish();
+                    return;
+                case SpellType.Control:
+                    CastControl(caster, cast, plan, Finish);
                     return;
                 case SpellType.Buff or SpellType.Bane:
                     foreach (var target in plan.Targets)

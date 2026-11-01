@@ -179,6 +179,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>The lights the party has: carried, dropped, and built fires.</summary>
         public int PartyLights => Characters.Sum(c => c.CarriedLights) + encounter.LightsOnTheGround.Count + encounter.Fires.Count();
 
+        /// <summary>Whether a Control spell is holding <paramref name="combatant"/>.</summary>
+        public bool IsControlled(Combatant combatant) => encounter.IsControlled(combatant);
+
         /// <summary>Spells still at work on the board.</summary>
         public IReadOnlyList<SpellInPlay> SpellsInPlay => encounter.SpellsInPlay;
 

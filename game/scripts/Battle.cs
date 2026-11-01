@@ -120,6 +120,7 @@ namespace WoundBoundGame
         private CheckBox backlashBox = null!;
         private OptionButton thresholdPicker = null!;
         private OptionButton tapPicker = null!;
+        private OptionButton effectPicker = null!;
         private static readonly Color SpellArea = new(0.65f, 0.35f, 0.95f, 0.35f);
         private static readonly ThresholdType[] BuffThresholds = [ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve];
 
@@ -152,6 +153,11 @@ namespace WoundBoundGame
                 Backlash = backlashBox.ButtonPressed,
                 Threshold = spell.SpellType is SpellType.Buff or SpellType.Bane ? BuffThresholds[Mathf.Max(0, thresholdPicker.Selected)] : null,
             };
+
+            if (spell.SpellType == SpellType.Control)
+            {
+                cast = cast with { Effect = (ControlEffect)Mathf.Max(0, effectPicker.Selected) };
+            }
 
             // Elemental Fuel: the pack, the light in hand, or a fire burning within reach.
             if (spell.Source == MagicSource.ElementalMagic)
@@ -459,6 +465,9 @@ namespace WoundBoundGame
                 combatant.IsStunned ? "stunned" : null,
                 combatant.IsNumbed ? "numbed" : null,
                 combatant.Conditions.Contains(CharacterCondition.Slowed) ? "slowed" : null,
+                combatant.Conditions.Contains(CharacterCondition.Frightened) ? "frightened" : null,
+                combatant.Conditions.Contains(CharacterCondition.Confused) ? "confused" : null,
+                combatant.Conditions.Contains(CharacterCondition.Compelled) ? "compelled" : null,
                 combatant.Conditions.Contains(CharacterCondition.Hastened) ? "hastened" : null,
                 encounter.SpellsInPlay.Any(e => e.Target == combatant && e.Type == SpellType.Buff) ? "blessed" : null,
                 encounter.SpellsInPlay.Any(e => e.Target == combatant && e.Type == SpellType.Bane) ? "cursed" : null,
@@ -817,6 +826,7 @@ namespace WoundBoundGame
             sustainBox.Visible = armedSpell is { } s && SpellCalculator.CanBeSustained(s.SpellType);
             thresholdPicker.Visible = armedSpell is { SpellType: SpellType.Buff or SpellType.Bane };
             tapPicker.Visible = armedSpell is { Source: MagicSource.ElementalMagic };
+            effectPicker.Visible = armedSpell is { SpellType: SpellType.Control };
         }
 
         /// <summary>
@@ -1183,7 +1193,12 @@ namespace WoundBoundGame
             tapPicker.AddItem("Fuel: tap the light in hand");
             tapPicker.AddItem("Fuel: tap a fire beside me");
 
-            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker, tapPicker })
+            effectPicker = new OptionButton { TooltipText = "What a Control spell does to whoever it lands on. It lasts by Tier, and is rechecked free at the end of each of your turns." };
+            effectPicker.AddItem("Fear: gives ground a band a turn");
+            effectPicker.AddItem("Confusion: attacks whoever is in reach");
+            effectPicker.AddItem("Compulsion: drops its weapon and kneels");
+
+            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker, tapPicker, effectPicker })
             {
                 castOptions.AddChild(option);
             }
