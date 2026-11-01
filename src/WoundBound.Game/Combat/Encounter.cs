@@ -45,7 +45,9 @@ namespace WoundBound.Game.Combat
         bool AttackerWounded,
         bool UsedOpportunity,
         bool AsReaction,
-        bool Dodged);
+        bool Dodged,
+        int Boost = 0,
+        string? BoostedBy = null);
 
     /// <summary>
     /// Something the defender can still answer for 1 Stamina, now they've seen it coming:
@@ -73,12 +75,14 @@ namespace WoundBound.Game.Combat
         int Threshold,
         string Prompt,
         int ImpactWounds = 0,
-        IReadOnlyList<LeaverResponse>? Options = null)
+        IReadOnlyList<LeaverResponse>? Options = null,
+        int Bonus = ThresholdModifierCalculator.ReactionBonus)
     {
-        public int RaisedThreshold => Threshold + ThresholdModifierCalculator.ReactionBonus;
+        /// <summary>The Threshold the spend would make it: +2, or for a shield raised, what that shield adds.</summary>
+        public int RaisedThreshold => Threshold + Bonus;
 
-        /// <summary>Only a Dodge Threshold boost can Riposte (Core Rules §9, "Criticals").</summary>
-        public bool WouldRiposte => Kind == ReactionKind.PanicDodge && Roll?.IsCritical == true;
+        /// <summary>Only a Dodge Threshold boost can Riposte (Core Rules §9, "Criticals") — a panic dodge, or a shield raised in time.</summary>
+        public bool WouldRiposte => Kind is ReactionKind.PanicDodge or ReactionKind.RaiseShield && Roll?.IsCritical == true;
     }
 
     /// <summary>
@@ -194,7 +198,8 @@ namespace WoundBound.Game.Combat
 
         public IEnumerable<Combatant> Fighting(Side side) => combatants.Where(c => c.Side == side && !c.IsOutOfFight);
 
-        public Combatant? At(GridPosition square) => combatants.FirstOrDefault(c => c.Position == square && !c.IsOutOfFight);
+        /// <summary>Whoever takes up <paramref name="square"/>: anybody still fighting, a character lying dying or stable there, or a foe who gave up.</summary>
+        public Combatant? At(GridPosition square) => combatants.FirstOrDefault(c => c.Position == square && c.OccupiesSquare);
 
         public bool IsOnBoard(GridPosition square) =>
             square.X >= 0 && square.Y >= 0 && square.X < Width && square.Y < Height;
@@ -325,6 +330,134 @@ namespace WoundBound.Game.Combat
             };
         }
 
+        /// <summary>
+        /// Why <paramref name="actor"/> can't Help or Harry <paramref name="target"/> now, or null if
+        /// they can (Core Rules §9, "Actions in Combat"): the action, and the target <b>adjacent</b> —
+        /// an ally to Help, an enemy to Harry, either still in the fight.
+        /// </summary>
+        public static string? AidRefusal(Combatant actor, CombatAction action, Combatant target)
+        {
+            if (action is not (CombatAction.Help or CombatAction.Harry))
+            {
+                return $"{action} isn't Help or Harry.";
+            }
+
+            if (actor.IsOutOfFight)
+            {
+                return $"{actor.Name} is in no state to.";
+            }
+
+            if (action == CombatAction.Help ? target.Side != actor.Side || target == actor : target.Side == actor.Side)
+            {
+                return action == CombatAction.Help ? "Help is for an ally." : "Harry is for an enemy.";
+            }
+
+            if (target.IsOutOfFight)
+            {
+                return $"{target.Name} isn't in the fight.";
+            }
+
+            if (actor.Position.DistanceTo(target.Position) > 1)
+            {
+                return $"{target.Name} has to be adjacent.";
+            }
+
+            return actor.ActionsRemaining < 1 ? "No action left to do it with." : null;
+        }
+
+        /// <summary>
+        /// Why <paramref name="actor"/> can't Heal, Meditate or Pray over <paramref name="target"/>
+        /// now, or null if they can (Core Rules §4, "Recovery"): the action, the target themselves
+        /// or an ally beside them — dying ones included — and a track carrying a fresh wound that
+        /// action hasn't yet tended.
+        /// </summary>
+        public static string? TendRefusal(Combatant actor, CombatAction action, Combatant target)
+        {
+            if (CombatActionCatalog.For(action).Restores is not { } track)
+            {
+                return $"{action} doesn't tend a wound.";
+            }
+
+            if (actor.IsOutOfFight)
+            {
+                return $"{actor.Name} is in no state to.";
+            }
+
+            if (target.Side != actor.Side || target.HasFled || target.BodyStatus == BodyStatus.Dead || (target.IsOutOfFight && !target.IsDefenceless && target != actor))
+            {
+                return $"{target.Name} is beyond help.";
+            }
+
+            if (target != actor && actor.Position.DistanceTo(target.Position) > 1)
+            {
+                return $"{target.Name} has to be beside them.";
+            }
+
+            if (!target.CanBeTended(track))
+            {
+                return target.Track(track) is var (current, max) && current >= max
+                    ? $"{target.Name} carries no {track} wound."
+                    : $"{action} has already tended {target.Name}'s {track} — only a fresh wound makes it worth doing again.";
+            }
+
+            return actor.ActionsRemaining < 1 ? "No action left to do it with." : null;
+        }
+
+        /// <summary>
+        /// Why <paramref name="bearer"/> can't raise their shield now — over themselves, or over
+        /// <paramref name="ally"/> — or null if they can (Core Rules §9, "Shields"). It takes the
+        /// action. Only a Medium or Heavy shield covers somebody else, an ally within the bearer's
+        /// Reach; a braced Heavy one covers the bearer and that ally both.
+        /// </summary>
+        public static string? ShieldRefusal(Combatant bearer, Combatant? ally = null)
+        {
+            if (bearer.IsOutOfFight)
+            {
+                return $"{bearer.Name} is in no state to.";
+            }
+
+            if (bearer.InHandShield is not { } shield)
+            {
+                return "No shield in hand.";
+            }
+
+            if (ally is not null)
+            {
+                if (ally == bearer)
+                {
+                    return null;
+                }
+
+                if (ally.Side != bearer.Side || ally.IsOutOfFight && !ally.IsDefenceless)
+                {
+                    return $"{ally.Name} isn't an ally to cover.";
+                }
+
+                if (!InventoryCalculator.CanCoverAnAlly(shield.Weight))
+                {
+                    return $"A {shield.Weight} shield covers nobody but its bearer.";
+                }
+
+                if (bearer.Position.DistanceTo(ally.Position) > bearer.Reach)
+                {
+                    return $"{ally.Name} is beyond {bearer.Name}'s Reach.";
+                }
+            }
+
+            return bearer.ActionsRemaining < 1 ? "No action left to raise it with." : null;
+        }
+
+        /// <summary>
+        /// What dragging the creature <paramref name="holder"/> holds to <paramref name="square"/>
+        /// would cost — the move's own price and one more (Core Rules §9, "Drag") — or null if it
+        /// can't be done.
+        /// </summary>
+        public int? DragCostTo(Combatant holder, GridPosition square) =>
+            holder.Holding is not null && CanMoveItself(holder) && PriceOfMove(holder, square) is { } cost
+            && cost + 1 <= MovesAvailable(holder)
+                ? cost + 1
+                : null;
+
         /// <summary>Why <paramref name="combatant"/> can't stand up from Prone now, or null if they can. Standing costs a move (Core Rules §9, "Prone").</summary>
         public static string? StandUpRefusal(Combatant combatant)
         {
@@ -354,7 +487,7 @@ namespace WoundBound.Game.Combat
 
         public bool CanAttack(Combatant attacker, Combatant target) =>
             attacker.Side != target.Side
-            && !target.IsOutOfFight
+            && (!target.IsOutOfFight || target.IsDefenceless)
             && attacker.ActionsRemaining > 0
             && PlanAttack(attacker, target).CanAttack;
 
@@ -582,6 +715,59 @@ namespace WoundBound.Game.Combat
             return true;
         }
 
+        /// <summary>Helps an adjacent ally or Harries an adjacent enemy, with the action (Core Rules §9).</summary>
+        public bool TryAid(CombatAction action, Combatant target)
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } actor || AidRefusal(actor, action, target) is not null)
+            {
+                return false;
+            }
+
+            Aid(actor, action, target);
+            return true;
+        }
+
+        /// <summary>Heals, Meditates or Prays over the target — themselves or an ally beside them — with the action (Core Rules §4).</summary>
+        public bool TryTend(CombatAction action, Combatant target)
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } actor || TendRefusal(actor, action, target) is not null)
+            {
+                return false;
+            }
+
+            Tend(actor, action, target);
+            CheckForEnd();
+            return true;
+        }
+
+        /// <summary>
+        /// Raises the active character's shield with the action: over themselves, or over
+        /// <paramref name="ally"/> — and, braced, over both (Core Rules §9, "Shields").
+        /// </summary>
+        public bool TryRaiseShield(Combatant? ally = null)
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } bearer || ShieldRefusal(bearer, ally) is not null)
+            {
+                return false;
+            }
+
+            bearer.ActionsRemaining--;
+            RaiseShield(bearer, ally ?? bearer, reactive: false);
+            return true;
+        }
+
+        /// <summary>Moves to <paramref name="square"/> hauling the creature the active character holds (Core Rules §9, "Drag").</summary>
+        public bool TryDrag(GridPosition square)
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } holder || DragCostTo(holder, square) is not { } cost)
+            {
+                return false;
+            }
+
+            Drag(holder, square, cost, () => CheckForEnd());
+            return true;
+        }
+
         /// <summary>Stands up from Prone, for a move. Like a swap it isn't movement: nobody's reach is left (Core Rules §9, "Prone").</summary>
         public bool TryStandUp()
         {
@@ -761,7 +947,16 @@ namespace WoundBound.Game.Combat
             if (partyStillToAct.FirstOrDefault(c => c.IsOutOfFight) is { } passedOver)
             {
                 partyStillToAct.Remove(passedOver);
-                Write($"{passedOver.Name} has no turn to take.");
+                StartTurnFor(passedOver);
+                if (passedOver.BodyStatus == BodyStatus.Dying && !passedOver.HasFled)
+                {
+                    RollToStabilise(passedOver);
+                }
+                else
+                {
+                    Write($"{passedOver.Name} has no turn to take.");
+                }
+
                 AfterPartyTurn();
                 return;
             }
@@ -941,6 +1136,28 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void StartTurnFor(Combatant combatant)
         {
+            // Help and Harry lapse at the start of the giver's next turn, unused; a raised shield
+            // comes down at the start of its bearer's (Core Rules §9).
+            foreach (var other in combatants)
+            {
+                if (other.HelpedBy.Remove(combatant))
+                {
+                    Write($"{combatant.Name}'s Help for {other.Name} lapses unused.");
+                }
+
+                if (other.HarriedBy.Remove(combatant))
+                {
+                    Write($"{combatant.Name}'s Harrying of {other.Name} lapses unused.");
+                }
+
+                if (other.CoveredBy.RemoveAll(c => c.Bearer == combatant) > 0)
+                {
+                    Write(other == combatant
+                        ? $"{combatant.Name} lowers their shield."
+                        : $"{combatant.Name} lowers their shield from over {other.Name}.");
+                }
+            }
+
             var wasStanding = combatant.StandingGround.ToList();
             combatant.ThresholdModifiers = ThresholdModifierCalculator.AtTurnStart(combatant.ThresholdModifiers);
             combatant.HasMovedThisTurn = false;
@@ -1024,6 +1241,38 @@ namespace WoundBound.Game.Combat
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !control.WithAdvantage;
                     ResolveControl(actor, control.Action, control.Target, control.WithAdvantage, () => TakeStep(turn, done));
+                    return;
+
+                case GmStep.Aid aid:
+                    if (AidRefusal(actor, aid.Action, aid.Target) is { } cannotAid)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} {aid.Action} {aid.Target.Name}: {cannotAid}");
+                    }
+
+                    turn.HasAttacked = true;
+                    Aid(actor, aid.Action, aid.Target);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Tend tend:
+                    if (TendRefusal(actor, tend.Action, tend.Target) is { } cannotTend)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} {tend.Action} {tend.Target.Name}: {cannotTend}");
+                    }
+
+                    turn.HasAttacked = true;
+                    Tend(actor, tend.Action, tend.Target);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Drag drag:
+                    if (DragCostTo(actor, drag.Square) is not { } dragCost)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} drag to {drag.Square}, which it can't.");
+                    }
+
+                    turn.HasMoved = true;
+                    Drag(actor, drag.Square, dragCost, () => TakeStep(turn, done));
                     return;
 
                 case GmStep.StandUp:
@@ -1260,7 +1509,8 @@ namespace WoundBound.Game.Combat
         {
             var dt = target.DodgeThreshold;
             var st = target.StabilityThreshold;
-            var roll = RollAgainst(actor.UnarmedAttackModifier, Math.Max(dt, st), advantage: false, AttacksAtDisadvantage(actor));
+            var (helped, harried) = TakeAid(actor);
+            var roll = RollAgainst(actor.UnarmedAttackModifier, Math.Max(dt, st), helped, AttacksAtDisadvantage(actor) || harried);
             var verb = Verb(action);
 
             void Finish(bool dodged, bool stoodFirm)
@@ -1363,31 +1613,295 @@ namespace WoundBound.Game.Combat
 
             // Standing your ground costs the blow: Disadvantage on every attack roll while it lasts,
             // reaction attacks included (Core Rules §10) — as does being Off-guard (§9,
-            // "Conditions"). An Advantage cancels it.
-            var disadvantage = AttacksAtDisadvantage(attacker);
-            var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(opportunityBonus, disadvantage))
+            // "Conditions"), or being Harried. Help, a spent Opportunity or a defenceless target
+            // give Advantage (§4, "Dying"). The two cancel.
+            var (helped, harried) = TakeAid(attacker);
+            if (target.IsDefenceless)
+            {
+                Write($"{target.Name} is defenceless, lying {target.BodyStatus.ToString().ToLowerInvariant()}: Advantage.");
+            }
+
+            var advantage = opportunityBonus || helped || target.IsDefenceless;
+            var disadvantage = AttacksAtDisadvantage(attacker) || harried;
+            var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
                 .ToList();
-            var roll = RollCalculator.Resolve(rolled, attacker.Attack.AttackModifier, plan.DodgeThreshold, opportunityBonus, disadvantage);
+            var roll = RollCalculator.Resolve(rolled, attacker.Attack.AttackModifier, plan.DodgeThreshold, advantage, disadvantage);
 
             if (!asReaction)
             {
                 attacker.ActionsRemaining--;
             }
 
-            if (!BoostWouldTurn(roll, plan.DodgeThreshold))
+            // A shield in hand, not yet raised over its bearer, is the better reaction: its whole
+            // bonus against this blow, and up until the bearer's next turn (Core Rules §9, "Shields").
+            var shieldGain = target.InHandShield is { } shield && target.CoveredBy.All(c => c.Bearer != target)
+                ? Math.Max(0, InventoryCalculator.ShieldDodgeThresholdBonus(shield.Weight) - target.ShieldBonus)
+                : 0;
+            var riposte = roll.IsCritical ? " — a critical, so turning it would Riposte it" : string.Empty;
+
+            if (shieldGain > 0 && BoostWouldTurn(roll, plan.DodgeThreshold, shieldGain))
             {
-                then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged: false));
+                OfferReaction(
+                    new PendingReaction(ReactionKind.RaiseShield, target, attacker, roll, plan.DodgeThreshold,
+                        $"{attacker.Name}'s {attacker.Attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
+                        $"Raising the shield now (1 Stamina, +{shieldGain}, and it stays up) would make it miss.",
+                        Bonus: shieldGain),
+                    raised =>
+                    {
+                        if (raised)
+                        {
+                            RaiseShield(target, target, reactive: true);
+                        }
+
+                        then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, raised ? shieldGain : 0, raised ? "shield raised" : null));
+                    });
                 return;
             }
 
-            var riposte = roll.IsCritical ? " — a critical, so a dodge would Riposte it" : string.Empty;
+            if (!BoostWouldTurn(roll, plan.DodgeThreshold))
+            {
+                then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, boost: 0, boostedBy: null));
+                return;
+            }
+
             OfferReaction(
                 new PendingReaction(ReactionKind.PanicDodge, target, attacker, roll, plan.DodgeThreshold,
                     $"{attacker.Name}'s {attacker.Attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
                     "A panic dodge (1 Stamina, +2) would make it miss."),
-                dodged => then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged)));
+                dodged => then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
+                    dodged ? ThresholdModifierCalculator.ReactionBonus : 0, dodged ? "panic dodge" : null)));
         }
+
+        /// <summary>
+        /// Uses up whatever Help and Harrying <paramref name="roller"/> carries on the roll it's
+        /// about to make — "Advantage on their next roll", "Disadvantage on their next roll"
+        /// (Core Rules §9) — and says so in the log.
+        /// </summary>
+        private (bool Helped, bool Harried) TakeAid(Combatant roller)
+        {
+            var helped = roller.HelpedBy.Count > 0;
+            var harried = roller.HarriedBy.Count > 0;
+            if (helped)
+            {
+                Write($"{roller.Name} rolls with {string.Join(" and ", roller.HelpedBy.Select(h => h.Name))}'s Help: Advantage.");
+            }
+
+            if (harried)
+            {
+                Write($"{roller.Name} rolls Harried by {string.Join(" and ", roller.HarriedBy.Select(h => h.Name))}: Disadvantage.");
+            }
+
+            roller.HelpedBy.Clear();
+            roller.HarriedBy.Clear();
+            return (helped, harried);
+        }
+
+        private void Aid(Combatant actor, CombatAction action, Combatant target)
+        {
+            actor.ActionsRemaining--;
+            (action == CombatAction.Help ? target.HelpedBy : target.HarriedBy).Add(actor);
+            Write($"{actor.Name} {CombatActionCatalog.ActionLogLine(action, extra: false, target.Name).TrimEnd('.')}.");
+        }
+
+        /// <summary>
+        /// +1 to the tended track, and that action is spent on it until a fresh wound (Core Rules §4,
+        /// "Recovery"). A dying character healed back above 0 is back in the fight.
+        /// </summary>
+        private void Tend(Combatant actor, CombatAction action, Combatant target)
+        {
+            actor.ActionsRemaining--;
+            var track = CombatActionCatalog.For(action).Restores!.Value;
+            var wasDown = target.BodyStatus != BodyStatus.Healthy;
+            switch (track)
+            {
+                case WoundType.Body:
+                    target.Body = PlayStateCalculator.ApplyHeal(target.Body, 1, target.BodyMax);
+                    if (target.Body > 0)
+                    {
+                        target.IsStable = false;
+                    }
+
+                    break;
+                case WoundType.Mind:
+                    target.Mind = PlayStateCalculator.ApplyHeal(target.Mind, 1, target.MindMax);
+                    break;
+                default:
+                    target.Soul = PlayStateCalculator.ApplyHeal(target.Soul, 1, target.SoulMax);
+                    break;
+            }
+
+            target.TendEligible[track] = false;
+            var (now, max) = target.Track(track);
+            var who = target == actor ? "themselves" : target.Name;
+            Write($"{actor.Name} takes the {action} action on {who}: {track} {now}/{max}." +
+                  (wasDown && target.BodyStatus == BodyStatus.Healthy ? $" {target.Name} is back in the fight!" : string.Empty));
+        }
+
+        /// <summary>
+        /// Raises <paramref name="bearer"/>'s shield over <paramref name="over"/>: its bonus to Dodge
+        /// Threshold until the start of the bearer's next turn. A braced Heavy shield raised over an
+        /// ally covers the bearer too. Paid for already — the action, or the reaction's Stamina.
+        /// </summary>
+        private void RaiseShield(Combatant bearer, Combatant over, bool reactive)
+        {
+            var weight = bearer.InHandShield!.Weight;
+            var covered = over == bearer || !bearer.IsShieldBraced ? new[] { over } : new[] { over, bearer };
+            foreach (var who in covered)
+            {
+                who.CoveredBy.RemoveAll(c => c.Bearer == bearer);
+                who.CoveredBy.Add((bearer, weight));
+            }
+
+            if (!reactive)
+            {
+                Write(over == bearer
+                    ? $"{bearer.Name} raises their {weight} shield: +{InventoryCalculator.ShieldDodgeThresholdBonus(weight)} DT until their next turn (DT {bearer.DodgeThreshold})."
+                    : $"{bearer.Name} raises their {weight} shield over {over.Name}" + (covered.Length > 1 ? ", braced, and over themselves" : string.Empty) +
+                      $": DT {over.DodgeThreshold} until {bearer.Name}'s next turn.");
+            }
+        }
+
+        /// <summary>Ends any shield cover whose ally has left the bearer's Reach, or whose bearer is out of the fight.</summary>
+        private void CheckCover()
+        {
+            foreach (var covered in combatants.Where(c => c.CoveredBy.Count > 0))
+            {
+                var lapsed = covered.CoveredBy.RemoveAll(c => c.Bearer.IsOutOfFight
+                    || (c.Bearer != covered && c.Bearer.Position.DistanceTo(covered.Position) > c.Bearer.Reach));
+                if (lapsed > 0)
+                {
+                    Write($"{covered.Name} is no longer behind a shield.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// The dying character's roll at the start of their turn (Core Rules §4, "Dying"): 2d12 +
+        /// Presence, 10 or more to stabilise. Short of it, they lose another Body wound — and at −3
+        /// they're dead.
+        /// </summary>
+        private void RollToStabilise(Combatant dying)
+        {
+            const int stabiliseOn = 10;
+            var presence = dying.Build?.GetModifier(Ability.Presence) ?? 0;
+            var (helped, harried) = TakeAid(dying);
+            var roll = RollAgainst(presence, stabiliseOn, helped, harried);
+            if (roll.Success == true)
+            {
+                dying.IsStable = true;
+                Write($"{dying.Name}, dying, rolls to hold on: {DescribeRoll(roll)} against 10 — stable, on 0 but no longer dying.");
+                return;
+            }
+
+            dying.Body = PlayStateCalculator.ApplyDamage(dying.Body, 1, PlayStateCalculator.MinBodyWounds);
+            dying.TendEligible[WoundType.Body] = true;
+            Write($"{dying.Name}, dying, rolls to hold on: {DescribeRoll(roll)} against 10 — worse: Body {dying.Body}" +
+                  (dying.BodyStatus == BodyStatus.Dead ? $". {dying.Name} is dead." : $". At {PlayStateCalculator.MinBodyWounds} they die."));
+        }
+
+        /// <summary>
+        /// A move hauling the held creature along (Core Rules §9, "Drag"): a roll against its
+        /// Stability Threshold first — which it may stand firm against — once per move. On a
+        /// success it comes too, ending in a square within the holder's own reach, and the move
+        /// costs one more than it would; on a failure the move is spent and nobody goes anywhere.
+        /// Drag isn't Forced Movement, so it can't be arrested; but leaving the reach of the
+        /// holder's allies on the way gives each of them a reaction.
+        /// </summary>
+        private void Drag(Combatant holder, GridPosition square, int cost, Action then)
+        {
+            var held = holder.Holding!;
+            var paidWith = PayMoves(holder, cost);
+            holder.HasMovedThisTurn = true;
+
+            var (helped, harried) = TakeAid(holder);
+            var threshold = held.StabilityThreshold;
+            var roll = RollAgainst(holder.UnarmedAttackModifier, threshold, helped, AttacksAtDisadvantage(holder) || harried);
+
+            void Finish(bool stoodFirm)
+            {
+                var final = stoodFirm ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                var line = $"{holder.Name} tries to drag {held.Name}: {DescribeRoll(final)} vs ST {final.Threshold}" +
+                           (stoodFirm ? " (+2 standing firm)" : string.Empty);
+
+                if (final.Success != true)
+                {
+                    var overbalanced = final.IsCritical && roll.Success != true;
+                    Write(line + (overbalanced
+                        ? $" — critical failure! {holder.Name} goes down, Prone, and the move ({paidWith}) is spent."
+                        : $" — {held.Name} digs in. The move ({paidWith}) is spent, and nobody goes anywhere."));
+                    if (overbalanced)
+                    {
+                        holder.SetCondition(CharacterCondition.Prone, true);
+                    }
+
+                    then();
+                    return;
+                }
+
+                Write(line + (final.IsCritical ? $" — critical! {held.Name} is hauled off their feet." : $" — {held.Name} comes along."));
+                var heldFrom = held.Position;
+
+                // The holder's own leaving draws reactions first — from everyone but the creature it
+                // hauls, which comes along — and whoever's reach the held creature is hauled out of,
+                // the holder's allies, may then react to it.
+                var holderReactors = new Queue<Combatant>(LeavingReachOf(holder, square).Where(e => e != held));
+                ReactToLeaving(holder, PathBetween(holder.Position, square), holderReactors, caughtAt =>
+                {
+                    var arrivedAt = caughtAt ?? square;
+                    if (holder.IsOutOfFight)
+                    {
+                        then();
+                        return;
+                    }
+
+                    var from = holder.Position;
+                    holder.Position = arrivedAt;
+                    Write($"{holder.Name} moves {from.DistanceTo(arrivedAt)} square(s), hauling {held.Name}, for {paidWith}.");
+
+                    var landing = SquaresAround(arrivedAt, holder.OwnReach)
+                        .Where(sq => IsOnBoard(sq) && (sq == heldFrom || At(sq) is null))
+                        .OrderBy(sq => sq.DistanceTo(heldFrom))
+                        .ThenBy(sq => (sq.X - heldFrom.X) * (sq.X - heldFrom.X) + (sq.Y - heldFrom.Y) * (sq.Y - heldFrom.Y))
+                        .Select(sq => (GridPosition?)sq)
+                        .FirstOrDefault() ?? heldFrom;
+
+                    var reactors = new Queue<Combatant>(Fighting(holder.Side)
+                        .Where(a => a != holder && a.CanReach(heldFrom) && !a.CanReach(landing)));
+
+                    ReactToLeaving(held, PathBetween(heldFrom, landing), reactors, caughtAt =>
+                    {
+                        if (!held.IsOutOfFight)
+                        {
+                            held.Position = caughtAt ?? landing;
+                            if (final.IsCritical)
+                            {
+                                held.SetCondition(CharacterCondition.Prone, true);
+                            }
+                        }
+
+                        CheckHolds();
+                        then();
+                    });
+                });
+            }
+
+            if (!BoostWouldTurn(roll, threshold))
+            {
+                Finish(false);
+                return;
+            }
+
+            OfferReaction(
+                new PendingReaction(ReactionKind.StandFirm, held, holder, roll, threshold,
+                    $"{holder.Name} tries to drag {held.Name}: {roll.Total} against ST {threshold}. Standing firm (1 Stamina, +2 ST) would keep them put."),
+                Finish);
+        }
+
+        private static IEnumerable<GridPosition> SquaresAround(GridPosition centre, int reach) =>
+            Enumerable.Range(-reach, reach * 2 + 1)
+                .SelectMany(dx => Enumerable.Range(-reach, reach * 2 + 1).Select(dy => new GridPosition(centre.X + dx, centre.Y + dy)))
+                .Where(sq => sq != centre);
 
         /// <summary>Standing their ground or Off-guard: either puts Disadvantage on an attacker's roll (Core Rules §9, §10).</summary>
         private static bool AttacksAtDisadvantage(Combatant attacker) => attacker.IsStandingGround || attacker.IsOffGuard;
@@ -1396,10 +1910,10 @@ namespace WoundBound.Game.Combat
         /// Whether +2 to the Threshold, decided after seeing the roll, would turn this success into
         /// a failure. Nothing answers a double twelve — "there is no Threshold to reach" (Core Rules §10).
         /// </summary>
-        private static bool BoostWouldTurn(RollResult roll, int threshold) =>
+        private static bool BoostWouldTurn(RollResult roll, int threshold, int bonus = ThresholdModifierCalculator.ReactionBonus) =>
             roll.Success == true
             && !roll.IsAbsoluteSuccess
-            && roll.Total < threshold + ThresholdModifierCalculator.ReactionBonus;
+            && roll.Total < threshold + bonus;
 
         /// <summary>
         /// Offers <paramref name="offer"/>'s defender their 1-Stamina answer, if they can pay for it,
@@ -1420,7 +1934,7 @@ namespace WoundBound.Game.Combat
             {
                 var takes = offer.Kind switch
                 {
-                    ReactionKind.PanicDodge => gm.PanicDodges(view, offer),
+                    ReactionKind.PanicDodge or ReactionKind.RaiseShield => gm.PanicDodges(view, offer),
                     ReactionKind.StandFirm => gm.StandsFirm(view, offer),
                     _ => gm.ArrestsShove(view, offer),
                 };
@@ -1461,7 +1975,8 @@ namespace WoundBound.Game.Combat
             }
 
             var threshold = target.StabilityThreshold;
-            var roll = RollAgainst(actor.UnarmedAttackModifier, threshold, opportunityBonus, AttacksAtDisadvantage(actor));
+            var (helped, harried) = TakeAid(actor);
+            var roll = RollAgainst(actor.UnarmedAttackModifier, threshold, opportunityBonus || helped, AttacksAtDisadvantage(actor) || harried);
             actor.ActionsRemaining--;
 
             var verb = Verb(action);
@@ -1633,7 +2148,8 @@ namespace WoundBound.Game.Combat
         {
             var holder = breaker.HeldBy!;
             var threshold = holder.StabilityThreshold;
-            var roll = RollAgainst(breaker.UnarmedAttackModifier, threshold, advantage: false, AttacksAtDisadvantage(breaker));
+            var (helped, harried) = TakeAid(breaker);
+            var roll = RollAgainst(breaker.UnarmedAttackModifier, threshold, helped, AttacksAtDisadvantage(breaker) || harried);
             breaker.ActionsRemaining--;
 
             void Finish(bool stoodFirm)
@@ -1755,12 +2271,16 @@ namespace WoundBound.Game.Combat
             return $"({string.Join("+", roll.CountedDice)}){sign}{Math.Abs(roll.Modifier)} = {roll.Total}{extra}";
         }
 
+        /// <param name="boost">What a panic dodge or a shield raised in time added to DT after the roll; 0 for neither.</param>
+        /// <param name="boostedBy">Which of the two it was, for the log.</param>
         private AttackOutcome FinishAttack(
-            Combatant attacker, Combatant target, RollResult rolled, AttackPlan plan, bool usedOpportunity, bool asReaction, bool dodged)
+            Combatant attacker, Combatant target, RollResult rolled, AttackPlan plan, bool usedOpportunity, bool asReaction,
+            int boost, string? boostedBy)
         {
             // Re-read the same dice against the raised Threshold. A dodged critical comes back a
             // critical failure, which is exactly what a Riposte is (Core Rules §10).
-            var roll = dodged ? Reread(rolled, plan.DodgeThreshold + ThresholdModifierCalculator.ReactionBonus) : rolled;
+            var dodged = boost > 0;
+            var roll = dodged ? Reread(rolled, plan.DodgeThreshold + boost) : rolled;
 
             int rolledDamage = 0, absorbed = 0, dealt = 0;
             var attackerWounded = false;
@@ -1782,7 +2302,7 @@ namespace WoundBound.Game.Combat
             }
 
             var outcome = new AttackOutcome(attacker, target, roll, plan, rolledDamage, absorbed, dealt, attackerWounded,
-                usedOpportunity, asReaction, dodged);
+                usedOpportunity, asReaction, dodged, boost, boostedBy);
             Write(Describe(outcome));
             return outcome;
         }
@@ -1815,6 +2335,9 @@ namespace WoundBound.Game.Combat
             {
                 return;
             }
+
+            // A fresh wound is what makes Heal worth doing again (Core Rules §4, "Recovery").
+            combatant.TendEligible[WoundType.Body] = true;
 
             if (combatant.Side == Side.Party)
             {
@@ -1885,8 +2408,9 @@ namespace WoundBound.Game.Combat
                 return true;
             }
 
-            // Whoever just went down lets go, or is let go of.
+            // Whoever just went down lets go, or is let go of; a shield's cover ends out of Reach.
             CheckHolds();
+            CheckCover();
             CheckMorale();
 
             if (!Fighting(Side.Party).Any())
@@ -1965,7 +2489,7 @@ namespace WoundBound.Game.Combat
                 : string.Empty;
             var sign = roll.Modifier >= 0 ? "+" : "−";
             var range = outcome.Plan.RangeDodgeModifier > 0 ? $" (+{outcome.Plan.RangeDodgeModifier} for range)" : string.Empty;
-            var dodge = outcome.Dodged ? $" (+{ThresholdModifierCalculator.ReactionBonus} panic dodge)" : string.Empty;
+            var dodge = outcome.Dodged ? $" (+{outcome.Boost} {outcome.BoostedBy})" : string.Empty;
             var verb = outcome.AsReaction ? "strikes at" : "attacks";
             var line = $"{outcome.Attacker.Name} {verb} {outcome.Target.Name} with {outcome.Attacker.Attack.Name}: " +
                        $"({dice}){sign}{Math.Abs(roll.Modifier)} = {roll.Total} vs DT {roll.Threshold}{range}{dodge}{advantage}";

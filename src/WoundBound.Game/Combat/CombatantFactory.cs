@@ -36,6 +36,10 @@ namespace WoundBound.Game.Combat
                 BodyMax = stats.BodyWoundPool,
                 Body = build.Play.CurrentBodyWounds ?? stats.BodyWoundPool,
                 IsStable = build.Play.IsStable,
+                MindMax = stats.MindWoundPool,
+                Mind = build.Play.CurrentMindWounds ?? stats.MindWoundPool,
+                SoulMax = stats.SoulWoundPool,
+                Soul = build.Play.CurrentSoulWounds ?? stats.SoulWoundPool,
                 BaseDodgeThreshold = stats.DodgeThreshold,
                 BaseStabilityThreshold = stats.StabilityThreshold,
                 BaseResolveThreshold = stats.ResolveThreshold,
@@ -55,6 +59,10 @@ namespace WoundBound.Game.Combat
             Position = position,
             BodyMax = info.BodyMax,
             Body = info.BodyMax,
+            MindMax = info.MindMax ?? 0,
+            Mind = info.MindMax ?? 0,
+            SoulMax = info.SoulMax ?? 0,
+            Soul = info.SoulMax ?? 0,
             BaseDodgeThreshold = info.DodgeThreshold,
             BaseStabilityThreshold = info.StabilityThreshold,
             BaseResolveThreshold = info.ResolveThreshold,
@@ -74,6 +82,14 @@ namespace WoundBound.Game.Combat
             StaminaMax = info.Stamina,
             Stamina = info.Stamina,
             TacticalSpendsPerRound = CharacterCalculator.TacticalSpendsPerRound(info.Tier),
+        };
+
+        /// <summary>A shield in the loadout in hand (Core Rules §15, "Equipped Items").</summary>
+        public static ShieldDefinition ShieldInHand(string name, ShieldWeight weight) => new()
+        {
+            Name = name,
+            Weight = weight,
+            IsEquipped = true,
         };
 
         /// <summary>A catalogue weapon in the loadout in hand (Core Rules §15, "Equipped Items").</summary>

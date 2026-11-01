@@ -22,6 +22,15 @@ namespace WoundBound.Game.Combat.Brains
 
         public int StandUps { get; internal set; }
 
+        /// <summary>Helps and Harries.</summary>
+        public int Aids { get; internal set; }
+
+        /// <summary>Heal, Meditate and Pray.</summary>
+        public int Tends { get; internal set; }
+
+        /// <summary>Shields raised with the action.</summary>
+        public int ShieldsRaised { get; internal set; }
+
         /// <summary>Stood firm or arrested a shove.</summary>
         public int OtherReactions { get; internal set; }
 
@@ -83,12 +92,12 @@ namespace WoundBound.Game.Combat.Brains
                 case EncounterPhase.AwaitingReaction when encounter.Pending is { } pending:
                     var spend = pending.Kind switch
                     {
-                        ReactionKind.PanicDodge => party.PanicDodges(encounter.View, pending),
+                        ReactionKind.PanicDodge or ReactionKind.RaiseShield => party.PanicDodges(encounter.View, pending),
                         ReactionKind.StandFirm => party.StandsFirm(encounter.View, pending),
                         _ => party.ArrestsShove(encounter.View, pending),
                     };
 
-                    if (pending.Kind == ReactionKind.PanicDodge)
+                    if (pending.Kind is ReactionKind.PanicDodge or ReactionKind.RaiseShield)
                     {
                         Tally.DodgesOffered++;
                         Tally.DodgesTaken += spend ? 1 : 0;
@@ -139,6 +148,10 @@ namespace WoundBound.Game.Combat.Brains
                 PartyStep.StandUp => Count(encounter.TryStandUp(), () => Tally.StandUps++),
                 PartyStep.BreakFree => encounter.TryBreakFree(),
                 PartyStep.LetGo => encounter.TryLetGo(),
+                PartyStep.Aid aid => Count(encounter.TryAid(aid.Action, aid.Target), () => Tally.Aids++),
+                PartyStep.Tend tend => Count(encounter.TryTend(tend.Action, tend.Target), () => Tally.Tends++),
+                PartyStep.RaiseShield raise => Count(encounter.TryRaiseShield(raise.Ally), () => Tally.ShieldsRaised++),
+                PartyStep.Drag drag => encounter.TryDrag(drag.Square),
                 _ => EndTurn(),
             };
 
@@ -153,6 +166,10 @@ namespace WoundBound.Game.Combat.Brains
                     PartyStep.StandUp => Encounter.StandUpRefusal(character),
                     PartyStep.BreakFree => Encounter.BreakFreeRefusal(character),
                     PartyStep.LetGo => "they're holding nobody",
+                    PartyStep.Aid aid => Encounter.AidRefusal(character, aid.Action, aid.Target),
+                    PartyStep.Tend tend => Encounter.TendRefusal(character, tend.Action, tend.Target),
+                    PartyStep.RaiseShield raise => Encounter.ShieldRefusal(character, raise.Ally),
+                    PartyStep.Drag => "they can't drag there",
                     PartyStep.Attack attack => encounter.PlanAttack(character, attack.Target).Refusal ?? "no action left",
                     _ => null,
                 });

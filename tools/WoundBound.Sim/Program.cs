@@ -1,10 +1,11 @@
 // Bot v bot: plays a sample fight many times over with each way of playing the party, the GM's
 // brain held fixed, and prints how each one fared.
 //
-//   dotnet run --project tools/WoundBound.Sim -- [--fight signpost|party|solo] [--gm simple|tripping] [--fights 1000] [--seed 1]
+//   dotnet run --project tools/WoundBound.Sim -- [--fight signpost|signpost4|party|solo] [--gm simple|tripping] [--fights 1000] [--seed 1]
 //
 //   signpost (the default): the Dumb Fighter, Salla Rinehart and Drovan Thale v the Quickstart's
 //     signpost bandits, who break and run; the lantern-bearer mustn't get away.
+//   signpost4: the book's table of four — Joren Blacke joins, and so does a second Roadside Bandit.
 //   party: the same three v a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin.
 //   solo: the Dumb Fighter v three Bramble Ratkin.
 //
@@ -27,6 +28,7 @@ Encounter Stage(IDiceRoller dice) => which switch
 {
     "solo" => SampleEncounters.FighterVersusRatkin(data, dice, Gm()),
     "party" => SampleEncounters.PartyVersusAmbush(data, dice, Gm()),
+    "signpost4" => SampleEncounters.SignpostAmbush(data, dice, Gm(), fourPlayers: true),
     _ => SampleEncounters.SignpostAmbush(data, dice, Gm()),
 };
 
@@ -35,6 +37,7 @@ var fight = which switch
 {
     "solo" => "The Dumb Fighter v three Bramble Ratkin",
     "party" => "The Dumb Fighter, Salla and Drovan v a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin",
+    "signpost4" => "The Dumb Fighter, Salla, Drovan and Joren v four signpost bandits (objective: take the lantern-bearer)",
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 

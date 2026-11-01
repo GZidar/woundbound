@@ -46,6 +46,9 @@ Pick one on the battle screen:
   bandit can be made to talk. The ambushers' crossbows wait for statblock ranged attacks, so they use
   the knives their statblock gives them for close work; the night, the lights and the opening volley
   aren't in yet.
+- **Signpost ambush, four players:** the book's table of four — Joren Blacke (Martial Templar,
+  battle axe and buckler, chainmail) joins the party, and a second Roadside Bandit waits round the
+  corner ("two of each").
 - **Roadside ambush:** a party of three — the Dumb Fighter of Core Rules §12, and Salla Rinehart
   (Nimble Duelist, rapier) and Drovan Thale (Nimble Ranger, short bow, knife at the ready) from the
   Quickstart Adventure — against a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin: a Threat
@@ -100,6 +103,22 @@ What they exercise, all through `WoundBound.Rules`:
 - Objectives: what a fight is about besides dropping everybody — so far, someone who mustn't get
   away (`Objective.DontLetEscape`, `Objective.NoneEscape`). Shown on screen, logged at the end, and
   counted by the simulator.
+- Help and Harry: an adjacent ally has Advantage on their next roll, or an adjacent foe Disadvantage;
+  each lapses at the giver's next turn if unused.
+- Heal, Meditate and Pray: +1 to the track, on yourself or an ally beside you, once per fresh wound
+  to it (Core Rules §4, "Recovery"). Characters now have Mind and Soul tracks, though nothing deals
+  Mind or Soul damage yet.
+- Dying (Core Rules §4): a character on 0 Body or below lies where they fell, defenceless — attacks on
+  them have Advantage, and a hit is a flat 1 wound. At the start of their turn they roll 2d12 +
+  Presence, 10 or more to stabilise; short of it they slip a wound further, and at −3 they're dead.
+  A Heal brings them back into the fight.
+- Shields (Core Rules §9): raised with the action, or for 1 Stamina once a blow is seen to land —
+  the shield's whole bonus, up until the bearer's next turn, a Riposte against a critical, and
+  offered in place of the panic dodge. A Medium or Heavy shield can cover an ally within Reach; a
+  braced Heavy one covers the bearer and that ally both. Only the largest shield over anyone counts.
+- Drag (Core Rules §9): moving while holding somebody, rolled against their ST once per move, a move
+  dearer; a failure spends the move and goes nowhere. The holder's allies may react to the creature
+  hauled out of their reach.
 - GM Opportunities: banked from extra actions (at most 3), Immediate from reactions and Threshold
   boosts (lapsing at the spender's next turn); spent on an extra adversary turn — on a creature that
   can strike, ideally one that has already acted — or, with a full bank, on an attack's Advantage.
@@ -160,7 +179,7 @@ already strike, and otherwise whoever is nearest an enemy.
   ```
 
   The signpost ambush is the default, and the table leads with how often every objective was met;
-  `--fight party` plays the roadside ambush, `--fight solo` the Dumb Fighter against the ratkin, and
+  `--fight signpost4` the four-player signpost, `--fight party` the roadside ambush, `--fight solo` the Dumb Fighter against the ratkin, and
   `--gm tripping` swaps in the tripping GM. Party tactics now include reacting to foes leaving reach
   (strike at everyone, or only stop runners) and hunting runners down.
 

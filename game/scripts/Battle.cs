@@ -74,6 +74,31 @@ namespace WoundBoundGame
 
         /// <summary>Grab, Shove or Trip, chosen from its button; the next foe clicked is the target. Null for a plain attack.</summary>
         private ControlAction? armed;
+
+        /// <summary>Help, Harry, Heal, Meditate, Pray or Shield, chosen from its button; the next creature clicked is who it's for.</summary>
+        private CombatAction? armedAction;
+
+        /// <summary>The Drag button is down: the next empty square clicked is where to haul the held creature.</summary>
+        private bool armedDrag;
+
+        private readonly Dictionary<CombatAction, Button> aidButtons = new();
+        private Button raiseShieldButton = null!;
+        private Button dragButton = null!;
+
+        private void Disarm()
+        {
+            armed = null;
+            armedAction = null;
+            armedDrag = false;
+        }
+
+        /// <summary>Whether the armed Help, Harry, Heal, Meditate, Pray or Shield could be aimed at <paramref name="target"/>.</summary>
+        private static string? ArmedRefusal(Combatant actor, CombatAction action, Combatant target) => action switch
+        {
+            CombatAction.Help or CombatAction.Harry => Encounter.AidRefusal(actor, action, target),
+            CombatAction.Shield => Encounter.ShieldRefusal(actor, target),
+            _ => Encounter.TendRefusal(actor, action, target),
+        };
         private RichTextLabel logLabel = null!;
 
         /// <summary>How big a square is drawn: as big as fits the board area, up to <see cref="LargestCell"/>.</summary>
@@ -132,18 +157,31 @@ namespace WoundBoundGame
                 if (armed is { } action)
                 {
                     encounter.TryControl(action, occupant);
-                    armed = null;
+                }
+                else if (armedAction is { } combatAction)
+                {
+                    _ = combatAction switch
+                    {
+                        CombatAction.Help or CombatAction.Harry => encounter.TryAid(combatAction, occupant),
+                        CombatAction.Shield => encounter.TryRaiseShield(occupant),
+                        _ => encounter.TryTend(combatAction, occupant),
+                    };
                 }
                 else
                 {
                     encounter.TryAttack(occupant);
                 }
             }
+            else if (armedDrag)
+            {
+                encounter.TryDrag(clicked);
+            }
             else
             {
-                armed = null;
                 encounter.TryMove(clicked);
             }
+
+            Disarm();
 
             Refresh();
         }
@@ -196,7 +234,7 @@ namespace WoundBoundGame
                 return;
             }
 
-            if (combatant.IsOutOfFight)
+            if (combatant.IsOutOfFight && !combatant.IsDefenceless)
             {
                 // Left where it fell, so the board remembers the fight.
                 DrawString(font, new Vector2(rect.Position.X, centre.Y + 8), "✕", HorizontalAlignment.Center, CellSize, Mathf.Max(10, CellSize * 2 / 5),
@@ -204,7 +242,9 @@ namespace WoundBoundGame
                 return;
             }
 
-            DrawCircle(centre, radius, combatant.Side == Side.Party ? PartyToken : AdversaryToken);
+            // A character dying or stable lies there, faded, still to be reached.
+            var colour = combatant.Side == Side.Party ? PartyToken : AdversaryToken;
+            DrawCircle(centre, radius, combatant.IsDefenceless ? colour with { A = 0.35f } : colour);
 
             if (combatant == encounter.Active)
             {
@@ -216,7 +256,9 @@ namespace WoundBoundGame
             }
             else if (active is not null && (armed is { } action
                          ? Encounter.ControlRefusal(active, action, combatant) is null
-                         : encounter.CanAttack(active, combatant)))
+                         : armedAction is { } combatAction
+                             ? ArmedRefusal(active, combatAction, combatant) is null
+                             : encounter.CanAttack(active, combatant)))
             {
                 DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, TargetRing, 3);
             }
@@ -231,6 +273,11 @@ namespace WoundBoundGame
                 combatant.HeldBy is not null ? "held" : null,
                 combatant.Holding is not null ? "holding" : null,
                 combatant.IsBroken ? "running" : null,
+                combatant.BodyStatus == BodyStatus.Dying && combatant.Side == Side.Party ? "dying" : null,
+                combatant.BodyStatus == BodyStatus.Stable && combatant.Side == Side.Party ? "stable" : null,
+                combatant.ShieldBonus > 0 ? "shield" : null,
+                combatant.IsHelped ? "helped" : null,
+                combatant.IsHarried ? "harried" : null,
             }.Where(m => m is not null));
             if (marks.Length > 0)
             {
@@ -250,12 +297,13 @@ namespace WoundBoundGame
         {
             encounter = fightPicker.Selected switch
             {
-                1 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller()),
-                2 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller()),
+                1 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), fourPlayers: true),
+                2 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller()),
+                3 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller()),
                 _ => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller()),
             };
             shown = null;
-            armed = null;
+            Disarm();
             stepPending = false;
             bot = null;
             UpdateBot();
@@ -366,6 +414,7 @@ namespace WoundBoundGame
             {
                 ReactionKind.PanicDodge => ("Panic dodge (1 Stamina)", "Take the hit"),
                 ReactionKind.StandFirm => ("Stand firm (1 Stamina, +2 ST)", "Let it happen"),
+                ReactionKind.RaiseShield => ($"Raise shield (1 Stamina, +{pending.Bonus})", "Take the hit"),
                 _ => ("Arrest (1 Stamina)", "Let it carry them"),
             };
         }
@@ -449,8 +498,24 @@ namespace WoundBoundGame
 
             if (!isPartyTurn)
             {
-                armed = null;
+                Disarm();
             }
+
+            var acting = isPartyTurn ? encounter.Active : null;
+            foreach (var (action, button) in aidButtons)
+            {
+                var candidates = encounter.Combatants.Where(c => c.OccupiesSquare);
+                button.Disabled = acting is null || !candidates.Any(c => ArmedRefusal(acting, action, c) is null);
+                button.ButtonPressed = armedAction == action;
+            }
+
+            var shieldWhy = acting is null ? "Not your turn." : Encounter.ShieldRefusal(acting);
+            raiseShieldButton.Disabled = shieldWhy is not null;
+            raiseShieldButton.TooltipText = shieldWhy ??
+                $"Raise your {acting!.InHandShield!.Weight} shield with the action: +{InventoryCalculator.ShieldDodgeThresholdBonus(acting.InHandShield.Weight)} DT until your next turn. " +
+                "Or keep the action, and raise it for 1 Stamina once you see a blow would land.";
+            dragButton.Disabled = acting?.Holding is null;
+            dragButton.ButtonPressed = armedDrag;
 
             foreach (var (action, button) in controlButtons)
             {
@@ -494,7 +559,8 @@ namespace WoundBoundGame
             partyLabel.Visible = party.Count > 1;
             partyLabel.Text = string.Join("\n", party.Select(c =>
                 $"{(c == encounter.Active ? "▶ " : "   ")}{c.Name}: Body {c.Body}/{c.BodyMax}, Stamina {c.Stamina}/{c.StaminaMax} — " +
-                (c.IsOutOfFight ? "out of the fight"
+                (c.IsDefenceless ? (c.BodyStatus == BodyStatus.Dying ? "DYING — Heal them, or they roll to hold on" : "stable, on 0")
+                    : c.IsOutOfFight ? (c.BodyStatus == BodyStatus.Dead ? "dead" : "out of the fight")
                     : c == encounter.Active ? "acting"
                     : encounter.PartyStillToAct.Contains(c) ? "still to act"
                     : "has acted")));
@@ -681,12 +747,59 @@ namespace WoundBoundGame
                 var button = new Button { Text = action.ToString(), ToggleMode = true };
                 button.Pressed += () =>
                 {
-                    armed = armed == action ? null : action;
+                    var was = armed;
+                    Disarm();
+                    armed = was == action ? null : action;
                     Refresh();
                 };
                 buttons.AddChild(button);
                 controlButtons[action] = button;
             }
+
+            foreach (var (action, label, tip) in new[]
+            {
+                (CombatAction.Help, "Help", "An ally beside you has Advantage on their next roll. Your action; it lapses at your next turn."),
+                (CombatAction.Harry, "Harry", "A foe beside you has Disadvantage on its next roll. Your action; it lapses at your next turn."),
+                (CombatAction.Heal, "Heal", "+1 Body to yourself or an ally beside you — the dying included — once per fresh wound. Your action."),
+                (CombatAction.Meditate, "Meditate", "+1 Mind to yourself or an ally beside you, once per fresh wound. Your action."),
+                (CombatAction.Pray, "Pray", "+1 Soul to yourself or an ally beside you, once per fresh wound. Your action."),
+                (CombatAction.Shield, "Shield an ally", "Raise a Medium or Heavy shield over an ally within your Reach, with the action."),
+            })
+            {
+                var button = new Button { Text = label, ToggleMode = true, TooltipText = tip + " Then click who it's for." };
+                button.Pressed += () =>
+                {
+                    var was = armedAction;
+                    Disarm();
+                    armedAction = was == action ? null : action;
+                    Refresh();
+                };
+                buttons.AddChild(button);
+                aidButtons[action] = button;
+            }
+
+            raiseShieldButton = new Button { Text = "Raise shield" };
+            raiseShieldButton.Pressed += () =>
+            {
+                encounter.TryRaiseShield();
+                Refresh();
+            };
+            buttons.AddChild(raiseShieldButton);
+
+            dragButton = new Button
+            {
+                Text = "Drag",
+                ToggleMode = true,
+                TooltipText = "Move hauling whoever you hold: rolled against their ST, and a move dearer. Then click where.",
+            };
+            dragButton.Pressed += () =>
+            {
+                var was = armedDrag;
+                Disarm();
+                armedDrag = !was;
+                Refresh();
+            };
+            buttons.AddChild(dragButton);
 
             standUpButton = new Button { Text = "Stand up", TooltipText = "Get up from Prone, for a move. Not movement: it leaves nobody's reach." };
             standUpButton.Pressed += () =>
@@ -731,6 +844,7 @@ namespace WoundBoundGame
 
             fightPicker = new OptionButton();
             fightPicker.AddItem("Signpost ambush (Quickstart)");
+            fightPicker.AddItem("Signpost ambush, four players");
             fightPicker.AddItem("Roadside ambush (party of three)");
             fightPicker.AddItem("The Dumb Fighter v three ratkin");
             fightPicker.ItemSelected += _ => StartEncounter();

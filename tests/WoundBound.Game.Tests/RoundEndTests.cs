@@ -96,7 +96,7 @@ public class RoundEndTests
 
         Assert.Equal(EncounterPhase.ChoosingCharacter, encounter.Phase);
         Assert.True(encounter.TryBeginTurn(encounter.Combatants.Single(c => c.Name == "The Dumb Fighter")));
-        encounter.Combatants.Single(c => c.Name == "The Other Fighter").Body = 0;
+        encounter.Combatants.Single(c => c.Name == "The Other Fighter").Body = WoundBound.Rules.Calculation.PlayStateCalculator.MinBodyWounds; // dead: no Presence roll to make
         encounter.EndTurn();
         encounter.RunAdversaryTurn();
         encounter.RunAdversaryTurn();

@@ -23,6 +23,13 @@ namespace WoundBound.Game.Combat
         /// <summary>+2 Dodge Threshold against an attack that would hit — a Riposte, against a critical.</summary>
         PanicDodge,
 
+        /// <summary>
+        /// Raise the shield in hand against an attack that would hit: its whole bonus to DT, and it
+        /// stays up until the bearer's next turn — the better reaction, where there's a shield to
+        /// raise (Core Rules §9, "Shields"). A Riposte against a critical, as a dodge is.
+        /// </summary>
+        RaiseShield,
+
         /// <summary>+2 Stability Threshold against a Grab, Shove or Trip — or a break-free — that would succeed (Core Rules §10).</summary>
         StandFirm,
 

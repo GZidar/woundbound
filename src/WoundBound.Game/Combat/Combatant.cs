@@ -29,6 +29,84 @@ namespace WoundBound.Game.Combat
 
         public int Body { get; internal set; }
 
+        /// <summary>The Mind track (Core Rules §4). Nothing in the slice deals Mind damage yet.</summary>
+        public int MindMax { get; init; }
+
+        public int Mind { get; internal set; }
+
+        /// <summary>The Soul track. Nothing in the slice deals Soul damage yet.</summary>
+        public int SoulMax { get; init; }
+
+        public int Soul { get; internal set; }
+
+        /// <summary>
+        /// Whether Heal, Meditate or Pray could tend each track (Core Rules §4, "Recovery"): set by
+        /// a fresh wound of that type, cleared once the matching action has helped it. A character
+        /// never tended is eligible, so long as they carry a wound.
+        /// </summary>
+        internal Dictionary<WoundType, bool> TendEligible { get; } = new()
+        {
+            [WoundType.Body] = true,
+            [WoundType.Mind] = true,
+            [WoundType.Soul] = true,
+        };
+
+        /// <summary>Where a track stands, for the recovery actions: (current, max).</summary>
+        public (int Current, int Max) Track(WoundType type) => type switch
+        {
+            WoundType.Body => (Body, BodyMax),
+            WoundType.Mind => (Mind, MindMax),
+            _ => (Soul, SoulMax),
+        };
+
+        /// <summary>Whether Heal, Meditate or Pray would do anything for this track right now (Core Rules §4).</summary>
+        public bool CanBeTended(WoundType type) =>
+            Track(type) is var (current, max) && PlayStateCalculator.CanTend(current, max, TendEligible[type]);
+
+        /// <summary>
+        /// Allies whose Help this creature carries — Advantage on its next roll — and enemies whose
+        /// Harrying it carries — Disadvantage on it (Core Rules §9, "Actions in Combat"). Each
+        /// lapses at the start of the giver's next turn if no roll has used it.
+        /// </summary>
+        internal List<Combatant> HelpedBy { get; } = new();
+
+        internal List<Combatant> HarriedBy { get; } = new();
+
+        /// <summary>Somebody's Help is waiting on this creature's next roll.</summary>
+        public bool IsHelped => HelpedBy.Count > 0;
+
+        /// <summary>Somebody's Harrying is waiting on this creature's next roll.</summary>
+        public bool IsHarried => HarriedBy.Count > 0;
+
+        /// <summary>
+        /// Shields raised over this creature, by whom, until the start of each bearer's next turn
+        /// (Core Rules §9, "Shields"). Only the largest counts: "only one shield ever covers a
+        /// character at a time".
+        /// </summary>
+        internal List<(Combatant Bearer, ShieldWeight Weight)> CoveredBy { get; } = new();
+
+        /// <summary>The Dodge Threshold the shield covering this creature adds, if any.</summary>
+        public int ShieldBonus => CoveredBy.Count == 0 ? 0 : CoveredBy.Max(c => InventoryCalculator.ShieldDodgeThresholdBonus(c.Weight));
+
+        /// <summary>The shield in this character's hand, if any — the heaviest, should there be two.</summary>
+        public ShieldDefinition? InHandShield => Build is { } build
+            ? InventoryCalculator.InHandShields(build).OrderByDescending(s => s.Weight).FirstOrDefault()
+            : null;
+
+        /// <summary>A Heavy shield held with no weapon in hand: one raise covers the bearer and an ally (Core Rules §9, "Bracing").</summary>
+        public bool IsShieldBraced => InHandShield is { } shield
+            && InventoryCalculator.IsBraced(shield.Weight, hasWeaponEquipped: InHandWeapon is not null, holdingLitLight: Build is { } b && InventoryCalculator.LitLightsHeld(b) > 0);
+
+        /// <summary>
+        /// Lying on the board, taking up a square: anybody still fighting, a character dying or
+        /// stable (who can still be reached, healed — and stabbed), or a foe who gave up.
+        /// </summary>
+        public bool OccupiesSquare => !HasFled
+            && (!IsOutOfFight || HasSurrendered || (Side == Side.Party && BodyStatus is BodyStatus.Dying or BodyStatus.Stable));
+
+        /// <summary>A character on 0 Body or below and not yet dead — defenceless: attacks on them have Advantage (Core Rules §4, "Dying").</summary>
+        public bool IsDefenceless => Side == Side.Party && BodyStatus is BodyStatus.Dying or BodyStatus.Stable && !HasFled;
+
         /// <summary>Stabilized at 0 Body (Core Rules §4). Only ever true of a player character.</summary>
         public bool IsStable { get; internal set; }
 
@@ -48,7 +126,7 @@ namespace WoundBound.Game.Combat
         internal List<ThresholdModifier> ThresholdModifiers { get; set; } = new();
 
         /// <summary>What an attack is rolled against right now: the base, plus every modifier held (Core Rules §10).</summary>
-        public int DodgeThreshold => BaseDodgeThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Dodge);
+        public int DodgeThreshold => BaseDodgeThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Dodge) + ShieldBonus;
 
         public int StabilityThreshold => BaseStabilityThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Stability);
 

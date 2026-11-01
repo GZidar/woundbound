@@ -26,8 +26,9 @@ namespace WoundBound.Game.Combat.Brains
         PartyStep NextStep(BattleView view, Combatant character);
 
         /// <summary>
-        /// Whether to spend 1 Stamina on a panic dodge against <paramref name="reaction"/>. Only
-        /// asked when the dodge would turn the hit and the character could pay for it.
+        /// Whether to spend 1 Stamina on a panic dodge — or, with a shield in hand, on raising it —
+        /// against <paramref name="reaction"/>. Only asked when it would turn the hit and the
+        /// character could pay for it.
         /// </summary>
         bool PanicDodges(BattleView view, PendingReaction reaction);
 
@@ -72,6 +73,18 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Spend the action trying to break a hold.</summary>
         public sealed record BreakFree : PartyStep;
+
+        /// <summary>Help an adjacent ally, or Harry an adjacent enemy.</summary>
+        public sealed record Aid(CombatAction Action, Combatant Target) : PartyStep;
+
+        /// <summary>Heal, Meditate or Pray over themselves or an ally beside them.</summary>
+        public sealed record Tend(CombatAction Action, Combatant Target) : PartyStep;
+
+        /// <summary>Raise the shield in hand — over an ally, if one is named.</summary>
+        public sealed record RaiseShield(Combatant? Ally = null) : PartyStep;
+
+        /// <summary>Move to a square hauling whoever they hold.</summary>
+        public sealed record Drag(GridPosition Square) : PartyStep;
 
         /// <summary>Let go of whoever they're holding.</summary>
         public sealed record LetGo : PartyStep;

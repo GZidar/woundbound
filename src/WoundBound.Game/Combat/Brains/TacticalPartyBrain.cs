@@ -49,6 +49,8 @@ namespace WoundBound.Game.Combat.Brains
     /// Go after creatures that have broken — the ones a fight's objectives say mustn't escape
     /// first — and grab one in reach rather than swing at it.
     /// </param>
+    /// <param name="RescueTheFallen">Get beside a dying or stable ally and Heal them, before anything else.</param>
+    /// <param name="HelpWhenIdle">With nobody to hit this turn, Help an adjacent ally still to act who has — or else Harry an adjacent foe.</param>
     public sealed record PartyTactics(
         string Name,
         bool ShootWhenOutOfReach = false,
@@ -58,7 +60,9 @@ namespace WoundBound.Game.Combat.Brains
         PanicDodgePolicy PanicDodges = PanicDodgePolicy.Always,
         bool TripForAllies = false,
         LeaverPolicy ReactToLeavers = LeaverPolicy.Never,
-        bool HuntRunners = false)
+        bool HuntRunners = false,
+        bool RescueTheFallen = false,
+        bool HelpWhenIdle = false)
     {
         /// <summary>The ways of playing the simulator compares and the battle screen's bot can be set to.</summary>
         public static IReadOnlyList<PartyTactics> Presets { get; } =
@@ -76,6 +80,9 @@ namespace WoundBound.Game.Combat.Brains
             new("Charge, strike at leavers", ReactToLeavers: LeaverPolicy.StrikeEveryone),
             new("Charge, stop runners", ReactToLeavers: LeaverPolicy.StopRunners, HuntRunners: true),
             new("Charge, stop runners, extra attacks", ReactToLeavers: LeaverPolicy.StopRunners, HuntRunners: true, BuyExtraAttacks: true),
+            new("Charge, rescue the fallen", RescueTheFallen: true),
+            new("Charge, rescue the fallen, help when idle", RescueTheFallen: true, HelpWhenIdle: true),
+            new("Stop runners, rescue, help when idle", ReactToLeavers: LeaverPolicy.StopRunners, HuntRunners: true, RescueTheFallen: true, HelpWhenIdle: true),
         ];
     }
 
@@ -101,6 +108,11 @@ namespace WoundBound.Game.Combat.Brains
             if (character.IsProne && BattleView.StandUpRefusal(character) is null)
             {
                 return new PartyStep.StandUp();
+            }
+
+            if (Tactics.RescueTheFallen && Rescue(view, character) is { } rescue)
+            {
+                return rescue;
             }
 
             // Bracing has to come first: a character who has moved can't, and one who has can't move.
@@ -131,6 +143,11 @@ namespace WoundBound.Game.Combat.Brains
             if (Tactics.HuntRunners && Runners(view, character).FirstOrDefault() is { } quarry)
             {
                 nearest = quarry;
+            }
+
+            if (Tactics.HelpWhenIdle && Aid(view, character) is { } aid)
+            {
+                return aid;
             }
 
             // Held with nobody to hit: get loose.
@@ -170,6 +187,54 @@ namespace WoundBound.Game.Combat.Brains
             PanicDodgePolicy.OnlyRipostes => reaction.WouldRiposte && CanSpare(reaction.Defender),
             _ => false,
         };
+
+        /// <summary>Heal a dying or stable ally beside them; or, with the move, step beside one first.</summary>
+        private static PartyStep? Rescue(BattleView view, Combatant character)
+        {
+            var fallen = view.PartyOnBoard.Where(c => c != character && c.IsDefenceless).ToList();
+            if (fallen.FirstOrDefault(f => BattleView.TendRefusal(character, CombatAction.Heal, f) is null) is { } beside)
+            {
+                return new PartyStep.Tend(CombatAction.Heal, beside);
+            }
+
+            if (!character.HasMove || character.ActionsRemaining == 0)
+            {
+                return null;
+            }
+
+            return fallen
+                .Where(f => f.CanBeTended(WoundType.Body))
+                .SelectMany(f => view.SquaresWithin(character, 1).Keys.Where(sq => sq.DistanceTo(f.Position) <= 1))
+                .OrderBy(sq => sq.DistanceTo(character.Position))
+                .Select(sq => (PartyStep)new PartyStep.Move(sq))
+                .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Nothing to hit, and no step that would bring anybody into reach: Help an adjacent ally
+        /// still to act who has somebody to hit, or else Harry an adjacent foe.
+        /// </summary>
+        private static PartyStep? Aid(BattleView view, Combatant character)
+        {
+            if (character.ActionsRemaining == 0
+                || (character.HasMove && view.EnemiesOf(character).Any(e => view.StrikeSquare(character, e) is not null)))
+            {
+                return null;
+            }
+
+            var ally = view.PartyStillToAct
+                .Where(a => a != character && BattleView.AidRefusal(character, CombatAction.Help, a) is null && !a.IsHelped)
+                .FirstOrDefault(a => view.EnemiesOf(a).Any(e => view.PlanAttack(a, e).CanAttack || view.StrikeSquare(a, e) is not null));
+            if (ally is not null)
+            {
+                return new PartyStep.Aid(CombatAction.Help, ally);
+            }
+
+            return view.EnemiesOf(character)
+                .Where(e => BattleView.AidRefusal(character, CombatAction.Harry, e) is null && !e.IsHarried)
+                .Select(e => (PartyStep)new PartyStep.Aid(CombatAction.Harry, e))
+                .FirstOrDefault();
+        }
 
         public virtual bool StandsFirm(BattleView view, PendingReaction reaction) =>
             Tactics.PanicDodges == PanicDodgePolicy.Always && CanSpare(reaction.Defender);

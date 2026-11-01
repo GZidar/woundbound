@@ -92,7 +92,7 @@ public class PartyTests
         var salla = Named(encounter, "Salla Rinehart");
 
         encounter.TryBeginTurn(Named(encounter, "Drovan Thale"));
-        salla.Body = 0;
+        salla.Body = WoundBound.Rules.Calculation.PlayStateCalculator.MinBodyWounds; // dead: no Presence roll to make
         encounter.EndTurn();
         RunGmTurns(encounter);
 

@@ -119,6 +119,18 @@ namespace WoundBound.Game.Combat.Brains
         public static string? ControlRefusal(Combatant actor, ControlAction action, Combatant target) =>
             Encounter.ControlRefusal(actor, action, target);
 
+        /// <summary>Why <paramref name="actor"/> can't Help or Harry <paramref name="target"/> now, or null if they can.</summary>
+        public static string? AidRefusal(Combatant actor, Rules.Enums.CombatAction action, Combatant target) => Encounter.AidRefusal(actor, action, target);
+
+        /// <summary>Why <paramref name="actor"/> can't Heal, Meditate or Pray over <paramref name="target"/> now, or null if they can.</summary>
+        public static string? TendRefusal(Combatant actor, Rules.Enums.CombatAction action, Combatant target) => Encounter.TendRefusal(actor, action, target);
+
+        /// <summary>Why <paramref name="bearer"/> can't raise their shield — over <paramref name="ally"/>, if named — now, or null if they can.</summary>
+        public static string? ShieldRefusal(Combatant bearer, Combatant? ally = null) => Encounter.ShieldRefusal(bearer, ally);
+
+        /// <summary>The party, the dying and the stable among them included — everyone a Heal could still reach.</summary>
+        public IEnumerable<Combatant> PartyOnBoard => encounter.Combatants.Where(c => c.Side == Side.Party && c.OccupiesSquare);
+
         /// <summary>Why <paramref name="combatant"/> can't stand up from Prone now, or null if they can.</summary>
         public static string? StandUpRefusal(Combatant combatant) => Encounter.StandUpRefusal(combatant);
 

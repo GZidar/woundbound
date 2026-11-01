@@ -76,6 +76,30 @@ namespace WoundBound.Game.Combat
         };
 
         /// <summary>
+        /// Joren Blacke, Martial Templar, from the Quickstart Adventure: battle axe and a buckler in
+        /// hand, in chainmail. The buckler is a Light shield — his own cover, and nobody else's.
+        /// </summary>
+        public static CharacterBuild JorenBlacke(GameData data) => new()
+        {
+            CharacterName = "Joren Blacke",
+            ClassPrinciple = ClassPrinciple.Martial,
+            SecondaryWound = WoundType.Soul,
+            Tier = Tier.T1,
+            AbilityModifiers = new Dictionary<Ability, int>
+            {
+                [Ability.Strength] = 3,
+                [Ability.Agility] = 1,
+                [Ability.Intellect] = 0,
+                [Ability.Vitality] = 2,
+                [Ability.Focus] = -1,
+                [Ability.Presence] = 1,
+            },
+            Weapons = { CombatantFactory.InHand(data.Weapon("Battleaxe")) },
+            Shields = { CombatantFactory.ShieldInHand("Buckler", ShieldWeight.Light) },
+            Armour = { new ArmourDefinition { Name = "Chainmail", Weight = ArmourWeight.Medium, IsEquipped = true } },
+        };
+
+        /// <summary>
         /// Drovan Thale, Nimble Ranger, from the Quickstart Adventure: short bow in hand and a
         /// dagger at the ready for the hunting knife.
         /// </summary>
@@ -177,7 +201,12 @@ namespace WoundBound.Game.Combat
         /// the lantern-bearer is the one the party wants to keep: a captured bandit can be made to
         /// talk (GM Reference §2). The night, the lights and the opening volley aren't in yet.
         /// </summary>
-        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        /// <param name="fourPlayers">
+        /// The book's table of four: Joren Blacke joins the party, and the fourth bandit — a second
+        /// Roadside Bandit, around the corner — joins the ambush ("If you have four players, then
+        /// have two of each").
+        /// </param>
+        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool fourPlayers = false)
         {
             var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4));
 
@@ -190,6 +219,12 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", new GridPosition(7, 1)),
                 CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", new GridPosition(7, 6)),
             };
+
+            if (fourPlayers)
+            {
+                combatants.Insert(3, CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(2, 4)));
+                combatants.Add(CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3)));
+            }
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
                 objectives: [new Objective.DontLetEscape("Take the lantern-bearer — he can be made to talk", lanternBearer)]);

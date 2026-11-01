@@ -94,6 +94,15 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Stand up from Prone, for a move.</summary>
         public sealed record StandUp : GmStep;
 
+        /// <summary>Help an adjacent ally or Harry an adjacent enemy, with the action.</summary>
+        public sealed record Aid(Rules.Enums.CombatAction Action, Combatant Target) : GmStep;
+
+        /// <summary>Heal, Meditate or Pray over itself or an adjacent ally, with the action.</summary>
+        public sealed record Tend(Rules.Enums.CombatAction Action, Combatant Target) : GmStep;
+
+        /// <summary>Move to <paramref name="Square"/> hauling whoever it holds — a move dearer, and rolled for.</summary>
+        public sealed record Drag(GridPosition Square) : GmStep;
+
 
         /// <summary>Spend the action trying to break the hold it's in.</summary>
         public sealed record BreakFree : GmStep;
