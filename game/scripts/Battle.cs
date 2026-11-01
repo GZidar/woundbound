@@ -20,11 +20,14 @@ namespace WoundBoundGame
     public partial class Battle : Node2D
     {
         /// <summary>The room the board is drawn in; a big field gets smaller squares to fit it.</summary>
-        private static readonly Vector2 BoardArea = new(800, 672);
+        private static readonly Vector2 BoardArea = new(800, 592);
         private const int LargestCell = 72;
         private const double AdversaryTurnDelay = 0.7;
         private const double BotStepDelay = 0.4;
-        private static readonly Vector2 BoardOrigin = new(24, 24);
+        private static readonly Vector2 BoardOrigin = new(24, 104);
+
+        /// <summary>Where the side panel starts — above the board, beside the roster.</summary>
+        private const float HudTop = 24;
 
         private static readonly Color LightSquare = new(0.20f, 0.21f, 0.24f);
         private static readonly Color DarkSquare = new(0.17f, 0.18f, 0.21f);
@@ -37,6 +40,64 @@ namespace WoundBoundGame
         private static readonly Color ActiveRing = new(1f, 0.85f, 0.3f);
         private static readonly Color TargetRing = new(1f, 0.35f, 0.3f);
         private static readonly Color ChoosableRing = new(0.6f, 0.85f, 1f);
+
+        /// <summary>
+        /// Demo mode, from the command line (<c>-- --demo --fight camp --seed 7</c>): the bots play
+        /// both seats at a pace a viewer can follow, and the game quits once the fight is over — for
+        /// recording with Godot's Movie Maker (<c>--write-movie</c>).
+        /// </summary>
+        private bool demo;
+        private int? seed;
+        private bool quitting;
+
+        /// <summary>What somebody just did, said over their token for a few seconds.</summary>
+        private sealed class Bubble(Combatant who, string text, bool isResult)
+        {
+            public Combatant Who { get; } = who;
+            public string Text { get; } = text;
+            public bool IsResult { get; } = isResult;
+            public double Age { get; set; }
+        }
+
+        private readonly List<Bubble> bubbles = new();
+        private double BubbleLife => demo ? 4.2 : 2.6;
+        private const int BubbleWidth = 230;
+
+        /// <summary>Where each token is drawn, eased along towards its square so a move can be followed.</summary>
+        private readonly Dictionary<Combatant, Vector2> tokenAt = new();
+
+        /// <summary>The centre of the square a token belongs on — pinned to the edge when it's off the map.</summary>
+        private Vector2 SquareCentreOf(Combatant c) =>
+            SquareRect(new GridPosition(Mathf.Clamp(c.Position.X, 0, encounter.Width - 1), Mathf.Clamp(c.Position.Y, 0, encounter.Height - 1))).GetCenter();
+
+        private Vector2 TokenCentre(Combatant c) => tokenAt.TryGetValue(c, out var at) ? at : SquareCentreOf(c);
+
+        /// <summary>Where each character's avatar is drawn in the roster, eased towards where it belongs.</summary>
+        private readonly Dictionary<Combatant, Vector2> rosterAt = new();
+
+        /// <summary>The characters who have finished their turn this round, in the order they went.</summary>
+        private readonly List<Combatant> actedThisRound = new();
+        private int rosterRound;
+
+        /// <summary>A colour for each character, so the roster, their token and their bubbles agree.</summary>
+        private static readonly Color[] PartyColours =
+        [
+            new(0.25f, 0.55f, 0.90f), new(0.30f, 0.72f, 0.45f), new(0.85f, 0.62f, 0.20f),
+            new(0.68f, 0.42f, 0.88f), new(0.22f, 0.72f, 0.75f), new(0.85f, 0.45f, 0.60f),
+        ];
+
+        private Color ColourOf(Combatant c)
+        {
+            if (c.Side != Side.Party)
+            {
+                return AdversaryToken;
+            }
+
+            var index = encounter.Combatants.Where(x => x.Side == Side.Party).ToList().IndexOf(c);
+            return PartyColours[Mathf.Max(0, index) % PartyColours.Length];
+        }
+
+        private VBoxContainer hudColumn = null!;
 
         private GameData data = null!;
         private Encounter encounter = null!;
@@ -210,7 +271,243 @@ namespace WoundBoundGame
         {
             data = GameData.Load(file => FileAccess.GetFileAsString($"res://data/rules/{file}"));
             BuildHud();
+            ReadDemoArguments();
             StartEncounter();
+        }
+
+        /// <summary>Reads <c>--demo</c>, <c>--fight</c>, <c>--seed</c> and <c>--gm</c> from the user arguments, after Godot's own <c>--</c>.</summary>
+        private void ReadDemoArguments()
+        {
+            var args = OS.GetCmdlineUserArgs();
+            string? Value(string name) => System.Array.IndexOf(args, name) is var at and >= 0 && at + 1 < args.Length ? args[at + 1] : null;
+
+            demo = args.Contains("--demo");
+            seed = int.TryParse(Value("--seed"), out var s) ? s : null;
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo" };
+            if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
+            {
+                fightPicker.Select(index);
+            }
+
+            if (Value("--gm") is { } gm)
+            {
+                gmPicker.Select(gm switch { "balanced" => 1, "poor" => 2, "simple" => 3, _ => 0 });
+            }
+
+            if (demo)
+            {
+                tacticPicker.Select(0);
+                botToggle.SetPressedNoSignal(true);
+
+                // Nobody is at the controls: only what a viewer follows stays on the panel.
+                foreach (var child in hudColumn.GetChildren().OfType<Control>())
+                {
+                    child.Visible = child == statusLabel || child == logLabel || child == reactionBox;
+                }
+            }
+        }
+
+        public override void _Process(double delta)
+        {
+            var animating = false;
+            foreach (var bubble in bubbles)
+            {
+                bubble.Age += delta;
+            }
+
+            animating |= bubbles.RemoveAll(b => b.Age > BubbleLife) > 0 || bubbles.Count > 0;
+
+            var glide = 1 - Mathf.Exp(-9 * (float)delta);
+            foreach (var c in encounter.Combatants)
+            {
+                var target = SquareCentreOf(c);
+                var at = tokenAt.TryGetValue(c, out var was) ? was : target;
+                var next = at.DistanceTo(target) < 0.5f ? target : at.Lerp(target, glide);
+                animating |= next != target;
+                tokenAt[c] = next;
+            }
+
+            UpdateRosterOrder();
+            var ease = 1 - Mathf.Exp(-6 * (float)delta);
+            foreach (var (who, target) in RosterTargets())
+            {
+                var at = rosterAt.TryGetValue(who, out var was) ? was : target;
+                var next = at.Lerp(target, ease);
+                animating |= next.DistanceTo(target) > 0.5f;
+                rosterAt[who] = next;
+            }
+
+            if (animating)
+            {
+                QueueRedraw();
+            }
+        }
+
+        /// <summary>Keeps the order characters finished their turns in, and starts it afresh each round.</summary>
+        private void UpdateRosterOrder()
+        {
+            if (encounter.Round != rosterRound)
+            {
+                rosterRound = encounter.Round;
+                actedThisRound.Clear();
+            }
+
+            foreach (var c in encounter.Combatants.Where(c => c.Side == Side.Party))
+            {
+                if (!encounter.PartyStillToAct.Contains(c) && c != encounter.Active && !actedThisRound.Contains(c))
+                {
+                    actedThisRound.Add(c);
+                }
+            }
+        }
+
+        private const float RosterY = 52;
+        private const float RosterStep = 64;
+        private const float YetToActX = 130;
+        private const float ActingX = 470;
+        private const float ActedX = 590;
+
+        /// <summary>Where each avatar belongs: yet to act on the left, the one acting in the middle, those who have acted on the right.</summary>
+        private IEnumerable<(Combatant Who, Vector2 At)> RosterTargets()
+        {
+            var yet = encounter.Combatants.Where(c => c.Side == Side.Party && encounter.PartyStillToAct.Contains(c) && c != encounter.Active).ToList();
+            for (var i = 0; i < yet.Count; i++)
+            {
+                yield return (yet[i], new Vector2(YetToActX + i * RosterStep, RosterY));
+            }
+
+            if (encounter.Active is { Side: Side.Party } acting)
+            {
+                yield return (acting, new Vector2(ActingX, RosterY));
+            }
+
+            for (var i = 0; i < actedThisRound.Count; i++)
+            {
+                yield return (actedThisRound[i], new Vector2(ActedX + i * RosterStep * 0.75f, RosterY));
+            }
+        }
+
+        /// <summary>The roster across the top: who has yet to act this round, who is acting, who has acted — and the GM, when it's theirs.</summary>
+        private void DrawRoster()
+        {
+            var font = ThemeDB.FallbackFont;
+            var dim = new Color(0.75f, 0.75f, 0.8f);
+            DrawRect(new Rect2(BoardOrigin.X, 8, BoardArea.X, 84), new Color(0.12f, 0.13f, 0.16f));
+            DrawString(font, new Vector2(BoardOrigin.X + 10, 26), $"Round {encounter.Round}", HorizontalAlignment.Left, -1, 14, Colors.White);
+            DrawString(font, new Vector2(YetToActX - 24, 26), "Yet to act", HorizontalAlignment.Left, -1, 13, dim);
+            DrawString(font, new Vector2(ActingX - 24, 26), "Acting", HorizontalAlignment.Left, -1, 13, ActiveRing);
+            DrawString(font, new Vector2(ActedX - 24, 26), "Acted", HorizontalAlignment.Left, -1, 13, dim);
+
+            foreach (var (who, _) in RosterTargets())
+            {
+                var at = rosterAt.TryGetValue(who, out var known) ? known : new Vector2(YetToActX, RosterY);
+                var colour = ColourOf(who);
+                var down = who.IsOutOfFight;
+                var acted = actedThisRound.Contains(who);
+                DrawCircle(at, 20, down ? colour with { A = 0.25f } : acted ? colour.Darkened(0.35f) : colour);
+                if (who == encounter.Active)
+                {
+                    DrawArc(at, 24, 0, Mathf.Tau, 48, ActiveRing, 3);
+                }
+
+                DrawString(font, at + new Vector2(-20, 5), Initials(who.Name), HorizontalAlignment.Center, 40, 14, Colors.White);
+                DrawString(font, at + new Vector2(-32, 36), who.Name.Split(' ')[0], HorizontalAlignment.Center, 64, 11, down ? dim with { A = 0.5f } : dim);
+            }
+
+            // The GM's chip: lit while an adversary is taking its turn.
+            var gmActing = encounter.Phase == EncounterPhase.AdversaryTurn || (encounter.Active is { Side: Side.Adversaries });
+            var gmAt = new Vector2(BoardOrigin.X + BoardArea.X - 40, RosterY);
+            DrawCircle(gmAt, 20, gmActing ? AdversaryToken : AdversaryToken.Darkened(0.6f));
+            if (gmActing)
+            {
+                DrawArc(gmAt, 24, 0, Mathf.Tau, 48, ActiveRing, 3);
+            }
+
+            DrawString(font, gmAt + new Vector2(-20, 5), "GM", HorizontalAlignment.Center, 40, 14, Colors.White);
+            DrawString(font, gmAt + new Vector2(-40, 36), gmActing ? "acting" : $"{encounter.GmOpportunities} Opp.", HorizontalAlignment.Center, 80, 11, dim);
+        }
+
+        /// <summary>
+        /// Turns a line of the log into a bubble: what somebody did, over them — "casts Smite at the
+        /// Ambusher on the ridge" — and how a roll went, over whoever it landed on.
+        /// </summary>
+        private void OnLogged(string line)
+        {
+            if (line.StartsWith("—") || line.EndsWith("'s turn.") || line.StartsWith("The GM banks") || line.StartsWith("Objective"))
+            {
+                return;
+            }
+
+            var byName = encounter.Combatants.OrderByDescending(c => c.Name.Length).ToList();
+            if (byName.FirstOrDefault(c => line.StartsWith(c.Name + " ")) is { } actor)
+            {
+                Say(actor, line[(actor.Name.Length + 1)..], isResult: false);
+                return;
+            }
+
+            if (byName.FirstOrDefault(c => line.StartsWith(c.Name + ":")) is { } hurt)
+            {
+                Say(hurt, line[(hurt.Name.Length + 1)..].Trim(), isResult: true);
+                return;
+            }
+
+            // "Smite at Ambusher on the ridge: (9+5)+4 = 18 vs DT 17 — hit, 3 Soul."
+            if (line.IndexOf(": (", System.StringComparison.Ordinal) is var colon and > 0
+                && byName.FirstOrDefault(c => line[..colon].EndsWith(c.Name)) is { } target)
+            {
+                Say(target, line[..colon].Replace(" at " + target.Name, string.Empty) + line[colon..], isResult: true);
+            }
+        }
+
+        private void Say(Combatant who, string text, bool isResult)
+        {
+            text = text.Trim().TrimEnd('.');
+            if (text.Length == 0)
+            {
+                return;
+            }
+
+            text = char.ToUpperInvariant(text[0]) + text[1..];
+            bubbles.Add(new Bubble(who, text.Length > 140 ? text[..137] + "…" : text, isResult));
+            while (bubbles.Count(b => b.Who == who) > 2)
+            {
+                bubbles.Remove(bubbles.First(b => b.Who == who));
+            }
+
+            QueueRedraw();
+        }
+
+        /// <summary>The bubbles, over each token, the newest nearest it, fading as they go.</summary>
+        private void DrawBubbles()
+        {
+            var font = ThemeDB.FallbackFont;
+            const int size = 13;
+            foreach (var group in bubbles.GroupBy(b => b.Who))
+            {
+                var who = group.Key;
+                var anchor = TokenCentre(who) - new Vector2(0, CellSize * 0.45f);
+                foreach (var bubble in group.Reverse())
+                {
+                    var fade = Mathf.Clamp((float)((BubbleLife - bubble.Age) / 0.6), 0, 1) * Mathf.Clamp((float)(bubble.Age / 0.15), 0, 1);
+                    var textSize = font.GetMultilineStringSize(bubble.Text, HorizontalAlignment.Left, BubbleWidth, size);
+                    var box = new Vector2(textSize.X + 16, textSize.Y + 10);
+                    var topLeft = new Vector2(Mathf.Clamp(anchor.X - box.X / 2, 4, BoardOrigin.X + BoardArea.X - box.X), Mathf.Max(BoardOrigin.Y + 2, anchor.Y - box.Y - 8));
+                    var fill = bubble.IsResult ? new Color(0.16f, 0.16f, 0.2f, 0.92f * fade) : new Color(0.97f, 0.96f, 0.92f, 0.95f * fade);
+                    var edge = (bubble.IsResult ? new Color(0.8f, 0.8f, 0.85f) : ColourOf(who)) with { A = fade };
+                    DrawStyleBox(new StyleBoxFlat
+                    {
+                        BgColor = fill,
+                        BorderColor = edge,
+                        BorderWidthLeft = 2, BorderWidthRight = 2, BorderWidthTop = 2, BorderWidthBottom = 2,
+                        CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8, CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
+                    }, new Rect2(topLeft, box));
+                    var tail = new Vector2(Mathf.Clamp(anchor.X, topLeft.X + 10, topLeft.X + box.X - 10), topLeft.Y + box.Y);
+                    DrawColoredPolygon([tail + new Vector2(-6, -1), tail + new Vector2(6, -1), tail + new Vector2(0, 8)], fill);
+                    DrawMultilineString(font, topLeft + new Vector2(8, 5 + font.GetAscent(size)), bubble.Text, HorizontalAlignment.Left, BubbleWidth, size, -1,
+                        (bubble.IsResult ? new Color(0.95f, 0.92f, 0.8f) : new Color(0.1f, 0.1f, 0.12f)) with { A = fade });
+                    anchor = new Vector2(anchor.X, topLeft.Y - 4);
+                }
+            }
         }
 
         public override void _UnhandledInput(InputEvent @event)
@@ -376,6 +673,9 @@ namespace WoundBoundGame
             {
                 DrawToken(combatant, active);
             }
+
+            DrawRoster();
+            DrawBubbles();
         }
 
         private void DrawToken(Combatant combatant, Combatant? active)
@@ -385,8 +685,8 @@ namespace WoundBoundGame
             // Past the map's open edge: drawn pinned to the edge, small and faded, with how far out.
             var shownAt = new GridPosition(Mathf.Clamp(combatant.Position.X, 0, encounter.Width - 1), Mathf.Clamp(combatant.Position.Y, 0, encounter.Height - 1));
             var offMap = shownAt != combatant.Position;
-            var rect = SquareRect(shownAt);
-            var centre = rect.GetCenter();
+            var centre = TokenCentre(combatant);
+            var rect = new Rect2(centre - new Vector2(CellSize, CellSize) / 2, new Vector2(CellSize, CellSize));
             var radius = CellSize * (offMap ? 0.22f : 0.36f);
 
             // Gone from the field altogether.
@@ -404,7 +704,7 @@ namespace WoundBoundGame
             }
 
             // A character dying or stable lies there, faded, still to be reached.
-            var colour = combatant.Side == Side.Party ? PartyToken : AdversaryToken;
+            var colour = ColourOf(combatant);
             DrawCircle(centre, radius, combatant.IsDefenceless ? colour with { A = 0.35f } : colour);
 
             if (combatant == encounter.Active)
@@ -490,15 +790,21 @@ namespace WoundBoundGame
         {
             encounter = fightPicker.Selected switch
             {
-                1 => SampleEncounters.SignpostWithCasters(data, new RandomDiceRoller(), PickedGm()),
-                2 => SampleEncounters.CampfireAmbush(data, new RandomDiceRoller(), PickedGm()),
-                3 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm(), fourPlayers: true),
-                4 => SampleEncounters.FerryShrineAmbush(data, new RandomDiceRoller(), PickedGm()),
-                5 => SampleEncounters.FerryShrineWithCasters(data, new RandomDiceRoller(), PickedGm()),
-                6 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller(), PickedGm()),
-                7 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller(), PickedGm()),
-                _ => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm()),
+                1 => SampleEncounters.SignpostWithCasters(data, Dice(), PickedGm()),
+                2 => SampleEncounters.CampfireAmbush(data, Dice(), PickedGm()),
+                3 => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), fourPlayers: true),
+                4 => SampleEncounters.FerryShrineAmbush(data, Dice(), PickedGm()),
+                5 => SampleEncounters.FerryShrineWithCasters(data, Dice(), PickedGm()),
+                6 => SampleEncounters.PartyVersusAmbush(data, Dice(), PickedGm()),
+                7 => SampleEncounters.FighterVersusRatkin(data, Dice(), PickedGm()),
+                _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
+            encounter.Logged += OnLogged;
+            bubbles.Clear();
+            rosterAt.Clear();
+            tokenAt.Clear();
+            actedThisRound.Clear();
+            rosterRound = 0;
             shown = null;
             Disarm();
             stepPending = false;
@@ -508,6 +814,9 @@ namespace WoundBoundGame
             logLabel.Clear();
             Refresh();
         }
+
+        /// <summary>Dice for a new fight: seeded from <c>--seed</c>, so a recorded fight can be played again exactly.</summary>
+        private RandomDiceRoller Dice() => seed is { } s ? new RandomDiceRoller(new System.Random(s)) : new RandomDiceRoller();
 
         private void Refresh()
         {
@@ -527,7 +836,7 @@ namespace WoundBoundGame
             {
                 stepPending = true;
                 var waitingOn = encounter;
-                GetTree().CreateTimer(gmToAct ? AdversaryTurnDelay : BotStepDelay).Timeout += () =>
+                GetTree().CreateTimer(demo ? 1.7 : gmToAct ? AdversaryTurnDelay : BotStepDelay).Timeout += () =>
                 {
                     stepPending = false;
 
@@ -548,6 +857,13 @@ namespace WoundBoundGame
 
                     Refresh();
                 };
+            }
+
+            // A demo ends itself a few seconds after the fight does, so a recording stops cleanly.
+            if (demo && encounter.IsOver && !quitting)
+            {
+                quitting = true;
+                GetTree().CreateTimer(6).Timeout += () => GetTree().Quit();
             }
         }
 
@@ -845,7 +1161,7 @@ namespace WoundBoundGame
             }
 
             var party = encounter.Combatants.Where(c => c.Side == Side.Party).ToList();
-            partyLabel.Visible = party.Count > 1;
+            partyLabel.Visible = party.Count > 1 && !demo;
             partyLabel.Text = string.Join("\n", party.Select(c =>
                 $"{(c == encounter.Active ? "▶ " : "   ")}{c.Name}: Body {c.Body}/{c.BodyMax}, Stamina {c.Stamina}/{c.StaminaMax} — " +
                 (c.IsDefenceless ? (c.BodyStatus == BodyStatus.Dying ? "DYING — Heal them, or they roll to hold on" : "stable, on 0")
@@ -994,8 +1310,8 @@ namespace WoundBoundGame
 
             var panel = new PanelContainer
             {
-                Position = new Vector2(BoardOrigin.X * 2 + BoardArea.X, BoardOrigin.Y),
-                CustomMinimumSize = new Vector2(1280 - BoardArea.X - BoardOrigin.X * 3, 720 - BoardOrigin.Y * 2),
+                Position = new Vector2(BoardOrigin.X * 2 + BoardArea.X, HudTop),
+                CustomMinimumSize = new Vector2(1280 - BoardArea.X - BoardOrigin.X * 3, 720 - HudTop * 2),
             };
             layer.AddChild(panel);
 
@@ -1007,9 +1323,12 @@ namespace WoundBoundGame
 
             panel.AddChild(margin);
 
+            panel.ClipContents = true;
+            panel.Size = panel.CustomMinimumSize;
             var column = new VBoxContainer();
             column.AddThemeConstantOverride("separation", 10);
             margin.AddChild(column);
+            hudColumn = column;
 
             statusLabel = WrappingLabel(column);
             statusLabel.AddThemeFontSizeOverride("font_size", 20);
@@ -1213,6 +1532,8 @@ namespace WoundBoundGame
             column.AddChild(botRow);
 
             fightPicker = new OptionButton();
+            fightPicker.FitToLongestItem = false;
+            fightPicker.ClipText = true;
             fightPicker.AddItem("Signpost ambush (Quickstart)");
             fightPicker.AddItem("Signpost ambush, the Quickstart five (with casters)");
             fightPicker.AddItem("The camp at night: the five round their campfire");
@@ -1233,6 +1554,8 @@ namespace WoundBoundGame
             botRow.AddChild(botToggle);
 
             tacticPicker = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+            tacticPicker.FitToLongestItem = false;
+            tacticPicker.ClipText = true;
             foreach (var level in BrainSkill.Levels)
             {
                 tacticPicker.AddItem($"Weighs every option ({level.Name})");
@@ -1257,6 +1580,8 @@ namespace WoundBoundGame
             column.AddChild(gmRow);
             gmRow.AddChild(new Label { Text = "GM plays:" });
             gmPicker = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "Takes effect from the next fight (Restart)." };
+            gmPicker.FitToLongestItem = false;
+            gmPicker.ClipText = true;
             gmPicker.AddItem("Best — weighs every option, takes the most effective");
             gmPicker.AddItem("Balanced — usually the best");
             gmPicker.AddItem("Poor — loose and careless");
