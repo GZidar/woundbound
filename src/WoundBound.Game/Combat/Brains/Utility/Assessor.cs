@@ -10,6 +10,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// </summary>
     public sealed record BrainSkill(string Name, double Temperature, double Care, bool UsesTricks)
     {
+        /// <summary>Tricks this brain leaves alone even though it uses the rest — for measuring what each is worth.</summary>
+        public IReadOnlySet<Trick> Off { get; init; } = new HashSet<Trick>();
+
+        /// <summary>Whether this brain reaches for <paramref name="trick"/>.</summary>
+        public bool Uses(Trick trick) => UsesTricks && !Off.Contains(trick);
+
         /// <summary>Always the most effective option.</summary>
         public static BrainSkill Best { get; } = new("Best", Temperature: 0, Care: 1, UsesTricks: true);
 
@@ -20,6 +26,34 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public static BrainSkill Poor { get; } = new("Poor", Temperature: 2.0, Care: 0.3, UsesTricks: false);
 
         public static IReadOnlyList<BrainSkill> Levels { get; } = [Best, Balanced, Poor];
+    }
+
+    /// <summary>The kinds of play past a plain blow, move or spell, each of which a brain can be told to leave alone.</summary>
+    public enum Trick
+    {
+        /// <summary>Slip, Precise and Patient.</summary>
+        Exploits,
+
+        /// <summary>Cleave, Topple, Ring, Disarm, Sunder.</summary>
+        Manoeuvres,
+
+        /// <summary>Standing ground with the Dodge action.</summary>
+        Brace,
+
+        /// <summary>Buff, Control and Shift spells.</summary>
+        SpellTricks,
+
+        /// <summary>Trip and Grab, on its turn or at a leaver.</summary>
+        Grapple,
+
+        /// <summary>Help and Harry.</summary>
+        Aid,
+
+        /// <summary>The Heal action.</summary>
+        Tend,
+
+        /// <summary>Raising a shield as an action.</summary>
+        Shield,
     }
 
     /// <summary>
@@ -66,6 +100,26 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             return value;
         }
+
+        /// <summary>
+        /// What <paramref name="amount"/> Body put back on <paramref name="c"/> is worth: how much it lowers
+        /// the chance they drop before they act again — the blows coming at them against what they have
+        /// left — times what they are worth standing, and a little for the longer fight. A wound mended
+        /// on somebody the next blow drops anyway, or nobody can reach, changes little.
+        /// </summary>
+        public double MendWorth(Combatant c, double amount)
+        {
+            var incoming = 1.5 * Exposure(c, c.Position) / Math.Max(1e-6, PerWound(c));
+            double Drops(double body) => body <= 0 ? 1 : Math.Min(1, incoming / body);
+            return Value(c) * (Drops(c.Body) - Drops(c.Body + amount)) + 0.3 * amount * Value(c) / Math.Max(1, c.BodyMax);
+        }
+
+        /// <summary>
+        /// What spending a tactical Stamina now costs <paramref name="c"/> besides the Stamina: where it is
+        /// the round's last, the extra action or the panic dodge it rules out — about half a blow.
+        /// </summary>
+        public static double SpendPrice(Combatant c, double blow) =>
+            c.TacticalSpendsPerRound - c.TacticalSpendsThisRound <= 1 ? 0.5 + 0.5 * Math.Max(0, blow) : 0.5;
 
         /// <summary>What one wound to <paramref name="c"/> is worth: its value spread over the wounds it can take — a Minion has one.</summary>
         public double PerWound(Combatant c) => Value(c) / Math.Max(1, c.IsMinion ? 1 : c.Body);

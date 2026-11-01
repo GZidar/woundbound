@@ -173,7 +173,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             // Slip first, where the best way out of here draws blades worth more than the Stamina.
-            if (skill.UsesTricks && actor.IsNimble && canMove && actor.Stamina >= 2 && (!real || BattleView.ExploitRefusal(actor, NimbleExploit.Slip) is null))
+            if (skill.Uses(Trick.Exploits) && actor.IsNimble && canMove && actor.Stamina >= 2 && (!real || BattleView.ExploitRefusal(actor, NimbleExploit.Slip) is null))
             {
                 var slipped = squares.Keys.Where(sq => sq != here)
                     .Select(sq => (Square: sq, Saved: care * assess.LeavingCost(actor, sq)))
@@ -200,7 +200,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             // Standing ground: +2 DT at the price of the move, and Disadvantage on the blow.
-            if (skill.UsesTricks && hasMove && actions > 0 && !actor.HasMovedThisTurn && View.QuietRounds == 0
+            if (skill.Uses(Trick.Brace) && hasMove && actions > 0 && !actor.HasMovedThisTurn && View.QuietRounds == 0
                 && (!real || BattleView.StandGroundRefusal(actor, CombatAction.Dodge) is null))
             {
                 var braced = Position(actor, here) - care * assess.Exposure(actor, here, extraDodge: 2);
@@ -217,6 +217,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var enemies = View.EnemiesOf(actor).ToList();
             var spendCost = SpendCostFor(actor);
+            var bestBlow = enemies.Select(e => assess.BestAttack(actor, at, e).Worth).DefaultIfEmpty(0).Max();
+            spendCost += Assessor.SpendPrice(actor, bestBlow) - 0.5;
 
             // The defenceless are still to be finished — the default goal is to kill.
             var targets = actor.Side == Side.Adversaries
@@ -256,24 +258,24 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
 
                 // A Nimble character's Exploits, bought first and spent on this blow.
-                if (actor.IsNimble)
+                if (actor.IsNimble && skill.Uses(Trick.Exploits))
                 {
                     var moved = actor.HasMovedSinceLastAttack || at != actor.Position;
                     if (moved && !actor.HoldsPrecise && (!checkRules || BattleView.ExploitRefusal(actor, NimbleExploit.Precise) is null))
                     {
                         var precise = assess.BestAttack(actor, at, target, precise: true).Worth;
-                        yield return new Option(OptionKind.Exploit, precise - 0.5, $"Precise, then {with.Name} at {target.Name}", Target: target, Exploit: NimbleExploit.Precise);
+                        yield return new Option(OptionKind.Exploit, precise - Assessor.SpendPrice(actor, worth), $"Precise, then {with.Name} at {target.Name}", Target: target, Exploit: NimbleExploit.Precise);
                     }
 
                     if (!actor.HasBeenAttackedSinceTurnStart && !actor.HoldsPatient && (!checkRules || BattleView.ExploitRefusal(actor, NimbleExploit.Patient) is null))
                     {
                         var patient = assess.BestAttack(actor, at, target, advantage: true).Worth;
-                        yield return new Option(OptionKind.Exploit, patient - 0.5, $"Patient, then {with.Name} at {target.Name}", Target: target, Exploit: NimbleExploit.Patient);
+                        yield return new Option(OptionKind.Exploit, patient - Assessor.SpendPrice(actor, worth), $"Patient, then {with.Name} at {target.Name}", Target: target, Exploit: NimbleExploit.Patient);
                     }
                 }
 
                 // A Martial character's manoeuvres, declared with the blow — 1 Stamina and a banked Opportunity.
-                var permitted = Encounter.ManoeuvresOf(actor);
+                var permitted = skill.Uses(Trick.Manoeuvres) ? Encounter.ManoeuvresOf(actor) : [];
                 if (with.IsRanged || permitted.Count == 0)
                 {
                     continue;
@@ -332,7 +334,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 yield return new Option(OptionKind.TakeUpWeapon, 0.8 + 1.5 * assess.Threat(actor), $"take up the {actor.DroppedWeapon.Name}");
             }
 
-            foreach (var cast in spells.Options(actor, at, checkRules, care, skill.UsesTricks))
+            foreach (var cast in spells.Options(actor, at, checkRules, care, skill.Uses(Trick.SpellTricks)))
             {
                 yield return cast;
             }
@@ -348,7 +350,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 yield break;
             }
 
-            foreach (var target in enemies.Where(e => at.DistanceTo(e.Position) <= actor.OwnReach))
+            foreach (var target in enemies.Where(e => skill.Uses(Trick.Grapple) && at.DistanceTo(e.Position) <= actor.OwnReach))
             {
                 foreach (var (control, worth) in new[]
                 {
@@ -366,7 +368,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             // Help an ally beside me who acts before I do again, or Harry a foe beside me.
-            foreach (var ally in (stillToAct ?? []).Where(a => a != actor && !a.IsHelped && at.DistanceTo(a.Position) <= 1))
+            foreach (var ally in (stillToAct ?? []).Where(a => skill.Uses(Trick.Aid) && a != actor && !a.IsHelped && at.DistanceTo(a.Position) <= 1))
             {
                 if (checkRules && BattleView.AidRefusal(actor, CombatAction.Help, ally) is not null)
                 {
@@ -383,7 +385,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
-            foreach (var foe in enemies.Where(e => !e.IsHarried && at.DistanceTo(e.Position) <= 1))
+            foreach (var foe in enemies.Where(e => skill.Uses(Trick.Aid) && !e.IsHarried && at.DistanceTo(e.Position) <= 1))
             {
                 if (checkRules && BattleView.AidRefusal(actor, CombatAction.Harry, foe) is not null)
                 {
@@ -394,7 +396,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             // Heal: the dying first — a body back in the fight, and a death put off.
-            foreach (var hurt in View.PartyOnBoard.Concat(View.Adversaries).Where(c => c.Side == actor.Side && c.CanBeTended(WoundType.Body)))
+            foreach (var hurt in View.PartyOnBoard.Concat(View.Adversaries).Where(c => skill.Uses(Trick.Tend) && c.Side == actor.Side && c.CanBeTended(WoundType.Body)))
             {
                 if (hurt != actor && at.DistanceTo(hurt.Position) > 1)
                 {
@@ -406,11 +408,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var worth = hurt.IsDefenceless ? 2 + 0.9 * assess.Value(hurt) : assess.PerWound(hurt);
+                var worth = hurt.IsDefenceless ? 2 + 0.9 * assess.Value(hurt) : assess.MendWorth(hurt, 1);
                 yield return new Option(OptionKind.Tend, worth, $"Heal {hurt.Name}", Target: hurt, Action: CombatAction.Heal);
             }
 
-            if (actor.InHandShield is { } shield && actor.CoveredBy.All(c => c.Bearer != actor) && (!checkRules || BattleView.ShieldRefusal(actor) is null))
+            if (skill.Uses(Trick.Shield) && actor.InHandShield is { } shield && actor.CoveredBy.All(c => c.Bearer != actor) && (!checkRules || BattleView.ShieldRefusal(actor) is null))
             {
                 var bonus = Rules.Calculation.InventoryCalculator.ShieldDodgeThresholdBonus(shield.Weight);
                 var spared = care * (assess.Exposure(actor, at) - assess.Exposure(actor, at, extraDodge: bonus));

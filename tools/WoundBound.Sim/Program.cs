@@ -89,6 +89,18 @@ if (seats is "all" or "presets")
     parties.AddRange(tactics.Select(t => (Func<IPartyBrain>)(() => new TacticalPartyBrain(t))));
 }
 
+// --party variants: Best with one setting changed at a time, against Balanced — for tuning.
+if (seats is "variants")
+{
+    BrainSkill[] variants =
+    [
+        BrainSkill.Best,
+        BrainSkill.Best with { Name = "Best, no tricks", UsesTricks = false },
+        .. Enum.GetValues<Trick>().Select(t => BrainSkill.Best with { Name = $"Best, no {t}", Off = new HashSet<Trick> { t } }),
+    ];
+    parties.AddRange(variants.Select(v => (Func<IPartyBrain>)(() => new UtilityPartyBrain(v))));
+}
+
 if (seats is "all" or "utility")
 {
     parties.AddRange(BrainSkill.Levels.Select(level => (Func<IPartyBrain>)(() => new UtilityPartyBrain(level))));

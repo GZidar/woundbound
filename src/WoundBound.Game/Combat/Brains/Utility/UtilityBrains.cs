@@ -278,7 +278,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             foreach (var reach in new[] { LeaverResponse.Grab, LeaverResponse.Trip })
             {
-                if (options.Contains(reach) && Skill.UsesTricks)
+                if (options.Contains(reach) && Skill.Uses(Trick.Grapple))
                 {
                     worths.Add((reach, assess.ControlChance(me, leaver, againstDodgeToo: true) * stopping * (reach == LeaverResponse.Grab ? 1 : 0.6)));
                 }

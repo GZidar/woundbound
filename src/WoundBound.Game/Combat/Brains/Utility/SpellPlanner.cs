@@ -43,12 +43,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         .Select(c => (Mend(spell, c), (Func<CastPlan, double>)(plan => HealWorth(actor, spell, plan)))),
                     SpellType.Buff when usesTricks => View.PartyOnBoard.Concat(View.Adversaries)
                         .Where(c => c.Side == actor.Side && !c.IsOutOfFight)
-                        .Select(c => (new SpellCast(spell) { Target = c, Threshold = ThresholdType.Dodge }, (Func<CastPlan, double>)(plan => BuffWorth(plan, care)))),
+                        .Select(c => (new SpellCast(spell) { Target = c, Threshold = ThresholdType.Dodge }, (Func<CastPlan, double>)(plan => Denial * BuffWorth(plan, care)))),
                     SpellType.Control when usesTricks => enemies.Where(e => e.ResolveThreshold is not null && !View.IsControlled(e))
                         .SelectMany(e => (SpellArea.FixedEffectOf(spell) is { } written ? [written] : new[] { ControlEffect.Fear, ControlEffect.Compulsion })
-                            .Select(effect => (new SpellCast(spell) { Target = e, Effect = effect }, (Func<CastPlan, double>)(plan => ControlWorth(actor, effect, plan))))),
+                            .Select(effect => (new SpellCast(spell) { Target = e, Effect = effect }, (Func<CastPlan, double>)(plan => Denial * ControlWorth(actor, effect, plan))))),
                     SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Shift => enemies.Where(e => !e.IsBroken)
-                        .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => ShiftWorth(actor, plan)))),
+                        .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => Denial * ShiftWorth(actor, plan)))),
                     _ => [],
                 };
 
@@ -262,8 +262,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return patient.HasFled ? 0 : 2 + 0.9 * assess.Value(patient);
             }
 
-            return Math.Min(average, max - now) * assess.PerWound(patient) * 0.8;
+            var mended = Math.Min(average, max - now);
+            return track == WoundType.Body ? assess.MendWorth(patient, mended) : mended * assess.PerWound(patient) * 0.8;
         }
+
+        /// <summary>
+        /// What a Buff, a Control or a Shift is reckoned at against a blow: each prices the turns or blows
+        /// it denies as though the other side would have spent them as harmfully as it could, which it
+        /// often wouldn't have — so they are discounted (calibrated by simulation, 2026-11-02).
+        /// </summary>
+        private const double Denial = 0.6;
 
         /// <summary>A Buff on Dodge is worth the blows it would turn before the caster's next turn.</summary>
         private double BuffWorth(CastPlan plan, double care)
