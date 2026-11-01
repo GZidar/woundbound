@@ -119,6 +119,7 @@ namespace WoundBoundGame
         private CheckBox sustainBox = null!;
         private CheckBox backlashBox = null!;
         private OptionButton thresholdPicker = null!;
+        private OptionButton tapPicker = null!;
         private static readonly Color SpellArea = new(0.65f, 0.35f, 0.95f, 0.35f);
         private static readonly ThresholdType[] BuffThresholds = [ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve];
 
@@ -151,6 +152,26 @@ namespace WoundBoundGame
                 Backlash = backlashBox.ButtonPressed,
                 Threshold = spell.SpellType is SpellType.Buff or SpellType.Bane ? BuffThresholds[Mathf.Max(0, thresholdPicker.Selected)] : null,
             };
+
+            // Elemental Fuel: the pack, the light in hand, or a fire burning within reach.
+            if (spell.Source == MagicSource.ElementalMagic)
+            {
+                cast = tapPicker.Selected switch
+                {
+                    1 => cast with
+                    {
+                        Tap = caster.Build?.InventoryItems.Any(i => InventoryCalculator.IsLitLight(i) && i.Name.Contains("lantern", System.StringComparison.OrdinalIgnoreCase)) == true
+                            && caster.Build.InventoryItems.All(i => !(InventoryCalculator.IsLitLight(i) && i.Name.Contains("torch", System.StringComparison.OrdinalIgnoreCase)))
+                            ? FuelSource.Lantern
+                            : FuelSource.Torch,
+                    },
+                    2 when encounter.Fires.Where(f => f.DistanceTo(caster.Position) <= 1).Select(f => (GridPosition?)f).FirstOrDefault() is { } fire
+                        => cast with { Tap = FuelSource.Campfire, TapAt = fire },
+                    2 when encounter.LightsOnTheGround.Where(l => l.DistanceTo(caster.Position) <= 1).Select(l => (GridPosition?)l).FirstOrDefault() is { } dropped
+                        => cast with { Tap = FuelSource.Torch, TapAt = dropped },
+                    _ => cast,
+                };
+            }
 
             if (spell.Shape == SpellShape.Volume)
             {
@@ -325,7 +346,7 @@ namespace WoundBoundGame
             }
 
             // Lights burning where they were dropped, and built fires.
-            foreach (var light in encounter.LightsOnTheGround.Concat(encounter.Setting.Fires))
+            foreach (var light in encounter.LightsOnTheGround.Concat(encounter.Fires))
             {
                 DrawCircle(SquareRect(light).GetCenter(), CellSize * 0.12f, new Color(1f, 0.7f, 0.25f));
             }
@@ -793,6 +814,7 @@ namespace WoundBoundGame
             backlashBox.Visible = spells.Count > 0;
             sustainBox.Visible = armedSpell is { } s && SpellCalculator.CanBeSustained(s.SpellType);
             thresholdPicker.Visible = armedSpell is { SpellType: SpellType.Buff or SpellType.Bane };
+            tapPicker.Visible = armedSpell is { Source: MagicSource.ElementalMagic };
         }
 
         /// <summary>
@@ -882,7 +904,9 @@ namespace WoundBoundGame
                     return $"{armedOne.Name}: {plan.Refusal}";
                 }
 
-                var paid = plan.WoundsPaid > 0 ? $"{plan.WoundsPaid} {plan.Track}" : "no wounds";
+                var paid = plan.Fuel is { } fuel
+                    ? $"{fuel.Cost} {fuel.Element} Fuel ({InventoryCalculator.DescribeFuelPayment(fuel, InventoryCalculator.FuelUnitsHeld(active.Build!, fuel.Element))})"
+                    : plan.WoundsPaid > 0 ? $"{plan.WoundsPaid} {plan.Track}" : "no wounds";
                 var roll = SpellCalculator.FixedThresholdFor(armedOne.SpellType) is { } against && armedOne.SpellType != SpellType.Heal
                     ? $", rolling 2d12+{plan.CastBonus} ({plan.CastAbility}) vs {against}"
                     : ", no roll to land";
@@ -1152,7 +1176,12 @@ namespace WoundBoundGame
                 thresholdPicker.AddItem(threshold.ToString());
             }
 
-            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker })
+            tapPicker = new OptionButton { TooltipText = "Where an Elemental spell's Fuel comes from, after what the place offers. A tapped source is spent whole — and a light goes out with it." };
+            tapPicker.AddItem("Fuel: pack only");
+            tapPicker.AddItem("Fuel: tap the light in hand");
+            tapPicker.AddItem("Fuel: tap a fire beside me");
+
+            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker, tapPicker })
             {
                 castOptions.AddChild(option);
             }

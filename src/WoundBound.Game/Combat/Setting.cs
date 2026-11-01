@@ -30,6 +30,14 @@ namespace WoundBound.Game.Combat
         /// <summary>Built or sited fires — the only light that holds a grade out to Long.</summary>
         public IReadOnlySet<GridPosition> Fires { get; init; } = new HashSet<GridPosition>();
 
+        /// <summary>
+        /// How much of each element the place offers an Elemental caster (Core Rules §14, "Ambient
+        /// presence") — a breeze or a gale, loose soil or bedrock, a building alight or a forge in
+        /// use. Water is also read from the water on the map.
+        /// </summary>
+        public IReadOnlyDictionary<Rules.Enums.Element, Rules.Enums.AmbientPresence> Elements { get; init; } =
+            new Dictionary<Rules.Enums.Element, Rules.Enums.AmbientPresence>();
+
         /// <summary>Walls, pillars and anything else solid: nobody stands in them, moves through them, or sees or shoots through them.</summary>
         public IReadOnlySet<GridPosition> Walls { get; init; } = new HashSet<GridPosition>();
 

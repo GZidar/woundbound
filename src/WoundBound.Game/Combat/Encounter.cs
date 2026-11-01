@@ -250,6 +250,7 @@ namespace WoundBound.Game.Combat
             }
 
             hash.Add(lightsOnTheGround.Count);
+            hash.Add(spentFires.Count);
             return hash.ToHashCode();
         }
 
@@ -294,7 +295,7 @@ namespace WoundBound.Game.Combat
                 best = grade < best ? grade : best;
             }
 
-            foreach (var fire in Setting.Fires)
+            foreach (var fire in Fires)
             {
                 if (RangeBandCalculator.BandForSquares(bands, fire.DistanceTo(square)) is { } band
                     && (Setting.Walls.Count == 0 || Sight.Clear(fire, square, Setting.IsWall)))
@@ -340,9 +341,11 @@ namespace WoundBound.Game.Combat
         /// <summary>Why the active character can't light a torch or lantern from their pack now, or null if they can: a light to light, a free hand, and the action.</summary>
         public static string? LightRefusal(Combatant combatant)
         {
-            if (combatant.Build is not { } build || !build.InventoryItems.Any(i => !i.IsLit && !i.IsStored && i.Quantity > 0 && InventoryCalculator.LooksLikeALightSource(i)))
+            if (combatant.Build is not { } build || !build.InventoryItems.Any(i => Lightable(combatant, i)))
             {
-                return $"{combatant.Name} has nothing to light.";
+                return combatant.DrainedLanterns.Count > 0
+                    ? $"{combatant.Name}'s lantern has no oil in it, and there's no flask to fill it from."
+                    : $"{combatant.Name} has nothing to light.";
             }
 
             if (!combatant.HasFreeHand)
@@ -382,12 +385,33 @@ namespace WoundBound.Game.Combat
                 return false;
             }
 
-            var light = build.InventoryItems.First(i => !i.IsLit && !i.IsStored && i.Quantity > 0 && InventoryCalculator.LooksLikeALightSource(i));
+            var light = build.InventoryItems.First(i => Lightable(lighter, i));
+            var refilled = lighter.DrainedLanterns.Remove(light);
+            if (refilled)
+            {
+                var oil = build.InventoryItems.First(IsOil);
+                oil.Quantity--;
+            }
+
             light.IsLit = true;
             lighter.ActionsRemaining--;
-            Write($"{lighter.Name} lights a {light.Name.Split(' ')[0].TrimEnd('e', 's').ToLowerInvariant()}.");
+            Write(refilled
+                ? $"{lighter.Name} fills their lantern from a flask of Oil and relights it."
+                : $"{lighter.Name} lights a {light.Name.Split(' ')[0].TrimEnd('e', 's').ToLowerInvariant()}.");
             return true;
         }
+
+        /// <summary>
+        /// A light in the pack that can be lit: unlit, not put away — and a lantern tapped dry only
+        /// with a flask of Oil to fill it from (Core Rules §14, "The lantern is the one carried
+        /// source the tap does not destroy").
+        /// </summary>
+        private static bool Lightable(Combatant combatant, InventoryItemDefinition item) =>
+            !item.IsLit && !item.IsStored && item.Quantity > 0 && InventoryCalculator.LooksLikeALightSource(item)
+            && (!combatant.DrainedLanterns.Contains(item) || combatant.Build!.InventoryItems.Any(IsOil));
+
+        private static bool IsOil(InventoryItemDefinition item) =>
+            item.Quantity > 0 && item.Name.Contains("oil", StringComparison.OrdinalIgnoreCase) && !InventoryCalculator.LooksLikeALightSource(item);
 
         /// <summary>The fight's goals besides dropping everybody (Core Rules §9, "Scenes and Challenges").</summary>
         public IReadOnlyList<Objective> Objectives { get; }

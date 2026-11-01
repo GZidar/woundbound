@@ -170,6 +170,15 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Why <paramref name="combatant"/> can't Sacrifice now, or null if they can.</summary>
         public static string? SacrificeRefusal(Combatant combatant) => Encounter.SacrificeRefusal(combatant);
 
+        /// <summary>Lights burning where they were dropped.</summary>
+        public IReadOnlyList<GridPosition> LightsOnTheGround => encounter.LightsOnTheGround;
+
+        /// <summary>The built fires still burning.</summary>
+        public IEnumerable<GridPosition> Fires => encounter.Fires;
+
+        /// <summary>The lights the party has: carried, dropped, and built fires.</summary>
+        public int PartyLights => Characters.Sum(c => c.CarriedLights) + encounter.LightsOnTheGround.Count + encounter.Fires.Count();
+
         /// <summary>Spells still at work on the board.</summary>
         public IReadOnlyList<SpellInPlay> SpellsInPlay => encounter.SpellsInPlay;
 

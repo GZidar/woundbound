@@ -88,7 +88,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             (SpellCast, CastPlan, double)? best = null;
             var ways = new List<SpellCast> { cast };
-            if (cast.Spell.Source is not (MagicSource.BloodMagic or MagicSource.ElementalMagic))
+            if (cast.Spell.Source == MagicSource.ElementalMagic)
+            {
+                // The fire to hand: the light in the hand, a torch on the ground, a built fire in reach.
+                ways.Add(cast with { Tap = FuelSource.Torch });
+                ways.Add(cast with { Tap = FuelSource.Lantern });
+                ways.AddRange(View.LightsOnTheGround.Where(l => l.DistanceTo(at) <= 1).Select(l => cast with { Tap = FuelSource.Torch, TapAt = l }));
+                ways.AddRange(View.Fires.Where(f => f.DistanceTo(at) <= 1).Select(f => cast with { Tap = FuelSource.Campfire, TapAt = f }));
+            }
+            else if (cast.Spell.Source != MagicSource.BloodMagic)
             {
                 ways.Add(cast with { PayInBody = true });
             }
@@ -136,6 +144,17 @@ namespace WoundBound.Game.Combat.Brains.Utility
             if (cast.Overclock)
             {
                 price += 0.3;
+            }
+
+            if (plan.Fuel is { } fuel)
+            {
+                price += 0.3 * fuel.FromCarried;
+                if (fuel.SourceSpent > 0)
+                {
+                    // The source is spent whole, and a burning one was a light: in the dark, putting
+                    // it out costs everybody it lit — the party's last light most of all.
+                    price += 0.4 + (View.Setting.IsUnlit ? (View.PartyLights <= 1 ? 3.0 : 1.2) : 0);
+                }
             }
 
             return price;

@@ -14,7 +14,7 @@ public class SpellTests
     /// Mirella and Elthric, with Salla beside them, against a Roadside Bandit and a Bandit Ambusher
     /// set where a test wants them — in daylight, on open ground.
     /// </summary>
-    private static Encounter Casters(int[] dice, (int X, int Y)? bandit = null, (int X, int Y)? ambusher = null, bool passiveGm = false)
+    private static Encounter Casters(int[] dice, (int X, int Y)? bandit = null, (int X, int Y)? ambusher = null, bool passiveGm = false, Setting? setting = null)
     {
         var combatants = new List<Combatant>
         {
@@ -26,7 +26,7 @@ public class SpellTests
         };
 
         return new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, combatants, Data.RangeBands, new ScriptedDice(dice),
-            passiveGm ? new HoldingGm() : null);
+            passiveGm ? new HoldingGm() : null, setting: setting, environment: Data.Environment);
     }
 
     /// <summary>A GM whose creatures stand where they are and do nothing.</summary>
@@ -57,7 +57,7 @@ public class SpellTests
             elthric.DodgeThreshold, elthric.ResolveThreshold!.Value, elthric.StabilityThreshold));
 
         Assert.Equal(["Smite", "Scourging Light", "Vital Transfer", "Blessing"], mirella.Spells.Select(s => s.Name));
-        Assert.Equal(["Mind Spike", "Foresight", "Telekinetic Shove", "Blood Mist"], elthric.Spells.Select(s => s.Name));
+        Assert.Equal(["Mind Spike", "Foresight", "Telekinetic Shove", "Blood Mist", "Flame Burst", "Conflagration"], elthric.Spells.Select(s => s.Name));
         Assert.True(elthric.HasOverclock);
         Assert.True(mirella.HasSacrifice && elthric.HasSacrifice);
     }
@@ -320,6 +320,124 @@ public class SpellTests
         }
 
         Assert.True(casts > 0);
+    }
+
+    private static Rules.Models.InventoryItemDefinition Torches(Combatant c) => c.Build!.InventoryItems.Single(i => i.Name.StartsWith("Torches"));
+
+    [Fact]
+    public void FlameBurst_TapsTheTorchInHand_CastWithIntellect_AndTheLightGoesWithIt()
+    {
+        // Core Rules §11's Example of Play: one target, a Ray, Short — 1 Fuel, from the torch.
+        // 11+9 +2 (Intellect +1, Tier 1) = 22, a hit; d6 = 4, the bandit's leather takes 1.
+        var encounter = Casters([11, 9, 4], bandit: (4, 3));
+        var elthric = Named(encounter, "Elthric Dane");
+        var bandit = Named(encounter, "Bandit");
+        Torches(elthric).IsLit = true;
+        encounter.TryBeginTurn(elthric);
+
+        var cast = new SpellCast(Spell(elthric, "Flame Burst")) { Target = bandit, Tap = FuelSource.Torch };
+        var plan = encounter.PlanCast(elthric, cast);
+        Assert.Null(plan.Refusal);
+        Assert.Equal((Ability.Intellect, 2, 1, 1, 0), (plan.CastAbility, plan.CastBonus, plan.Cost, plan.Fuel!.FromSource, plan.WoundsPaid));
+
+        Assert.True(encounter.TryCast(cast));
+
+        Assert.Equal(bandit.BodyMax - 3, bandit.Body);
+        Assert.False(Torches(elthric).IsLit);
+        Assert.Equal(5, Torches(elthric).Quantity);
+        Assert.Equal(0, elthric.CarriedLights);
+        Assert.Equal((elthric.MindMax, elthric.BodyMax), (elthric.Mind, elthric.Body));
+    }
+
+    [Fact]
+    public void WithNoFireToHand_AnElementalSpellCantBePaidFor_AndOverclockCantHelp()
+    {
+        var encounter = Casters([], bandit: (4, 3));
+        var elthric = Named(encounter, "Elthric Dane");
+        encounter.TryBeginTurn(elthric);
+        var burst = new SpellCast(Spell(elthric, "Flame Burst")) { Target = Named(encounter, "Bandit") };
+
+        Assert.Contains("1 short", encounter.PlanCast(elthric, burst).Refusal);
+        Assert.Contains("isn't holding a lit torch", encounter.PlanCast(elthric, burst with { Tap = FuelSource.Torch }).Refusal);
+        Assert.Contains("Fuel, not wounds", encounter.PlanCast(elthric, burst with { Overclock = true }).Refusal);
+    }
+
+    [Fact]
+    public void AbundantFire_PaysTheWholeCost_AndTheTorchStaysLit()
+    {
+        var forge = Setting.Daylight with { Name = "The smithy, forge in use", Elements = new Dictionary<Element, AmbientPresence> { [Element.Fire] = AmbientPresence.Abundant } };
+        var encounter = Casters([], bandit: (8, 3), setting: forge);
+        var elthric = Named(encounter, "Elthric Dane");
+        Torches(elthric).IsLit = true;
+        encounter.TryBeginTurn(elthric);
+
+        // Middle range: 2 Fuel, both off the forge — and with nothing left to pay, the torch isn't drawn on.
+        var plan = encounter.PlanCast(elthric, new SpellCast(Spell(elthric, "Flame Burst")) { Target = Named(encounter, "Bandit"), Tap = FuelSource.Torch });
+        Assert.Equal((2, 2, 0), (plan.Cost, plan.Fuel!.FromAmbient, plan.Fuel.SourceSpent));
+    }
+
+    [Fact]
+    public void ABuiltFire_InReach_PaysTwo_AndBurnsDown()
+    {
+        // A Conflagration over the bandit at Middle range: 2 Fuel, all of it from the campfire beside him.
+        var camp = Setting.Daylight with { Name = "The camp", Fires = new HashSet<GridPosition> { new(3, 2) } };
+        var encounter = Casters([1, 2], bandit: (9, 3), setting: camp);
+        var elthric = Named(encounter, "Elthric Dane");
+        encounter.TryBeginTurn(elthric);
+
+        var cast = new SpellCast(Spell(elthric, "Conflagration")) { Corner = new GridPosition(9, 3), Tap = FuelSource.Campfire, TapAt = new GridPosition(3, 2) };
+        var plan = encounter.PlanCast(elthric, cast);
+        Assert.Null(plan.Refusal);
+        Assert.Equal((2, 2), (plan.Cost, plan.Fuel!.FromSource));
+
+        Assert.True(encounter.TryCast(cast));
+        Assert.Empty(encounter.Fires);
+    }
+
+    [Fact]
+    public void ATappedLantern_GoesCold_AndNeedsAFlaskOfOilAndAnActionToRelight()
+    {
+        var encounter = Casters([1, 2], bandit: (4, 3));
+        var elthric = Named(encounter, "Elthric Dane");
+        Torches(elthric).IsStored = true;
+        var lantern = new Rules.Models.InventoryItemDefinition { Name = "Lantern", Quantity = 1, IsLit = true };
+        var oil = new Rules.Models.InventoryItemDefinition { Name = "Oil (flask)", Quantity = 1 };
+        elthric.Build!.InventoryItems.Add(lantern);
+        encounter.TryBeginTurn(elthric);
+
+        Assert.True(encounter.TryCast(new SpellCast(Spell(elthric, "Flame Burst")) { Target = Named(encounter, "Bandit"), Tap = FuelSource.Lantern }));
+        Assert.False(lantern.IsLit);
+        Assert.Equal(1, lantern.Quantity);
+
+        Assert.True(encounter.TryBuyExtraAction());
+        Assert.Contains("no oil", Encounter.LightRefusal(elthric));
+        elthric.Build.InventoryItems.Add(oil);
+        Assert.True(encounter.TryLight());
+        Assert.True(lantern.IsLit);
+        Assert.Equal(0, oil.Quantity);
+    }
+
+    [Fact]
+    public void TheUtilityBrain_ReachesForFire_WhenThoughtAndBloodAreRunningOut()
+    {
+        // One Mind left — a Spike would Stun him — too little Body to bleed, and nothing left to Heal: the torch it is.
+        var encounter = Casters([], bandit: (5, 3));
+        var elthric = Named(encounter, "Elthric Dane");
+        Torches(elthric).IsLit = true;
+        (elthric.Mind, elthric.Body, elthric.Stamina) = (1, 2, 2);
+        elthric.TendEligible[WoundType.Body] = false; // Healed already: the Heal action has nothing more to give.
+        encounter.TryBeginTurn(elthric);
+        elthric.HasMove = false; // It would step for a better angle first; with the move gone, it casts from here.
+
+        var step = new Combat.Brains.Utility.UtilityPartyBrain(Combat.Brains.Utility.BrainSkill.Best)
+            .NextStep(encounter.View, elthric);
+
+        var planner = new Combat.Brains.Utility.TurnPlanner(new Combat.Brains.Utility.Assessor(encounter.View), Combat.Brains.Utility.BrainSkill.Best);
+        var best = planner.Options(elthric, false, 1, real: true).OrderByDescending(o => o.Score).Take(6).Select(o => $"{o.Score:0.00} {o.Why}");
+        Assert.True(step is Combat.Brains.PartyStep.Cast, "Chose instead: " + string.Join(" | ", best));
+        var cast = (Combat.Brains.PartyStep.Cast)step;
+        Assert.Equal("Flame Burst", cast.Spell.Spell.Name);
+        Assert.Equal(FuelSource.Torch, cast.Spell.Tap);
     }
 
     /// <summary>Everybody but <paramref name="last"/> ends their turn, and the adversaries take theirs, until it's <paramref name="last"/>'s pick next round.</summary>

@@ -57,6 +57,18 @@ namespace WoundBound.Game.Combat
         /// <summary>Declared Sustained, to be held past the start of the caster's next turn for Stamina (Core Rules §11).</summary>
         public bool Sustain { get; init; }
 
+        /// <summary>
+        /// The fire, water or earth an Elemental spell draws on (Core Rules §14, "A carried or built
+        /// source"), spent whole: <see cref="FuelSource.Torch"/> or <see cref="FuelSource.Lantern"/>
+        /// in the caster's hand — or, with <see cref="TapAt"/>, a torch burning on the ground there;
+        /// <see cref="FuelSource.Campfire"/> for a built fire at <see cref="TapAt"/>. None pays from
+        /// the pack after whatever the place offers.
+        /// </summary>
+        public FuelSource Tap { get; init; } = FuelSource.None;
+
+        /// <summary>Where the tapped source is, when it isn't in the caster's hand.</summary>
+        public GridPosition? TapAt { get; init; }
+
         /// <summary>A Shift's straight line, one square's step — any of the eight ways. Null drives the target straight away from the caster.</summary>
         public (int X, int Y)? Direction { get; init; }
 
@@ -84,6 +96,9 @@ namespace WoundBound.Game.Combat
 
         /// <summary>The wounds the cast will cost once Overclock has paid its share.</summary>
         public int WoundsPaid { get; init; }
+
+        /// <summary>How an Elemental spell's Fuel is paid: ambient presence, the tapped source, the pack. Null for Pure Magic.</summary>
+        public Rules.Models.FuelPayment? Fuel { get; init; }
 
         /// <summary>Every square the spell covers — one for a Ray, none for a Touch.</summary>
         public IReadOnlyList<GridPosition> Area => Squares ?? [];
@@ -177,6 +192,20 @@ namespace WoundBound.Game.Combat
             return text.Contains("hasten") || text.Contains("quicken") ? MotionKind.Quicken
                 : text.Contains("moves the target") || text.Contains("shift") || text.Contains("shove") || text.Contains("hurl") ? MotionKind.Shift
                 : MotionKind.Bind;
+        }
+
+        /// <summary>
+        /// The element an Elemental spell works, read from what it is: flame and fire, stone and
+        /// earth, wind and gale, water. Null for a spell that names none.
+        /// </summary>
+        public static Element? ElementOf(SpellDefinition spell)
+        {
+            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            return text.Contains("flame") || text.Contains("fire") || text.Contains("conflagration") ? Element.Fire
+                : text.Contains("stone") || text.Contains("earth") ? Element.Earth
+                : text.Contains("wind") || text.Contains("gale") || text.Contains("air") ? Element.Air
+                : text.Contains("water") ? Element.Water
+                : null;
         }
 
         /// <summary>How far a Shift carries its target, by Tier: Short, Middle, Long — 4, 8 or 16 squares (Core Rules §11).</summary>

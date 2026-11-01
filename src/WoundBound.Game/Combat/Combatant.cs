@@ -349,6 +349,9 @@ namespace WoundBound.Game.Combat
         /// <summary>Has used Sacrifice this round.</summary>
         public bool HasSacrificedThisRound { get; internal set; }
 
+        /// <summary>Lanterns tapped for a spell: cold and intact, needing a flask of Oil before they'll light again (Core Rules §14).</summary>
+        internal HashSet<InventoryItemDefinition> DrainedLanterns { get; } = new();
+
         /// <summary>The one spell this caster is Sustaining, if any (Core Rules §11, "One at a time").</summary>
         public string? Sustaining { get; internal set; }
 

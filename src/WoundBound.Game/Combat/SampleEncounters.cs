@@ -153,15 +153,20 @@ namespace WoundBound.Game.Combat
             Experiences = { "Has ministered in the many villages that dot the land, and travelled the region extensively", "Cross Trained (Agility)" },
             Weapons = { CombatantFactory.InHand(data.Weapon("Short Sword")) },
             Armour = { new ArmourDefinition { Name = "Leather", Weight = ArmourWeight.Light, IsEquipped = true } },
-            InventoryItems = { new InventoryItemDefinition { Name = "Lantern", Quantity = 1, IsLit = lantern } },
+            InventoryItems =
+            {
+                new InventoryItemDefinition { Name = "Lantern", Quantity = 1, IsLit = lantern },
+                new InventoryItemDefinition { Name = "Oil (flask)", Quantity = 1 },
+            },
             Spells = { data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Vital Transfer"), data.Spell("Blessing") },
         };
 
         /// <summary>
         /// Elthric Dane, Cerebral Blood Mage, from the Quickstart Adventure: a dagger, a torch, and
         /// the four spells on his sheet — Mind Spike, Foresight, Telekinetic Shove and Blood Mist. He
-        /// casts with Focus whichever pool pays, and Overclocks once a round. He is Trained in
-        /// Elemental Magic (Fire), which isn't in yet.
+        /// casts with Focus whichever pool pays, and Overclocks once a round. Trained in Elemental
+        /// Magic (Fire), he also builds Flame Burst and Conflagration — cast with Intellect, paid in
+        /// Fuel, and his torches are the fire he carries (Core Rules §11, "Example of Play: Elemental Magic").
         /// </summary>
         /// <param name="torch">A lit torch in his free hand.</param>
         public static CharacterBuild ElthricDane(GameData data, bool torch = false) => new()
@@ -182,7 +187,11 @@ namespace WoundBound.Game.Combat
             Experiences = { "Studied ancient languages and cyphers", "Trained in Elemental Magic (Fire)" },
             Weapons = { CombatantFactory.InHand(data.Weapon("Dagger")) },
             InventoryItems = { new InventoryItemDefinition { Name = "Torches (bundle of 3)", Quantity = 6, IsLit = torch } },
-            Spells = { data.Spell("Mind Spike"), data.Spell("Foresight"), data.Spell("Telekinetic Shove"), data.Spell("Blood Mist") },
+            Spells =
+            {
+                data.Spell("Mind Spike"), data.Spell("Foresight"), data.Spell("Telekinetic Shove"), data.Spell("Blood Mist"),
+                data.Spell("Flame Burst"), data.Spell("Conflagration"),
+            },
         };
 
         /// <summary>

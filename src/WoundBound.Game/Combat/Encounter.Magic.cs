@@ -79,11 +79,6 @@ namespace WoundBound.Game.Combat
                 return CastPlan.Refused($"{spell.SpellType} spells aren't in the game yet.");
             }
 
-            if (spell.Source == MagicSource.ElementalMagic)
-            {
-                return CastPlan.Refused("Elemental Magic isn't in the game yet.");
-            }
-
             // Which access pays for it, and what it rolls (Core Rules §11, "Pure Magic", "Bleeding for Power").
             if (caster.MagicAccess.FirstOrDefault(a => a.Source == spell.Source) is not { } access)
             {
@@ -95,9 +90,44 @@ namespace WoundBound.Game.Combat
                 return CastPlan.Refused($"{spell.Name} is {spell.SpellTier}, past the {access.MaxSpellTier} {caster.Name} can cast.");
             }
 
-            WoundType track;
+            // Elemental Magic: the trained element only, and never a Heal (Core Rules §11, "Elemental Magic").
+            Element? element = null;
+            if (spell.Source == MagicSource.ElementalMagic)
+            {
+                if (SpellArea.ElementOf(spell) is not { } worked)
+                {
+                    return CastPlan.Refused($"{spell.Name} doesn't say which element it works.");
+                }
+
+                if (access.TrainedElements.Count > 0 && !access.TrainedElements.Contains(worked))
+                {
+                    return CastPlan.Refused($"{caster.Name} isn't trained in {worked}.");
+                }
+
+                if (spell.SpellType == SpellType.Heal)
+                {
+                    return CastPlan.Refused("Only Blood Magic can heal — no element can close a wound.");
+                }
+
+                element = worked;
+            }
+            else if (cast.Tap != FuelSource.None)
+            {
+                return CastPlan.Refused("Only Elemental Magic is paid in Fuel.");
+            }
+
+            WoundType? track;
             Ability ability;
-            if (spell.Source == MagicSource.BloodMagic)
+            if (element is not null)
+            {
+                if (cast.PayInBody)
+                {
+                    return CastPlan.Refused("Elemental Magic is paid in Fuel — there's no blood to bleed into it.");
+                }
+
+                (track, ability) = (null, access.CastAbility);
+            }
+            else if (spell.Source == MagicSource.BloodMagic)
             {
                 (track, ability) = (WoundType.Body, access.CastAbility);
             }
@@ -254,6 +284,11 @@ namespace WoundBound.Game.Combat
             var wounds = cost;
             if (cast.Overclock)
             {
+                if (element is not null)
+                {
+                    return CastPlan.Refused("Overclock pays a wound of a spell's cost, and Elemental Magic costs Fuel, not wounds.");
+                }
+
                 if (!caster.HasOverclock)
                 {
                     return CastPlan.Refused("Only a Cerebral character can Overclock.");
@@ -289,16 +324,35 @@ namespace WoundBound.Game.Combat
             }
 
             var sacrificed = cast.Sacrifice ? 1 : 0;
-            var payRefusal = track == WoundType.Body
-                ? PlayStateCalculator.SpendRefusal(WoundType.Body, caster.Body, caster.Body, wounds + sacrificed, false)
-                : PlayStateCalculator.SpendRefusal(WoundType.Body, caster.Body, caster.Body, sacrificed, false)
-                  ?? PlayStateCalculator.SpendRefusal(track, caster.Track(track).Current, caster.Body - sacrificed, wounds, cast.Backlash);
+            FuelPayment? fuel = null;
+            if (element is { } fuelled)
+            {
+                if (FuelRefusal(caster, from, fuelled, cast) is { } noSource)
+                {
+                    return CastPlan.Refused(noSource);
+                }
+
+                fuel = InventoryCalculator.PlanFuelPayment(build, fuelled, cost, AmbientAt(fuelled, from), cast.Tap);
+                if (!fuel.IsFullyPaid)
+                {
+                    return CastPlan.Refused($"{spell.Name} needs {cost} {fuelled} Fuel, and that leaves it {fuel.Shortfall} short.");
+                }
+
+                wounds = 0;
+            }
+
+            var payRefusal = track is not { } paying
+                ? PlayStateCalculator.SpendRefusal(WoundType.Body, caster.Body, caster.Body, sacrificed, false)
+                : paying == WoundType.Body
+                    ? PlayStateCalculator.SpendRefusal(WoundType.Body, caster.Body, caster.Body, wounds + sacrificed, false)
+                    : PlayStateCalculator.SpendRefusal(WoundType.Body, caster.Body, caster.Body, sacrificed, false)
+                      ?? PlayStateCalculator.SpendRefusal(paying, caster.Track(paying).Current, caster.Body - sacrificed, wounds, cast.Backlash);
             if (payRefusal is not null)
             {
                 return CastPlan.Refused(payRefusal);
             }
 
-            return new CastPlan(null, origin, range, cost, track, ability, castBonus, squares, caught, motion) { WoundsPaid = wounds };
+            return new CastPlan(null, origin, range, cost, track, ability, castBonus, squares, caught, motion) { WoundsPaid = wounds, Fuel = fuel };
         }
 
         /// <summary>Why <paramref name="combatant"/> can't Sacrifice now, or null if they can (Core Rules §3, "Sacrifice").</summary>
@@ -357,6 +411,28 @@ namespace WoundBound.Game.Combat
 
                 caster.TendEligible[track] = true;
                 paid.Insert(0, $"{plan.WoundsPaid} {track}");
+            }
+
+            if (plan.Fuel is { } fuel)
+            {
+                InventoryCalculator.PayFuelCost(caster.Build!, fuel);
+                var parts = new List<string>();
+                if (fuel.FromAmbient > 0)
+                {
+                    parts.Add($"{fuel.FromAmbient} from the {fuel.Element} around them");
+                }
+
+                if (fuel.SourceSpent > 0)
+                {
+                    parts.Add($"{fuel.FromSource} from {Tap(caster, cast)}");
+                }
+
+                if (fuel.FromCarried > 0)
+                {
+                    parts.Add($"{fuel.FromCarried} {fuel.Element} Fuel from the pack");
+                }
+
+                paid.Add(parts.Count == 0 ? "no Fuel" : string.Join(", ", parts));
             }
 
             if (cast.Sacrifice)
