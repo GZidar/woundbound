@@ -48,6 +48,10 @@ public class GmBrainTests
 
         encounter.RunAdversaryTurn();
 
+        // Stepping out of the fighter's reach offers the fighter a reaction; they let it go.
+        Assert.Equal(ReactionKind.LeaverReaction, encounter.Pending?.Kind);
+        Assert.True(encounter.RespondToLeaver(LeaverResponse.LetThemGo));
+
         Assert.Contains(encounter.Log, line => line.StartsWith("Ratkin Biter attacks"));
         Assert.Equal(new GridPosition(7, 2), biter.Position);
     }

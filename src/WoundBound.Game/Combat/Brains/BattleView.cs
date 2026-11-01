@@ -44,6 +44,21 @@ namespace WoundBound.Game.Combat.Brains
 
         public bool IsOnBoard(GridPosition square) => encounter.IsOnBoard(square);
 
+
+        /// <summary>What the fight is about besides dropping everybody.</summary>
+        public IReadOnlyList<Objective> Objectives => encounter.Objectives;
+
+        /// <summary>Squares from <paramref name="square"/> to the nearest character still fighting.</summary>
+        public int DistanceToNearestCharacter(GridPosition square) =>
+            Characters.Select(c => c.Position.DistanceTo(square)).DefaultIfEmpty(int.MaxValue).Min();
+
+        /// <summary>Whether a character still fighting has <paramref name="square"/> within Long. An adversary nobody does has left the board.</summary>
+        public bool IsWithinLongOfParty(GridPosition square) => encounter.IsWithinLongOfParty(square);
+
+        /// <summary>Whether a fight objective is about keeping <paramref name="combatant"/> from getting away.</summary>
+        public bool MustNotEscape(Combatant combatant) =>
+            Objectives.Any(o => o is Objective.NoneEscape || (o is Objective.DontLetEscape d && d.Who == combatant));
+
         /// <summary>Whoever is standing on <paramref name="square"/> and still fighting, if anybody.</summary>
         public Combatant? At(GridPosition square) => encounter.At(square);
 

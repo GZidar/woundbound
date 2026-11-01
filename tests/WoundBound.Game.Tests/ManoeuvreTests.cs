@@ -59,6 +59,8 @@ public class ManoeuvreTests
         var (encounter, _, biter) = Beside(6, 6);
 
         encounter.TryControl(ControlAction.Trip, biter);
+        // Shoved out of the fighter's own reach: the fighter may react to that too, and doesn't.
+        Assert.True(encounter.RespondToLeaver(LeaverResponse.LetThemGo));
 
         Assert.True(biter.IsProne);
         Assert.Equal(new GridPosition(8, 2), biter.Position);
@@ -84,6 +86,7 @@ public class ManoeuvreTests
         fighter.Position = new GridPosition(6, 1);
 
         encounter.TryControl(ControlAction.Shove, biter);
+        Assert.True(encounter.RespondToLeaver(LeaverResponse.LetThemGo));
 
         Assert.Equal(new GridPosition(8, 3), biter.Position);
         Assert.False(biter.IsProne);

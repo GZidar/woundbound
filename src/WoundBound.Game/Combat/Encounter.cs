@@ -60,6 +60,11 @@ namespace WoundBound.Game.Combat
     /// <param name="Threshold">The Threshold the roll met — DT for a dodge, ST for standing firm.</param>
     /// <param name="Prompt">What's happening and what the spend would do, in a line for the player.</param>
     /// <param name="ImpactWounds">For an arrest: the Body wounds, before armour, the Shove would put them into something solid for.</param>
+    /// <param name="Options">For a reaction to somebody leaving reach: what the character may do about it, letting them go always among them.</param>
+    /// <remarks>
+    /// <see cref="Defender"/> is always whoever is being asked — for a reaction to a leaver, the
+    /// character whose reach is being left, with the leaver as <see cref="Attacker"/>.
+    /// </remarks>
     public sealed record PendingReaction(
         ReactionKind Kind,
         Combatant Defender,
@@ -67,7 +72,8 @@ namespace WoundBound.Game.Combat
         RollResult? Roll,
         int Threshold,
         string Prompt,
-        int ImpactWounds = 0)
+        int ImpactWounds = 0,
+        IReadOnlyList<LeaverResponse>? Options = null)
     {
         public int RaisedThreshold => Threshold + ThresholdModifierCalculator.ReactionBonus;
 
@@ -111,6 +117,7 @@ namespace WoundBound.Game.Combat
         private int? adversaryTurnCap;
         private EncounterPhase phaseBeforeReaction;
         private Action<bool>? resumeAfterReaction;
+        private Action<LeaverResponse>? resumeLeaver;
 
         /// <summary>The extra turn the GM chose to buy in this gap, decided when the gap was opened.</summary>
         private Combatant? extraTurnChosen;
@@ -119,7 +126,9 @@ namespace WoundBound.Game.Combat
         private readonly BattleView view;
 
         /// <param name="gm">Who plays the GM's side. Defaults to <see cref="SimpleGmBrain"/>.</param>
-        public Encounter(int width, int height, IEnumerable<Combatant> combatants, RangeBandTables bands, IDiceRoller dice, IGmBrain? gm = null)
+        /// <param name="objectives">What the fight is about besides dropping everybody; none by default.</param>
+        public Encounter(int width, int height, IEnumerable<Combatant> combatants, RangeBandTables bands, IDiceRoller dice, IGmBrain? gm = null,
+            IEnumerable<Objective>? objectives = null)
         {
             Width = width;
             Height = height;
@@ -127,6 +136,7 @@ namespace WoundBound.Game.Combat
             this.bands = bands;
             this.dice = dice;
             this.gm = gm ?? new SimpleGmBrain();
+            Objectives = objectives?.ToList() ?? new List<Objective>();
             view = new BattleView(this);
 
             StartRound();
@@ -136,6 +146,20 @@ namespace WoundBound.Game.Combat
         internal BattleView View => view;
 
         public int Width { get; }
+
+        /// <summary>The fight's goals besides dropping everybody (Core Rules §9, "Scenes and Challenges").</summary>
+        public IReadOnlyList<Objective> Objectives { get; }
+
+        /// <summary>
+        /// Whether <paramref name="square"/> is within Long — 16 squares — of a character still
+        /// fighting. An adversary no character has within Long has left the board: the fight goes
+        /// on until every one of them is down, gone that far, or has given up.
+        /// </summary>
+        public bool IsWithinLongOfParty(GridPosition square) =>
+            Fighting(Side.Party).Any(c => RangeBandCalculator.BandForSquares(bands, c.Position.DistanceTo(square)) is not null);
+
+        /// <summary>The furthest a band reaches, in squares — Long's 16.</summary>
+        public int LongRangeSquares => bands.Bands.Max(b => b.MaxSquares);
 
         public int Height { get; }
 
@@ -245,7 +269,15 @@ namespace WoundBound.Game.Combat
         /// their own reach — the body's, not a weapon's — and an action to spend. A Grab wants a
         /// free hand, and nobody holds two creatures at once. A Swarm can't be put hands on at all.
         /// </summary>
-        public static string? ControlRefusal(Combatant actor, ControlAction action, Combatant target)
+        public static string? ControlRefusal(Combatant actor, ControlAction action, Combatant target) =>
+            ControlRefusal(actor, action, target, asReaction: false);
+
+        /// <summary>
+        /// As <see cref="ControlRefusal(Combatant, ControlAction, Combatant)"/>, or — with
+        /// <paramref name="asReaction"/> — as the reaction leaving the actor's reach triggers: no
+        /// action needed, but a tactical spend (Core Rules §9, "Against a creature on the move").
+        /// </summary>
+        public static string? ControlRefusal(Combatant actor, ControlAction action, Combatant target, bool asReaction)
         {
             if (actor.IsOutOfFight)
             {
@@ -257,7 +289,12 @@ namespace WoundBound.Game.Combat
                 return $"{target.Name} isn't an enemy still fighting.";
             }
 
-            if (actor.ActionsRemaining < 1)
+            if (asReaction && TacticalSpendRefusal(actor) is { } cannotSpend)
+            {
+                return cannotSpend;
+            }
+
+            if (!asReaction && actor.ActionsRemaining < 1)
             {
                 return "No action left to do it with.";
             }
@@ -422,28 +459,33 @@ namespace WoundBound.Game.Combat
                 return false;
             }
 
-            var from = mover.Position;
-            var paidWith = PayMoves(mover, cost);
-            mover.HasMovedThisTurn = true;
+            Move(mover, square, cost, () => CheckForEnd());
+            return true;
+        }
 
-            // "Leaving an enemy's reach is a trigger" (Core Rules §9, "Movement"): from a square
-            // within that enemy's Reach to one outside it. The slice moves in a straight hop, so the
-            // squares it starts and ends on are the whole of the question.
-            var leftBehind = new Queue<Combatant>(Fighting(Side.Adversaries)
-                .Where(a => a.CanReach(from) && !a.CanReach(square)));
-
-            StrikeAtLeaver(mover, leftBehind, () =>
+        /// <summary>
+        /// Answers a <see cref="ReactionKind.LeaverReaction"/>: one of <see cref="PendingReaction.Options"/>.
+        /// Anything but letting them go costs 1 Stamina, a tactical spend that hands the GM an
+        /// Immediate Opportunity. False if there was no such question, or that wasn't an option.
+        /// </summary>
+        public bool RespondToLeaver(LeaverResponse response)
+        {
+            if (Phase != EncounterPhase.AwaitingReaction || Pending is not { Kind: ReactionKind.LeaverReaction } pending
+                || resumeLeaver is not { } resume || pending.Options?.Contains(response) != true)
             {
-                if (!mover.IsOutOfFight)
-                {
-                    mover.Position = square;
-                    var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(square));
-                    Write($"{mover.Name} moves {from.DistanceTo(square)} square(s) ({band}) for {paidWith}.");
-                }
+                return false;
+            }
 
-                CheckForEnd();
-            });
+            if (response != LeaverResponse.LetThemGo)
+            {
+                PayTacticalSpend(pending.Defender, CombatActionCatalog.ReactionStaminaCost);
+                GrantImmediateOpportunity(pending.Defender);
+            }
 
+            Pending = null;
+            resumeLeaver = null;
+            Phase = phaseBeforeReaction;
+            resume(response);
             return true;
         }
 
@@ -617,7 +659,8 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public bool RespondToReaction(bool spend)
         {
-            if (Phase != EncounterPhase.AwaitingReaction || Pending is not { } pending || resumeAfterReaction is not { } resume)
+            if (Phase != EncounterPhase.AwaitingReaction || Pending is not { } pending || resumeAfterReaction is not { } resume
+                || pending.Kind == ReactionKind.LeaverReaction)
             {
                 return false;
             }
@@ -816,11 +859,13 @@ namespace WoundBound.Game.Combat
             }
             else
             {
-                CloseIn();
-                if (!CheckForEnd())
+                CloseIn(Fighting(Side.Adversaries).Where(a => !a.HasActedThisRound).ToList(), () =>
                 {
-                    StartRound();
-                }
+                    if (!CheckForEnd())
+                    {
+                        StartRound();
+                    }
+                });
             }
         }
 
@@ -829,43 +874,56 @@ namespace WoundBound.Game.Combat
         /// round, each adversary that took no turn may take one move — no action, nothing riding on
         /// it — and it isn't a turn. The GM brain picks who goes where, one at a time.
         /// </summary>
-        private void CloseIn()
+        private void CloseIn(List<Combatant> idle, Action done)
         {
-            var idle = Fighting(Side.Adversaries).Where(a => !a.HasActedThisRound).ToList();
-
-            while (idle.Count > 0 && gm.NextCloseIn(view, idle) is { } closeIn)
+            idle.RemoveAll(a => a.IsOutOfFight);
+            if (IsOver || idle.Count == 0 || gm.NextCloseIn(view, idle) is not { } closeIn)
             {
-                var adversary = closeIn.Adversary;
-                if (!idle.Remove(adversary))
-                {
-                    throw new InvalidOperationException($"The GM brain closed in with {adversary.Name}, which took a turn this round or has already moved.");
-                }
-
-                if (closeIn.StandUp)
-                {
-                    if (!adversary.IsProne)
-                    {
-                        throw new InvalidOperationException($"The GM brain stood {adversary.Name} up at the round's end, but it isn't Prone.");
-                    }
-
-                    adversary.SetCondition(CharacterCondition.Prone, false);
-                    Write($"{adversary.Name} didn't act this round, and gets to its feet.");
-                    continue;
-                }
-
-                if (!CanMoveItself(adversary) || PriceOfMove(adversary, closeIn.Square) is not { } cost || cost > 1)
-                {
-                    throw new InvalidOperationException($"The GM brain closed {adversary.Name} in to {closeIn.Square}, which isn't a single free move away.");
-                }
-
-                // A move is a straight hop in the slice. A character's reaction attack against an
-                // adversary leaving their reach isn't in yet, so none is drawn here.
-                var from = adversary.Position;
-                adversary.Position = closeIn.Square;
-                var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(closeIn.Square));
-                Write($"{adversary.Name} didn't act this round, and closes in {from.DistanceTo(closeIn.Square)} square(s) ({band}).");
-                CheckHolds();
+                done();
+                return;
             }
+
+            var adversary = closeIn.Adversary;
+            if (!idle.Remove(adversary))
+            {
+                throw new InvalidOperationException($"The GM brain closed in with {adversary.Name}, which took a turn this round or has already moved.");
+            }
+
+            void Next() => CloseIn(idle, done);
+
+            if (closeIn.StandUp)
+            {
+                if (!adversary.IsProne)
+                {
+                    throw new InvalidOperationException($"The GM brain stood {adversary.Name} up at the round's end, but it isn't Prone.");
+                }
+
+                adversary.SetCondition(CharacterCondition.Prone, false);
+                Write($"{adversary.Name} didn't act this round, and gets to its feet.");
+                Next();
+                return;
+            }
+
+            if (!CanMoveItself(adversary) || PriceOfMove(adversary, closeIn.Square) is not { } cost || cost > 1)
+            {
+                throw new InvalidOperationException($"The GM brain closed {adversary.Name} in to {closeIn.Square}, which isn't a single free move away.");
+            }
+
+            // Ordinary movement in every other way: leaving a character's reach draws reactions.
+            Relocate(adversary, closeIn.Square, arrivedAt =>
+            {
+                var crossed = adversary.Position.DistanceTo(arrivedAt);
+                if (!adversary.IsOutOfFight)
+                {
+                    var from = adversary.Position;
+                    adversary.Position = arrivedAt;
+                    var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(arrivedAt));
+                    Write($"{adversary.Name} didn't act this round, and closes in {crossed} square(s) ({band}).");
+                    CheckHolds();
+                }
+
+                Next();
+            });
         }
 
         private Combatant CheckAdversary(Combatant chosen, string forWhat) =>
@@ -931,12 +989,10 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain moved {actor.Name} to {move.Square}, which it can't reach with what it has left.");
                     }
 
-                    // An adversary leaving a character's reach would draw a reaction attack here,
-                    // once characters can make them.
-                    Move(actor, move.Square, cost);
                     turn.HasMoved = true;
-                    TakeStep(turn, done);
+                    Move(actor, move.Square, cost, () => TakeStep(turn, done));
                     return;
+
 
                 case GmStep.Attack attack:
                     if (!CanAttack(actor, attack.Target))
@@ -1027,45 +1083,245 @@ namespace WoundBound.Game.Combat
         /// adversary's spend hands the GM nothing; Opportunities come only from the players' own
         /// choices (GM Reference §1).
         /// </summary>
-        private void StrikeAtLeaver(Combatant mover, Queue<Combatant> leftBehind, Action then)
+        /// <summary>
+        /// The squares a straight hop from <paramref name="from"/> to <paramref name="to"/> passes
+        /// over, <paramref name="from"/> first and <paramref name="to"/> last — a diagonal step for
+        /// as long as both axes still need one. The slice has no walls, so the straight line is
+        /// the route.
+        /// </summary>
+        private static List<GridPosition> PathBetween(GridPosition from, GridPosition to)
+        {
+            var path = new List<GridPosition> { from };
+            var at = from;
+            while (at != to)
+            {
+                at = new GridPosition(at.X + Math.Sign(to.X - at.X), at.Y + Math.Sign(to.Y - at.Y));
+                path.Add(at);
+            }
+
+            return path;
+        }
+
+        /// <summary>
+        /// Everybody whose reach <paramref name="mover"/> leaves going from where it stands to
+        /// <paramref name="to"/>. "Leaving an enemy's reach is a trigger" however it was caused
+        /// (Core Rules §9, "Movement").
+        /// </summary>
+        private Queue<Combatant> LeavingReachOf(Combatant mover, GridPosition to) =>
+            new(Fighting(mover.Side == Side.Party ? Side.Adversaries : Side.Party)
+                .Where(e => e.CanReach(mover.Position) && !e.CanReach(to)));
+
+        /// <summary>
+        /// Carries <paramref name="mover"/> towards <paramref name="to"/>, offering a reaction to
+        /// each enemy whose reach it leaves. Says where it ends up: <paramref name="to"/>, or the
+        /// square it was caught in — "the rest of that move is lost" (Core Rules §9). Leaves the
+        /// position for the caller to set, along with the log line.
+        /// </summary>
+        private void Relocate(Combatant mover, GridPosition to, Action<GridPosition> then) =>
+            ReactToLeaving(mover, PathBetween(mover.Position, to), LeavingReachOf(mover, to), caughtAt => then(caughtAt ?? to));
+
+        private void Move(Combatant mover, GridPosition square, int cost, Action then)
+        {
+            var paidWith = PayMoves(mover, cost);
+            mover.HasMovedThisTurn = true;
+
+            Relocate(mover, square, arrivedAt =>
+            {
+                if (!mover.IsOutOfFight)
+                {
+                    var from = mover.Position;
+                    mover.Position = arrivedAt;
+                    var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(arrivedAt));
+                    Write(arrivedAt == from
+                        ? $"{mover.Name} is stopped before it gets anywhere — {paidWith} spent for nothing."
+                        : $"{mover.Name} moves {from.DistanceTo(arrivedAt)} square(s) ({band}) for {paidWith}" +
+                          (arrivedAt == square ? "." : $", and is stopped at {arrivedAt}."));
+                    CheckHolds();
+                }
+
+                then();
+            });
+        }
+
+        /// <summary>
+        /// Offers each enemy in <paramref name="leftBehind"/> the reaction <paramref name="mover"/>
+        /// leaving its reach triggers, one at a time — for 1 Stamina, a tactical spend (Core Rules
+        /// §9, "Movement"). The GM's creatures strike or don't, as its brain says; a character may
+        /// strike, or Grab, Shove or Trip the leaver, rolled against Dodge and Stability both (§9,
+        /// "Against a creature on the move"). A catch stops the move: the callback gets the square
+        /// it happened in, or null if the mover got through. An adversary's spend hands the GM
+        /// nothing; a character's hands it an Immediate Opportunity.
+        /// </summary>
+        /// <param name="path">The squares the move passes over, where it starts first.</param>
+        private void ReactToLeaving(Combatant mover, List<GridPosition> path, Queue<Combatant> leftBehind, Action<GridPosition?> then)
         {
             while (leftBehind.TryDequeue(out var enemy))
             {
-                if (mover.IsOutOfFight)
-                {
-                    break;
-                }
-
-                if (TacticalSpendRefusal(enemy) is not null || !PlanAttack(enemy, mover).CanAttack)
+                if (mover.IsOutOfFight || enemy.IsOutOfFight || TacticalSpendRefusal(enemy) is not null)
                 {
                     continue;
                 }
 
-                if (enemy.Side == Side.Adversaries && !gm.StrikesAtLeaver(view, enemy, mover))
+                if (enemy.Side == Side.Adversaries)
                 {
-                    Write($"{mover.Name} leaves {enemy.Name}'s reach, and it lets them go.");
+                    if (!PlanAttack(enemy, mover).CanAttack)
+                    {
+                        continue;
+                    }
+
+                    if (!gm.StrikesAtLeaver(view, enemy, mover))
+                    {
+                        Write($"{mover.Name} leaves {enemy.Name}'s reach, and it lets them go.");
+                        continue;
+                    }
+
+                    PayTacticalSpend(enemy, CombatActionCatalog.ReactionStaminaCost);
+                    Write($"{mover.Name} leaves {enemy.Name}'s reach, and it strikes as they go (1 Stamina).");
+                    ResolveAttack(enemy, mover, asReaction: true, opportunityBonus: false, _ => ReactToLeaving(mover, path, leftBehind, then));
+                    return;
+                }
+
+                var options = new List<LeaverResponse> { LeaverResponse.LetThemGo };
+                if (PlanAttack(enemy, mover).CanAttack)
+                {
+                    options.Add(LeaverResponse.Strike);
+                }
+
+                options.AddRange(new[] { LeaverResponse.Grab, LeaverResponse.Shove, LeaverResponse.Trip }
+                    .Where(r => ControlRefusal(enemy, ControlFor(r), mover, asReaction: true) is null));
+
+                if (options.Count == 1)
+                {
                     continue;
                 }
 
-                PayTacticalSpend(enemy, CombatActionCatalog.ReactionStaminaCost);
-                Write($"{mover.Name} leaves {enemy.Name}'s reach, and it strikes as they go (1 Stamina).");
-                ResolveAttack(enemy, mover, asReaction: true, opportunityBonus: false, _ => StrikeAtLeaver(mover, leftBehind, then));
+                var catchAt = path.LastOrDefault(square => square.DistanceTo(enemy.Position) <= enemy.OwnReach
+                    && (square == mover.Position || At(square) is null), mover.Position);
+                var reacting = enemy;
+
+                Pending = new PendingReaction(ReactionKind.LeaverReaction, reacting, mover, Roll: null, Threshold: 0,
+                    $"{mover.Name} is leaving {reacting.Name}'s reach. Strike as they go, or Grab, Shove or Trip them — " +
+                    $"against their DT and ST both — for 1 Stamina?",
+                    Options: options);
+                phaseBeforeReaction = Phase;
+                Phase = EncounterPhase.AwaitingReaction;
+                resumeLeaver = response =>
+                {
+                    switch (response)
+                    {
+                        case LeaverResponse.LetThemGo:
+                            Write($"{mover.Name} leaves {reacting.Name}'s reach, and {reacting.Name} lets them go.");
+                            ReactToLeaving(mover, path, leftBehind, then);
+                            return;
+
+                        case LeaverResponse.Strike:
+                            Write($"{mover.Name} leaves {reacting.Name}'s reach, and {reacting.Name} strikes as they go (1 Stamina).");
+                            ResolveAttack(reacting, mover, asReaction: true, opportunityBonus: false, _ => ReactToLeaving(mover, path, leftBehind, then));
+                            return;
+
+                        default:
+                            ResolveReactiveControl(reacting, ControlFor(response), mover, catchAt, caught =>
+                            {
+                                if (caught)
+                                {
+                                    then(catchAt);
+                                }
+                                else
+                                {
+                                    ReactToLeaving(mover, path, leftBehind, then);
+                                }
+                            });
+                            return;
+                    }
+                };
+                Write(Pending.Prompt);
                 return;
             }
 
-            then();
+            then(null);
         }
 
-        private void Move(Combatant mover, GridPosition square, int cost)
+        private static ControlAction ControlFor(LeaverResponse response) => response switch
         {
-            var from = mover.Position;
-            mover.Position = square;
-            mover.HasMovedThisTurn = true;
-            var paidWith = PayMoves(mover, cost);
+            LeaverResponse.Grab => ControlAction.Grab,
+            LeaverResponse.Shove => ControlAction.Shove,
+            _ => ControlAction.Trip,
+        };
 
-            var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(square));
-            Write($"{mover.Name} moves {from.DistanceTo(square)} square(s) ({band}) for {paidWith}.");
-            CheckHolds();
+        /// <summary>
+        /// A Grab, Shove or Trip made as the reaction to a creature leaving reach (Core Rules §9,
+        /// "Against a creature on the move"): one roll, against Dodge Threshold and Stability
+        /// Threshold both, and it takes effect only if it meets both. The target answers as it
+        /// would a manoeuvre — 1 Stamina for +2 to either — and a Dodge boost against a critical can
+        /// Riposte it. Caught, the creature stops at <paramref name="catchAt"/>: held there, felled
+        /// there, or pushed on from there.
+        /// </summary>
+        private void ResolveReactiveControl(Combatant actor, ControlAction action, Combatant target, GridPosition catchAt, Action<bool> then)
+        {
+            var dt = target.DodgeThreshold;
+            var st = target.StabilityThreshold;
+            var roll = RollAgainst(actor.UnarmedAttackModifier, Math.Max(dt, st), advantage: false, AttacksAtDisadvantage(actor));
+            var verb = Verb(action);
+
+            void Finish(bool dodged, bool stoodFirm)
+            {
+                var finalDt = dt + (dodged ? ThresholdModifierCalculator.ReactionBonus : 0);
+                var finalSt = st + (stoodFirm ? ThresholdModifierCalculator.ReactionBonus : 0);
+                var final = Reread(roll, Math.Max(finalDt, finalSt));
+                var line = $"{actor.Name} tries to {verb} {target.Name} on the move: {DescribeRoll(final)} vs DT {finalDt} and ST {finalSt}" +
+                           (dodged ? " (+2 panic dodge)" : stoodFirm ? " (+2 standing firm)" : string.Empty);
+
+                if (final.Success != true)
+                {
+                    // A dodged critical is a Riposte: it comes back on the one who reached (§9, "Criticals").
+                    var overbalanced = final.IsCritical && (roll.Success != true || dodged);
+                    Write(line + (overbalanced
+                        ? $" — {(dodged ? "Riposte" : "critical failure")}! {actor.Name} overbalances and goes down, Prone."
+                        : $" — {target.Name} slips past."));
+                    if (overbalanced)
+                    {
+                        actor.SetCondition(CharacterCondition.Prone, true);
+                    }
+
+                    then(false);
+                    return;
+                }
+
+                target.Position = catchAt;
+                ApplyControl(actor, action, target, final.IsCritical, line + $" — caught at {catchAt}", () => then(true));
+            }
+
+            if (BoostWouldTurn(roll, dt))
+            {
+                OfferReaction(
+                    new PendingReaction(ReactionKind.PanicDodge, target, actor, roll, dt,
+                        $"{actor.Name} reaches for {target.Name} on the move: {roll.Total} against DT {dt}. A panic dodge (1 Stamina, +2) would slip it."),
+                    dodged =>
+                    {
+                        if (!dodged && BoostWouldTurn(roll, st))
+                        {
+                            OfferReaction(
+                                new PendingReaction(ReactionKind.StandFirm, target, actor, roll, st,
+                                    $"{actor.Name} reaches for {target.Name} on the move: {roll.Total} against ST {st}. Standing firm (1 Stamina, +2 ST) would stop it."),
+                                stood => Finish(false, stood));
+                            return;
+                        }
+
+                        Finish(dodged, false);
+                    });
+                return;
+            }
+
+            if (BoostWouldTurn(roll, st))
+            {
+                OfferReaction(
+                    new PendingReaction(ReactionKind.StandFirm, target, actor, roll, st,
+                        $"{actor.Name} reaches for {target.Name} on the move: {roll.Total} against ST {st}. Standing firm (1 Stamina, +2 ST) would stop it."),
+                    stood => Finish(false, stood));
+                return;
+            }
+
+            Finish(false, false);
         }
 
         /// <summary>
@@ -1244,9 +1500,16 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            // "A critical success adds another effect instead": a Shove also trips, a Trip also
-            // shoves, a Grab leaves the target Off-guard for as long as the hold lasts.
-            var critical = roll.IsCritical;
+            ApplyControl(actor, action, target, roll.IsCritical, line, then);
+        }
+
+        /// <summary>
+        /// What a Grab, Shove or Trip that worked does. "A critical success adds another effect
+        /// instead": a Shove also trips, a Trip also shoves, a Grab leaves the target Off-guard for
+        /// as long as the hold lasts (Core Rules §9, "Criticals").
+        /// </summary>
+        private void ApplyControl(Combatant actor, ControlAction action, Combatant target, bool critical, string line, Action then)
+        {
             switch (action)
             {
                 case ControlAction.Grab:
@@ -1332,17 +1595,13 @@ namespace WoundBound.Game.Combat
                         return;
                     }
 
-                    var from = target.Position;
-
                     // Shoved out of an enemy's reach is leaving it (Core Rules §9, "Forced Movement") —
-                    // the shover's own included. Only the GM's creatures make reactions yet.
-                    var leftBehind = new Queue<Combatant>(target.Side == Side.Party
-                        ? Fighting(Side.Adversaries).Where(a => a.CanReach(from) && !a.CanReach(destination))
-                        : Enumerable.Empty<Combatant>());
-
-                    StrikeAtLeaver(target, leftBehind, () =>
+                    // the shover's own included — and a foe shoved past somebody can be caught on the
+                    // way through, where the push ends.
+                    ReactToLeaving(target, PathBetween(target.Position, destination), LeavingReachOf(target, destination), caughtAt =>
                     {
-                        if (!target.IsOutOfFight)
+                        // Caught on the way through, the push ends where the catch put them.
+                        if (caughtAt is null && !target.IsOutOfFight)
                         {
                             target.Position = destination;
                             if (crossed > 0)
@@ -1628,20 +1887,42 @@ namespace WoundBound.Game.Combat
 
             // Whoever just went down lets go, or is let go of.
             CheckHolds();
+            CheckMorale();
 
             if (!Fighting(Side.Party).Any())
             {
                 Phase = EncounterPhase.Defeat;
                 Active = null;
                 Write("The party has fallen.");
+                ReportObjectives();
                 return true;
             }
 
-            if (!Fighting(Side.Adversaries).Any())
+            CheckDepartures();
+
+            // The fight stays in effect until every adversary has left the board — down, gone
+            // beyond Long of every character, or given up. Broken and held fast, with nobody left
+            // free to fight on beside them, they give up.
+            var stillOnField = Fighting(Side.Adversaries).ToList();
+            if (stillOnField.Count > 0 && stillOnField.All(a => a.IsBroken && a.HeldBy is not null))
+            {
+                foreach (var caught in stillOnField)
+                {
+                    caught.HasSurrendered = true;
+                    Write($"{caught.Name}, broken and held fast by {caught.HeldBy!.Name}, gives up.");
+                }
+
+                stillOnField.Clear();
+            }
+
+            if (stillOnField.Count == 0)
             {
                 Phase = EncounterPhase.Victory;
                 Active = null;
-                Write("The last foe falls. Victory!");
+                Write(combatants.Any(c => c.Side == Side.Adversaries && c.HasFled)
+                    ? "No foe is left on the board. Victory!"
+                    : "The last foe falls. Victory!");
+                ReportObjectives();
                 return true;
             }
 
@@ -1713,6 +1994,46 @@ namespace WoundBound.Game.Combat
             }
 
             return line;
+        }
+
+        /// <summary>
+        /// Breaks every creature that has reached its breaking point (GM Reference §8, "Let
+        /// non-Solo adversaries break"): it stops being willing to fight, and looks for a way out.
+        /// </summary>
+        private void CheckMorale()
+        {
+            foreach (var creature in Fighting(Side.Adversaries).Where(a => !a.IsBroken && a.Morale is not null).ToList())
+            {
+                var alliesDown = combatants.Count(c => c.Side == Side.Adversaries && c != creature
+                    && c.IsOutOfFight && !c.HasFled && !c.HasSurrendered);
+                if (creature.Morale!.IsBroken(creature, alliesDown))
+                {
+                    creature.IsBroken = true;
+                    Write($"{creature.Name} has had enough ({creature.Morale.Trait}) — it breaks, and looks for a way out.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Takes off the board every adversary no character has within Long — it has got clear,
+        /// and takes no further part. Whatever it was holding, it let go of to run.
+        /// </summary>
+        private void CheckDepartures()
+        {
+            foreach (var gone in Fighting(Side.Adversaries).Where(a => !IsWithinLongOfParty(a.Position)).ToList())
+            {
+                Release(gone, "lets go");
+                gone.HasFled = true;
+                Write($"{gone.Name} is beyond Long of everyone, and off the board.");
+            }
+        }
+
+        private void ReportObjectives()
+        {
+            foreach (var objective in Objectives)
+            {
+                Write($"Objective — {objective.Name}: {(objective.StatusIn(this) == ObjectiveStatus.Achieved ? "achieved" : "failed")}.");
+            }
         }
 
         private static string DisadvantageReason(Combatant attacker) => (attacker.IsStandingGround, attacker.IsOffGuard) switch

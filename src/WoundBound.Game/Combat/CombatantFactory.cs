@@ -69,6 +69,7 @@ namespace WoundBound.Game.Combat
             Armour = info.Armour,
             InnateSpeed = info.Speed,
             IsSwarm = info.Role == AdversaryRole.Swarm,
+            Morale = Morale.FromStatblock(info),
             IsMinion = info.Role == AdversaryRole.Minion,
             StaminaMax = info.Stamina,
             Stamina = info.Stamina,

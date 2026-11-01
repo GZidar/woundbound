@@ -24,6 +24,9 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Stood firm or arrested a shove.</summary>
         public int OtherReactions { get; internal set; }
+
+        /// <summary>Struck at, or reached for, an enemy leaving reach.</summary>
+        public int LeaverReactions { get; internal set; }
     }
 
     /// <summary>
@@ -65,6 +68,16 @@ namespace WoundBound.Game.Combat.Brains
 
                 case EncounterPhase.PartyTurn when encounter.Active is { } character:
                     TakePartyStep(character);
+                    return true;
+
+                case EncounterPhase.AwaitingReaction when encounter.Pending is { Kind: ReactionKind.LeaverReaction } leaving:
+                    var response = party.ReactsToLeaver(encounter.View, leaving);
+                    Tally.LeaverReactions += response == LeaverResponse.LetThemGo ? 0 : 1;
+                    if (!encounter.RespondToLeaver(response))
+                    {
+                        throw Refused($"{response} for {leaving.Defender.Name}", $"the options were {string.Join(", ", leaving.Options ?? [])}");
+                    }
+
                     return true;
 
                 case EncounterPhase.AwaitingReaction when encounter.Pending is { } pending:

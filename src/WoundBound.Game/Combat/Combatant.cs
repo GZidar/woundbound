@@ -195,7 +195,20 @@ namespace WoundBound.Game.Combat
         /// state (GM Reference §2); a character at 0 is Dying, which the slice treats as out of the
         /// fight since nobody is left to stabilise them.
         /// </summary>
-        public bool IsOutOfFight => IsUnconscious || (Side == Side.Party ? BodyStatus != BodyStatus.Healthy : Body <= 0);
+        public bool IsOutOfFight => IsUnconscious || HasFled || HasSurrendered
+            || (Side == Side.Party ? BodyStatus != BodyStatus.Healthy : Body <= 0);
+
+        /// <summary>When this creature stops being willing to fight; null for one that never will.</summary>
+        public Morale? Morale { get; init; }
+
+        /// <summary>Has reached its breaking point, and is looking for a way out rather than a fight (GM Reference §8).</summary>
+        public bool IsBroken { get; internal set; }
+
+        /// <summary>Has left the field, and takes no further part in the Challenge.</summary>
+        public bool HasFled { get; internal set; }
+
+        /// <summary>Gave up when the fight ended — caught in a hold as the rest of its side broke and ran.</summary>
+        public bool HasSurrendered { get; internal set; }
 
         /// <summary>Whether a melee blow could land on <paramref name="square"/> — within Reach, and not inside an Unwieldy haft.</summary>
         public bool CanReach(GridPosition square) => CanReachFrom(Position, square);

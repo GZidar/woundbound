@@ -39,6 +39,12 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Whether to spend 1 Stamina arresting a Shove, and stay put.</summary>
         bool ArrestsShove(BattleView view, PendingReaction reaction);
+
+        /// <summary>
+        /// What <see cref="PendingReaction.Defender"/> does about <see cref="PendingReaction.Attacker"/>
+        /// leaving their reach: one of <see cref="PendingReaction.Options"/>.
+        /// </summary>
+        LeaverResponse ReactsToLeaver(BattleView view, PendingReaction reaction);
     }
 
     /// <summary>One thing a party member does on their turn — one click.</summary>

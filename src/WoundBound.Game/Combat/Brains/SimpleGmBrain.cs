@@ -4,7 +4,9 @@ namespace WoundBound.Game.Combat.Brains
     /// The GM played simply: every creature goes for the nearest character. Whoever can already
     /// strike, or else whoever is nearest, takes the turn; it steps into reach with the move and
     /// keeps the action for the blow when it can, and spends both on closing the distance when it
-    /// can't. A placeholder for a GM that thinks — and a baseline to measure one against.
+    /// can't. A creature that has broken runs, putting as much ground between it and the party
+    /// as it can, until no character has it within Long and it's off the board.
+    /// A placeholder for a GM that thinks — and a baseline to measure one against.
     /// </summary>
     public class SimpleGmBrain : IGmBrain
     {
@@ -12,7 +14,7 @@ namespace WoundBound.Game.Combat.Brains
         {
             var targets = view.Characters.ToList();
             return view.Adversaries
-                .OrderBy(a => CanStrikeThisTurn(view, a) ? 0 : 1)
+                .OrderBy(a => a.IsBroken ? 1 : CanStrikeThisTurn(view, a) ? 0 : 2)
                 .ThenBy(a => targets.Min(t => a.Position.DistanceTo(t.Position)))
                 .First();
         }
@@ -26,7 +28,7 @@ namespace WoundBound.Game.Combat.Brains
         {
             var targets = view.Characters.ToList();
             return view.Adversaries
-                .Where(a => CanStrikeThisTurn(view, a))
+                .Where(a => !a.IsBroken && CanStrikeThisTurn(view, a))
                 .OrderBy(a => a.HasActedThisRound ? 0 : 1)
                 .ThenBy(a => targets.Min(t => a.Position.DistanceTo(t.Position)))
                 .FirstOrDefault();
@@ -38,6 +40,11 @@ namespace WoundBound.Game.Combat.Brains
             if (NearestTarget(view, actor) is not { } target)
             {
                 return GmStep.End;
+            }
+
+            if (actor.IsBroken)
+            {
+                return Run(view, turn);
             }
 
             // On its feet before anything else: a Prone creature is Off-guard and crawls.
@@ -80,8 +87,42 @@ namespace WoundBound.Game.Combat.Brains
             return closest is { } square ? new GmStep.Move(square) : GmStep.End;
         }
 
-        /// <summary>A Minion dropped by any blow that lands has every reason to turn whatever it can.</summary>
-        public virtual bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => true;
+        /// <summary>
+        /// A broken creature's turn: loose from any hold, up off the floor, and away from the party
+        /// as far as what it has left will carry it.
+        /// </summary>
+        protected static GmStep Run(BattleView view, GmTurn turn)
+        {
+            var actor = turn.Actor;
+            if (actor.HeldBy is not null)
+            {
+                return BattleView.BreakFreeRefusal(actor) is null ? new GmStep.BreakFree() : GmStep.End;
+            }
+
+            if (actor.IsProne && BattleView.StandUpRefusal(actor) is null)
+            {
+                return new GmStep.StandUp();
+            }
+
+            return AwayFromParty(view, actor, view.MovesAvailable(actor)) is { } square ? new GmStep.Move(square) : GmStep.End;
+        }
+
+        /// <summary>
+        /// The square within <paramref name="moves"/> furthest from the nearest character — out of
+        /// everyone's Long, if it can get there — the cheaper where it's no further; null if none is
+        /// further than where it stands.
+        /// </summary>
+        protected static GridPosition? AwayFromParty(BattleView view, Combatant actor, int moves) =>
+            view.SquaresWithin(actor, moves)
+                .Where(o => view.DistanceToNearestCharacter(o.Key) > view.DistanceToNearestCharacter(actor.Position))
+                .OrderByDescending(o => !view.IsWithinLongOfParty(o.Key))
+                .ThenByDescending(o => view.DistanceToNearestCharacter(o.Key))
+                .ThenBy(o => o.Value)
+                .Select(o => (GridPosition?)o.Key)
+                .FirstOrDefault();
+
+        /// <summary>A Minion dropped by any blow that lands has every reason to turn whatever it can — unless it's running.</summary>
+        public virtual bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => !adversary.IsBroken;
 
         public virtual bool PanicDodges(BattleView view, PendingReaction reaction) => true;
 
@@ -98,9 +139,18 @@ namespace WoundBound.Game.Combat.Brains
                 return new GmCloseIn(fallen, fallen.Position, StandUp: true);
             }
 
+            // The broken spend the move getting away.
+            foreach (var runner in stillIdle.Where(a => a.IsBroken && Encounter.CanMoveItself(a)))
+            {
+                if (AwayFromParty(view, runner, 1) is { } square)
+                {
+                    return new GmCloseIn(runner, square);
+                }
+            }
+
             foreach (var adversary in stillIdle.OrderBy(a => NearestTarget(view, a) is { } t ? t.Position.DistanceTo(a.Position) : int.MaxValue))
             {
-                if (!Encounter.CanMoveItself(adversary) || NearestTarget(view, adversary) is not { } target || adversary.CanReach(target.Position))
+                if (adversary.IsBroken || !Encounter.CanMoveItself(adversary) || NearestTarget(view, adversary) is not { } target || adversary.CanReach(target.Position))
                 {
                     continue;
                 }

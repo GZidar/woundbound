@@ -18,7 +18,9 @@ namespace WoundBoundGame
     /// </summary>
     public partial class Battle : Node2D
     {
-        private const int CellSize = 72;
+        /// <summary>The room the board is drawn in; a big field gets smaller squares to fit it.</summary>
+        private static readonly Vector2 BoardArea = new(800, 672);
+        private const int LargestCell = 72;
         private const double AdversaryTurnDelay = 0.7;
         private const double BotStepDelay = 0.4;
         private static readonly Vector2 BoardOrigin = new(24, 24);
@@ -67,12 +69,17 @@ namespace WoundBoundGame
         private Button standUpButton = null!;
         private Button breakFreeButton = null!;
         private Button letGoButton = null!;
+        private HFlowContainer leaverButtons = null!;
+        private string leaverButtonsFor = string.Empty;
 
         /// <summary>Grab, Shove or Trip, chosen from its button; the next foe clicked is the target. Null for a plain attack.</summary>
         private ControlAction? armed;
         private RichTextLabel logLabel = null!;
 
-        private float BoardPixelWidth => SampleEncounters.BoardWidth * CellSize;
+        /// <summary>How big a square is drawn: as big as fits the board area, up to <see cref="LargestCell"/>.</summary>
+        private int CellSize => encounter is null
+            ? LargestCell
+            : Mathf.Min(LargestCell, Mathf.Min((int)BoardArea.X / encounter.Width, (int)BoardArea.Y / encounter.Height));
 
         public override void _Ready()
         {
@@ -183,10 +190,16 @@ namespace WoundBoundGame
             var centre = rect.GetCenter();
             var radius = CellSize * 0.36f;
 
+            // Gone from the field altogether.
+            if (combatant.HasFled)
+            {
+                return;
+            }
+
             if (combatant.IsOutOfFight)
             {
                 // Left where it fell, so the board remembers the fight.
-                DrawString(font, new Vector2(rect.Position.X, centre.Y + 8), "✕", HorizontalAlignment.Center, CellSize, 28,
+                DrawString(font, new Vector2(rect.Position.X, centre.Y + 8), "✕", HorizontalAlignment.Center, CellSize, Mathf.Max(10, CellSize * 2 / 5),
                     new Color(0.6f, 0.6f, 0.6f, 0.5f));
                 return;
             }
@@ -209,7 +222,7 @@ namespace WoundBoundGame
             }
 
             DrawString(font, new Vector2(rect.Position.X, centre.Y + 6), Initials(combatant.Name), HorizontalAlignment.Center,
-                CellSize, 18, Colors.White);
+                CellSize, Mathf.Max(9, CellSize / 4), Colors.White);
 
             // What's been done to it, across the top of the square.
             var marks = string.Join(" ", new[]
@@ -217,15 +230,17 @@ namespace WoundBoundGame
                 combatant.IsProne ? "prone" : null,
                 combatant.HeldBy is not null ? "held" : null,
                 combatant.Holding is not null ? "holding" : null,
+                combatant.IsBroken ? "running" : null,
             }.Where(m => m is not null));
             if (marks.Length > 0)
             {
-                DrawString(font, new Vector2(rect.Position.X, rect.Position.Y + 13), marks, HorizontalAlignment.Center, CellSize, 11,
+                DrawString(font, new Vector2(rect.Position.X, rect.Position.Y + 13), marks, HorizontalAlignment.Center, CellSize, Mathf.Max(7, CellSize / 6),
                     new Color(1f, 0.85f, 0.5f));
             }
 
             // Body bar along the foot of the square.
-            var bar = new Rect2(rect.Position.X + 8, rect.End.Y - 10, CellSize - 16, 5);
+            var inset = CellSize / 9f;
+            var bar = new Rect2(rect.Position.X + inset, rect.End.Y - inset - 2, CellSize - inset * 2, Mathf.Max(2, CellSize / 14));
             DrawRect(bar, new Color(0, 0, 0, 0.6f));
             var fraction = Mathf.Clamp((float)combatant.Body / combatant.BodyMax, 0, 1);
             DrawRect(new Rect2(bar.Position, new Vector2(bar.Size.X * fraction, bar.Size.Y)), new Color(0.35f, 0.85f, 0.4f));
@@ -233,9 +248,12 @@ namespace WoundBoundGame
 
         private void StartEncounter()
         {
-            encounter = fightPicker.Selected == 1
-                ? SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller())
-                : SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller());
+            encounter = fightPicker.Selected switch
+            {
+                1 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller()),
+                2 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller()),
+                _ => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller()),
+            };
             shown = null;
             armed = null;
             stepPending = false;
@@ -309,6 +327,41 @@ namespace WoundBoundGame
                 (pending.WouldRiposte ? "\nIt's a critical, so the miss would be a Riposte: the attacker takes the wound." : string.Empty) +
                 "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM an Immediate Opportunity.";
 
+            // Somebody leaving reach: a button for each thing the character may do about it.
+            var isLeaver = pending.Kind == ReactionKind.LeaverReaction;
+            panicDodgeButton.Visible = !isLeaver;
+            takeHitButton.Visible = !isLeaver;
+            var wanted = isLeaver ? string.Join("|", pending.Options ?? []) + pending.Attacker.Name : string.Empty;
+            if (wanted != leaverButtonsFor)
+            {
+                foreach (var child in leaverButtons.GetChildren())
+                {
+                    child.QueueFree();
+                }
+
+                foreach (var option in isLeaver ? pending.Options ?? [] : [])
+                {
+                    var button = new Button
+                    {
+                        Text = option == LeaverResponse.LetThemGo ? "Let them go" : $"{option} (1 Stamina)",
+                        Disabled = bot is not null,
+                    };
+                    button.Pressed += () =>
+                    {
+                        encounter.RespondToLeaver(option);
+                        Refresh();
+                    };
+                    leaverButtons.AddChild(button);
+                }
+
+                leaverButtonsFor = wanted;
+            }
+
+            if (isLeaver)
+            {
+                return;
+            }
+
             (panicDodgeButton.Text, takeHitButton.Text) = pending.Kind switch
             {
                 ReactionKind.PanicDodge => ("Panic dodge (1 Stamina)", "Take the hit"),
@@ -328,7 +381,13 @@ namespace WoundBoundGame
                 EncounterPhase.Victory => "Victory!",
                 _ => "Defeat."
             } + $"\nGM Opportunities: {encounter.BankedOpportunities}/{Encounter.MaxBankedOpportunities} banked" +
-              (encounter.ImmediateOpportunities > 0 ? $", {encounter.ImmediateOpportunities} immediate" : string.Empty);
+              (encounter.ImmediateOpportunities > 0 ? $", {encounter.ImmediateOpportunities} immediate" : string.Empty) +
+              string.Concat(encounter.Objectives.Select(o => $"\nObjective: {o.Name} — " + o.StatusIn(encounter) switch
+              {
+                  ObjectiveStatus.Achieved => "achieved",
+                  ObjectiveStatus.Failed => "failed",
+                  _ => "in play",
+              }));
 
             UpdateReactionPrompt();
 
@@ -556,8 +615,8 @@ namespace WoundBoundGame
 
             var panel = new PanelContainer
             {
-                Position = new Vector2(BoardOrigin.X * 2 + BoardPixelWidth, BoardOrigin.Y),
-                CustomMinimumSize = new Vector2(1280 - BoardPixelWidth - BoardOrigin.X * 3, 720 - BoardOrigin.Y * 2),
+                Position = new Vector2(BoardOrigin.X * 2 + BoardArea.X, BoardOrigin.Y),
+                CustomMinimumSize = new Vector2(1280 - BoardArea.X - BoardOrigin.X * 3, 720 - BoardOrigin.Y * 2),
             };
             layer.AddChild(panel);
 
@@ -671,6 +730,7 @@ namespace WoundBoundGame
             column.AddChild(botRow);
 
             fightPicker = new OptionButton();
+            fightPicker.AddItem("Signpost ambush (Quickstart)");
             fightPicker.AddItem("Roadside ambush (party of three)");
             fightPicker.AddItem("The Dumb Fighter v three ratkin");
             fightPicker.ItemSelected += _ => StartEncounter();
@@ -733,6 +793,10 @@ namespace WoundBoundGame
             };
             reactionButtons.AddChild(takeHitButton);
 
+            leaverButtons = new HFlowContainer();
+            leaverButtons.AddThemeConstantOverride("h_separation", 8);
+            reactionColumn.AddChild(leaverButtons);
+
             logLabel = new RichTextLabel
             {
                 ScrollFollowing = true,
@@ -749,10 +813,10 @@ namespace WoundBoundGame
             return label;
         }
 
-        private static Rect2 SquareRect(GridPosition square) =>
+        private Rect2 SquareRect(GridPosition square) =>
             new(BoardOrigin + new Vector2(square.X, square.Y) * CellSize, new Vector2(CellSize, CellSize));
 
-        private static GridPosition SquareAt(Vector2 point)
+        private GridPosition SquareAt(Vector2 point)
         {
             var local = (point - BoardOrigin) / CellSize;
             return new GridPosition(Mathf.FloorToInt(local.X), Mathf.FloorToInt(local.Y));

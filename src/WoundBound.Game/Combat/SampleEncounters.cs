@@ -1,4 +1,5 @@
 using WoundBound.Game.Data;
+using WoundBound.Rules.Catalog;
 using WoundBound.Rules.Enums;
 using WoundBound.Rules.Models;
 
@@ -9,6 +10,14 @@ namespace WoundBound.Game.Combat
     {
         public const int BoardWidth = 10;
         public const int BoardHeight = 8;
+
+        /// <summary>
+        /// The field the party fights are fought on: wide enough that a creature running from the
+        /// party can get beyond Long — 16 squares — of all of them, which is what leaving the board
+        /// means. The party starts at its western end.
+        /// </summary>
+        public const int FieldWidth = 28;
+        public const int FieldHeight = 18;
 
         /// <summary>
         /// The Dumb Fighter of Core Rules §12 — the same build the Rules tests check against the
@@ -114,7 +123,76 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromAdversary(ratkin, "Ratkin Shiv", new GridPosition(9, 7)),
             };
 
-            return new Encounter(BoardWidth, BoardHeight, combatants, data.RangeBands, dice, gm);
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm);
+        }
+
+        /// <summary>
+        /// The Quickstart Adventure's Roadside Bandit (Blood and Vintage, "Roadside Ambush"): the
+        /// lantern-bearer at the signpost, and his like. Cowardice — he breaks below half his Body,
+        /// or on seeing one of his side go down.
+        /// </summary>
+        public static StartingAdversaryInfo RoadsideBandit { get; } = QuickstartBandit("Roadside Bandit", "Rusty Sword", die: "d6", damageModifier: 0);
+
+        /// <summary>
+        /// The Quickstart Adventure's Bandit Ambusher. His Worn Crossbow isn't here — statblock
+        /// ranged attacks aren't modelled yet — so he fights with the Rusty Knife his statblock
+        /// gives him for close work.
+        /// </summary>
+        public static StartingAdversaryInfo BanditAmbusher { get; } = QuickstartBandit("Bandit Ambusher", "Rusty Knife", die: "d4", damageModifier: 2);
+
+        private static StartingAdversaryInfo QuickstartBandit(string name, string attack, string die, int damageModifier) => new(
+            ContentSource: "quickstart",
+            Name: name,
+            Role: AdversaryRole.Skirmisher,
+            Tier: Tier.T1,
+            BodyMax: 6,
+            MindMax: 4,
+            SoulMax: 4,
+            Stamina: 3,
+            DodgeThreshold: 15,
+            ResolveThreshold: 12,
+            StabilityThreshold: 11,
+            AttackName: attack,
+            AttackModifier: 2,
+            AttackVsThreshold: ThresholdType.Dodge,
+            DamageDiceCount: 1,
+            DamageDie: die,
+            DamageModifier: damageModifier,
+            DamageType: WoundType.Body,
+            SpecialText: string.Empty,
+            Notes: "Blood and Vintage, Roadside Ambush.",
+            Armour: ArmourWeight.Light,
+            FortitudeThreshold: 12,
+            Features:
+            [
+                new StartingFeatureInfo("Cowardice",
+                    "reduced below half its Body pool, or watching another of its side go down, it looks for a chance to break and run rather than fight to the last wound."),
+            ]);
+
+        /// <summary>
+        /// The Quickstart's signpost ambush for a table of three (Blood and Vintage, "Roadside
+        /// Ambush" — two Bandit Ambushers and a Roadside Bandit, one Skirmisher per player): the
+        /// lantern-bearer under the signpost, an ambusher on the ridge and another in the trees.
+        /// "This combat is not intended to be deadly and these adversaries will run away" — and
+        /// the lantern-bearer is the one the party wants to keep: a captured bandit can be made to
+        /// talk (GM Reference §2). The night, the lights and the opening volley aren't in yet.
+        /// </summary>
+        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4));
+
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(DumbFighter(data), new GridPosition(1, 4)),
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(1, 3)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(1, 5)),
+                lanternBearer,
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", new GridPosition(7, 1)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", new GridPosition(7, 6)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                objectives: [new Objective.DontLetEscape("Take the lantern-bearer — he can be made to talk", lanternBearer)]);
         }
 
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>

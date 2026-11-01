@@ -28,5 +28,31 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Stop a Shove before it carries them anywhere (Core Rules §9, "Forced Movement").</summary>
         Arrest,
+
+        /// <summary>
+        /// An enemy is leaving a character's reach: strike as they go, or Grab, Shove or Trip them
+        /// (Core Rules §9, "Movement" and "Against a creature on the move"). Answered with
+        /// <see cref="Encounter.RespondToLeaver"/>, not a yes or no.
+        /// </summary>
+        LeaverReaction,
+    }
+
+    /// <summary>What a character does about an enemy leaving their reach.</summary>
+    public enum LeaverResponse
+    {
+        /// <summary>Nothing: they go, and the Stamina is kept.</summary>
+        LetThemGo,
+
+        /// <summary>A reaction attack with whatever is in hand.</summary>
+        Strike,
+
+        /// <summary>Catch hold of them — rolled against DT and ST both. Caught, they're Held where they were caught.</summary>
+        Grab,
+
+        /// <summary>Push them on from where they're caught.</summary>
+        Shove,
+
+        /// <summary>Bring them down where they're caught.</summary>
+        Trip,
     }
 }

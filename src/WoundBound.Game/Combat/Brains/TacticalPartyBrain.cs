@@ -15,6 +15,19 @@ namespace WoundBound.Game.Combat.Brains
         Always,
     }
 
+    /// <summary>What a party bot does about an enemy leaving a character's reach.</summary>
+    public enum LeaverPolicy
+    {
+        /// <summary>Lets them go, and keeps the Stamina.</summary>
+        Never,
+
+        /// <summary>Only a creature running for it: grab it if there's a hand free, trip it if not, strike if nothing else.</summary>
+        StopRunners,
+
+        /// <summary>Stops runners as above, and strikes at anybody else leaving.</summary>
+        StrikeEveryone,
+    }
+
     /// <summary>
     /// The knobs a <see cref="TacticalPartyBrain"/> plays by. Each one is a tactic the simulator
     /// can switch on or off and measure, which is how a guess ("the bow is worth the swap") becomes
@@ -31,6 +44,11 @@ namespace WoundBound.Game.Combat.Brains
     /// strike it too — handing them its −2 DT — before swinging. Only where the trip is no harder
     /// than a blow would be, and never at a Minion, which any hit drops anyway.
     /// </param>
+    /// <param name="ReactToLeavers">What to do about an enemy leaving a character's reach.</param>
+    /// <param name="HuntRunners">
+    /// Go after creatures that have broken — the ones a fight's objectives say mustn't escape
+    /// first — and grab one in reach rather than swing at it.
+    /// </param>
     public sealed record PartyTactics(
         string Name,
         bool ShootWhenOutOfReach = false,
@@ -38,7 +56,9 @@ namespace WoundBound.Game.Combat.Brains
         int StaminaReserve = 1,
         double BraceBelowBody = 0,
         PanicDodgePolicy PanicDodges = PanicDodgePolicy.Always,
-        bool TripForAllies = false)
+        bool TripForAllies = false,
+        LeaverPolicy ReactToLeavers = LeaverPolicy.Never,
+        bool HuntRunners = false)
     {
         /// <summary>The ways of playing the simulator compares and the battle screen's bot can be set to.</summary>
         public static IReadOnlyList<PartyTactics> Presets { get; } =
@@ -53,6 +73,9 @@ namespace WoundBound.Game.Combat.Brains
             new("Bow first, brace when hurt", ShootWhenOutOfReach: true, BraceBelowBody: 0.5),
             new("Charge, trip for allies", TripForAllies: true),
             new("Charge, trip for allies, extra attacks", TripForAllies: true, BuyExtraAttacks: true),
+            new("Charge, strike at leavers", ReactToLeavers: LeaverPolicy.StrikeEveryone),
+            new("Charge, stop runners", ReactToLeavers: LeaverPolicy.StopRunners, HuntRunners: true),
+            new("Charge, stop runners, extra attacks", ReactToLeavers: LeaverPolicy.StopRunners, HuntRunners: true, BuyExtraAttacks: true),
         ];
     }
 
@@ -91,9 +114,23 @@ namespace WoundBound.Game.Combat.Brains
                 return new PartyStep.Control(ControlAction.Trip, toTrip);
             }
 
+            // A runner in reach: a hold keeps it here, where a blow might not.
+            if (Tactics.HuntRunners && view.EnemiesOf(character)
+                    .Where(e => e.IsBroken && e.HeldBy is null && BattleView.ControlRefusal(character, ControlAction.Grab, e) is null)
+                    .OrderByDescending(e => view.MustNotEscape(e))
+                    .FirstOrDefault() is { } runner)
+            {
+                return new PartyStep.Control(ControlAction.Grab, runner);
+            }
+
             if (BestTarget(view, character) is { } target)
             {
                 return new PartyStep.Attack(target);
+            }
+
+            if (Tactics.HuntRunners && Runners(view, character).FirstOrDefault() is { } quarry)
+            {
+                nearest = quarry;
             }
 
             // Held with nobody to hit: get loose.
@@ -169,13 +206,45 @@ namespace WoundBound.Game.Combat.Brains
             && BattleView.StandGroundRefusal(character, CombatAction.Dodge) is null
             && view.EnemiesOf(character).Any(e => e.CanReach(character.Position) || view.StrikeSquare(e, character) is not null);
 
-        /// <summary>Whoever can be attacked now, weakest first, then nearest.</summary>
-        protected static Combatant? BestTarget(BattleView view, Combatant character) =>
+        /// <summary>Whoever can be attacked now — runners first when hunting them — weakest first, then nearest.</summary>
+        protected Combatant? BestTarget(BattleView view, Combatant character) =>
             view.EnemiesOf(character)
                 .Where(e => view.CanAttack(character, e))
-                .OrderBy(e => e.Body)
+                .OrderBy(e => Tactics.HuntRunners && e.IsBroken ? view.MustNotEscape(e) ? 0 : 1 : 2)
+                .ThenBy(e => e.Body)
                 .ThenBy(e => character.Position.DistanceTo(e.Position))
                 .FirstOrDefault();
+
+        /// <summary>Enemies that have broken, the ones that mustn't escape first, then whichever is nearest getting clear.</summary>
+        protected static IEnumerable<Combatant> Runners(BattleView view, Combatant character) =>
+            view.EnemiesOf(character)
+                .Where(e => e.IsBroken)
+                .OrderByDescending(view.MustNotEscape)
+                .ThenByDescending(e => view.DistanceToNearestCharacter(e.Position));
+
+        public virtual LeaverResponse ReactsToLeaver(BattleView view, PendingReaction reaction)
+        {
+            var options = reaction.Options ?? [];
+            if (Tactics.ReactToLeavers == LeaverPolicy.Never || !CanSpare(reaction.Defender))
+            {
+                return LeaverResponse.LetThemGo;
+            }
+
+            if (reaction.Attacker.IsBroken)
+            {
+                foreach (var stop in new[] { LeaverResponse.Grab, LeaverResponse.Trip, LeaverResponse.Strike })
+                {
+                    if (options.Contains(stop))
+                    {
+                        return stop;
+                    }
+                }
+            }
+
+            return Tactics.ReactToLeavers == LeaverPolicy.StrikeEveryone && options.Contains(LeaverResponse.Strike)
+                ? LeaverResponse.Strike
+                : LeaverResponse.LetThemGo;
+        }
 
         private bool ShouldBuyAnotherSwing(BattleView view, Combatant character) =>
             Tactics.BuyExtraAttacks
@@ -192,8 +261,9 @@ namespace WoundBound.Game.Combat.Brains
                 return PartyStep.End;
             }
 
-            // Step into reach with the move, keeping the action for the blow.
+            // Step into reach with the move, keeping the action for the blow — a runner's reach first.
             if (character.HasMove && view.EnemiesOf(character)
+                    .OrderBy(e => Tactics.HuntRunners && e.IsBroken ? 0 : 1)
                     .Select(e => view.StrikeSquare(character, e))
                     .FirstOrDefault(s => s is not null) is { } strikeFrom)
             {

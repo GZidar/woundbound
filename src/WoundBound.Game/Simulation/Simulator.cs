@@ -11,6 +11,9 @@ namespace WoundBound.Game.Simulation
         int PartyStaminaLeft,
         int FoesDropped,
         int CharactersStanding,
+        int FoesFled,
+        int ObjectivesMet,
+        int ObjectivesSet,
         BotTally Tally)
     {
         public bool Won => Outcome == EncounterPhase.Victory;
@@ -37,6 +40,13 @@ namespace WoundBound.Game.Simulation
         public double AverageBodyLeftOnWin => Wins == 0 ? 0 : Fights.Where(f => f.Won).Average(f => f.PartyBodyLeft);
 
         public double AverageFoesDropped => Fights.Average(f => f.FoesDropped);
+
+        /// <summary>The share of fights in which every objective was met; null when the fight sets none.</summary>
+        public double? ObjectiveRate => Fights.Count == 0 || Fights[0].ObjectivesSet == 0
+            ? null
+            : (double)Fights.Count(f => f.ObjectivesMet == f.ObjectivesSet) / Fights.Count;
+
+        public double AverageFled => Fights.Average(f => f.FoesFled);
 
         /// <summary>Characters still fighting at the end of the fights the party won.</summary>
         public double AverageStandingOnWin => Wins == 0 ? 0 : Fights.Where(f => f.Won).Average(f => f.CharactersStanding);
@@ -81,27 +91,30 @@ namespace WoundBound.Game.Simulation
                 encounter.Round,
                 members.Sum(c => c.Body),
                 members.Sum(c => c.Stamina),
-                encounter.Combatants.Count(c => c.Side == Side.Adversaries && c.IsOutOfFight),
+                encounter.Combatants.Count(c => c.Side == Side.Adversaries && c.IsOutOfFight && !c.HasFled),
                 members.Count(c => !c.IsOutOfFight),
+                encounter.Combatants.Count(c => c.Side == Side.Adversaries && c.HasFled),
+                encounter.Objectives.Count(o => o.StatusIn(encounter) == ObjectiveStatus.Achieved),
+                encounter.Objectives.Count,
                 driver.Tally);
         }
 
         /// <summary>The reports side by side, best win rate first, as a plain-text table.</summary>
         public static string Table(IEnumerable<TacticReport> reports)
         {
-            var rows = reports.OrderByDescending(r => r.WinRate).ThenBy(r => r.AverageRounds).ToList();
+            var rows = reports.OrderByDescending(r => r.ObjectiveRate ?? r.WinRate).ThenByDescending(r => r.WinRate).ThenBy(r => r.AverageRounds).ToList();
             var width = Math.Max("Tactic".Length, rows.Count == 0 ? 0 : rows.Max(r => r.Tactic.Length));
 
             var lines = new List<string>
             {
-                $"{"Tactic".PadRight(width)}  Win%   W/L/S         Rounds  Body left  Up   Foes  Attacks  Trips  Swaps  Extra  Braces  Dodges",
+                $"{"Tactic".PadRight(width)}  Obj%  Win%   W/L/S         Rounds  Body left  Up   Foes  Fled  Attacks  Trips  Swaps  Extra  Braces  Dodges  Leavers",
             };
 
             lines.AddRange(rows.Select(r =>
-                $"{r.Tactic.PadRight(width)}  {r.WinRate,5:P0}  {$"{r.Wins}/{r.Losses}/{r.Stalemates}",-12}  " +
-                $"{r.AverageRounds,6:0.0}  {r.AverageBodyLeftOnWin,9:0.0}  {r.AverageStandingOnWin,3:0.0}  {r.AverageFoesDropped,4:0.0}  " +
+                $"{r.Tactic.PadRight(width)}  {(r.ObjectiveRate is { } obj ? obj.ToString("P0") : "—"),4}  {r.WinRate,5:P0}  {$"{r.Wins}/{r.Losses}/{r.Stalemates}",-12}  " +
+                $"{r.AverageRounds,6:0.0}  {r.AverageBodyLeftOnWin,9:0.0}  {r.AverageStandingOnWin,3:0.0}  {r.AverageFoesDropped,4:0.0}  {r.AverageFled,4:0.0}  " +
                 $"{r.Per(t => t.Attacks),7:0.0}  {r.Per(t => t.Manoeuvres),5:0.0}  {r.Per(t => t.Swaps),5:0.0}  {r.Per(t => t.ExtraActions),5:0.0}  " +
-                $"{r.Per(t => t.StoodGround),6:0.0}  {r.Per(t => t.DodgesTaken),6:0.0}"));
+                $"{r.Per(t => t.StoodGround),6:0.0}  {r.Per(t => t.DodgesTaken),6:0.0}  {r.Per(t => t.LeaverReactions),7:0.0}"));
 
             return string.Join(Environment.NewLine, lines);
         }

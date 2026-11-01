@@ -94,6 +94,7 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Stand up from Prone, for a move.</summary>
         public sealed record StandUp : GmStep;
 
+
         /// <summary>Spend the action trying to break the hold it's in.</summary>
         public sealed record BreakFree : GmStep;
 

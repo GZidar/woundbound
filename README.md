@@ -40,6 +40,12 @@ opening Godot lives in `src/`.
 
 Pick one on the battle screen:
 
+- **Signpost ambush:** the Quickstart Adventure's own (Blood and Vintage, "Roadside Ambush"), for a
+  table of three — the lantern-bearer under the signpost, an ambusher on the ridge and another in the
+  trees, all Skirmishers with Cowardice. The objective: take the lantern-bearer, since a captured
+  bandit can be made to talk. The ambushers' crossbows wait for statblock ranged attacks, so they use
+  the knives their statblock gives them for close work; the night, the lights and the opening volley
+  aren't in yet.
 - **Roadside ambush:** a party of three — the Dumb Fighter of Core Rules §12, and Salla Rinehart
   (Nimble Duelist, rapier) and Drovan Thale (Nimble Ranger, short bow, knife at the ready) from the
   Quickstart Adventure — against a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin: a Threat
@@ -80,6 +86,20 @@ What they exercise, all through `WoundBound.Rules`:
   up something two-handed, or drops). Criticals add the other effect, a critical failure puts the one
   who lunged on the ground, and a Swarm can't be put hands on. The target may stand firm after seeing
   the roll: 1 Stamina for +2 ST, a tactical spend. Grounded finally has something to resist.
+- Foes that break and run (GM Reference §8): Cowardice breaks a creature below half its Body or when
+  it sees one of its side go down; Not a Fanatic, at a second. A broken creature runs, putting ground
+  between itself and the party. The fight stays in effect until every adversary has left the board —
+  and an adversary has left the board once no character has it within Long (16 squares). Down, gone,
+  or — broken and held fast with nobody left beside it — given up. The party fights are on a 28×18
+  field so there's room to get that far; the battle screen scales the squares to fit.
+- Reactions to a foe leaving a character's reach — moving, closing in at the round's end, or shoved:
+  strike as they go, or Grab, Shove or Trip them, rolled against Dodge and
+  Stability both and stopping them where they're caught (Core Rules §9, "Against a creature on the
+  move"). 1 Stamina, a tactical spend, an Immediate Opportunity for the GM. The foe answers as it
+  would a manoeuvre, and a dodged critical is a Riposte.
+- Objectives: what a fight is about besides dropping everybody — so far, someone who mustn't get
+  away (`Objective.DontLetEscape`, `Objective.NoneEscape`). Shown on screen, logged at the end, and
+  counted by the simulator.
 - GM Opportunities: banked from extra actions (at most 3), Immediate from reactions and Threshold
   boosts (lapsing at the spender's next turn); spent on an extra adversary turn — on a creature that
   can strike, ideally one that has already acted — or, with a full bank, on an attack's Advantage.
@@ -95,6 +115,7 @@ Every choice the rules leave to the GM goes through `IGmBrain` (`src/WoundBound.
 - each step of an adversary's turn (move, attack or Grab/Shove/Trip — with or without Advantage —
   stand up, break free, let go, or end)
 - whether to make a reaction attack, panic dodge, stand firm or arrest a shove
+- where a broken creature runs
 - where idle adversaries close in at the round's end
 
 The `Encounter` owns the rules. It asks the brain, checks the answer, and carries it out, so a brain
@@ -104,6 +125,9 @@ for one step at a time, so a brain can re-plan after a dodge or a Riposte.
 
 `SimpleGmBrain` is the placeholder: everything goes for the nearest character. Pass a different
 brain to `Encounter` (or `SampleEncounters.FighterVersusRatkin`) to change how the GM plays.
+
+Not yet for fleeing: the GM's creatures reacting to a leaver with anything but a strike; Frightened;
+terrain to run into, round or behind.
 
 `TrippingGmBrain` is a second baseline: a creature that isn't a Minion trips a character its pack can
 also reach before swinging.
@@ -135,8 +159,10 @@ already strike, and otherwise whoever is nearest an enemy.
   dotnet run --project tools/WoundBound.Sim -- --fights 1000 --seed 1
   ```
 
-  The party ambush is the default; `--fight solo` plays the Dumb Fighter against the ratkin, and
-  `--gm tripping` swaps in the tripping GM.
+  The signpost ambush is the default, and the table leads with how often every objective was met;
+  `--fight party` plays the roadside ambush, `--fight solo` the Dumb Fighter against the ratkin, and
+  `--gm tripping` swaps in the tripping GM. Party tactics now include reacting to foes leaving reach
+  (strike at everyone, or only stop runners) and hunting runners down.
 
   The simulator measures one thing — winning a straight fight — and not every rule exists for that.
   Grab, Shove and Trip are there for the moments the story makes them matter: slowing a foe who is
@@ -145,6 +171,10 @@ already strike, and otherwise whoever is nearest an enemy.
   has no such moment in it yet, not that the rule is wasted. Fights with objectives other than
   "drop everyone" (an escape to stop, someone to save, ground that matters) are where they'll earn
   their place, and where the simulator should measure them.
+
+  The signpost is the first: with foes that run until they're beyond Long, it becomes a chase, and
+  parties that react to runners and hunt them down take the lantern-bearer most often (about 87–89%
+  of fights, against 82–84% for those that don't).
 
 As the rules grow, each new choice becomes a new switch, and the simulator says whether it wins
 fights.

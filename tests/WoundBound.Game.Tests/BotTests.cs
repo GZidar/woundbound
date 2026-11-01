@@ -92,6 +92,8 @@ public class BotTests
         public bool StandsFirm(BattleView view, PendingReaction reaction) => true;
 
         public bool ArrestsShove(BattleView view, PendingReaction reaction) => true;
+
+        public LeaverResponse ReactsToLeaver(BattleView view, PendingReaction reaction) => LeaverResponse.LetThemGo;
     }
 
     [Fact]
