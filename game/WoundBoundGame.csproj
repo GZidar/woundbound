@@ -17,6 +17,7 @@
     <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\environment.json" />
     <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-adversaries.json" />
     <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-weapons.json" />
+    <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-spells.json" />
   </ItemGroup>
 
   <!-- The catalogues live in the submodule, outside res://, where Godot can't see them. Copy them

@@ -140,6 +140,11 @@ namespace WoundBound.Game.Combat.Brains
                 return new PartyStep.Control(ControlAction.Grab, runner);
             }
 
+            if (CastAt(view, character) is { } cast)
+            {
+                return new PartyStep.Cast(cast);
+            }
+
             if (BestTarget(view, character) is { } target)
             {
                 return new PartyStep.Attack(target);
@@ -176,6 +181,34 @@ namespace WoundBound.Game.Combat.Brains
         /// weakest target in reach decides between two who can. Otherwise whoever is nearest an
         /// enemy, so the next to act is the one with most to do.
         /// </summary>
+        /// <summary>
+        /// A caster's one trick here: the first single-target Harm on their sheet, at the nearest enemy
+        /// it can reach from where they stand — paid in blood once their own pool is down to its last.
+        /// </summary>
+        private static SpellCast? CastAt(BattleView view, Combatant character)
+        {
+            foreach (var spell in character.Spells.Where(s => s.SpellType == Rules.Enums.SpellType.Harm && s.Target == Rules.Enums.SpellTarget.One))
+            {
+                foreach (var enemy in view.EnemiesOf(character).OrderBy(e => e.Position.DistanceTo(character.Position)))
+                {
+                    var cast = new SpellCast(spell) { Target = enemy };
+                    var plan = view.PlanCast(character, cast);
+                    if (plan.CanCast && plan.Track is { } track && track != Rules.Enums.WoundType.Body && character.Track(track).Current <= plan.Cost)
+                    {
+                        cast = cast with { PayInBody = true };
+                        plan = view.PlanCast(character, cast);
+                    }
+
+                    if (plan.CanCast)
+                    {
+                        return cast;
+                    }
+                }
+            }
+
+            return null;
+        }
+
         public virtual Combatant ChooseNextCharacter(BattleView view, IReadOnlyList<Combatant> stillToAct) =>
             stillToAct
                 .OrderBy(c => CanStrikeWithoutMoving(view, c) ? 0 : 1)

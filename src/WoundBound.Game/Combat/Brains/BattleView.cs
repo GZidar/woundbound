@@ -161,6 +161,18 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Why <paramref name="combatant"/> can't try to break free now, or null if they can.</summary>
         public static string? BreakFreeRefusal(Combatant combatant) => Encounter.BreakFreeRefusal(combatant);
 
+        /// <summary>What casting <paramref name="cast"/> now would come to, turn and all, or why it can't be cast.</summary>
+        public CastPlan PlanCast(Combatant caster, SpellCast cast) => encounter.PlanCast(caster, cast);
+
+        /// <summary>What casting <paramref name="cast"/> from <paramref name="from"/> would come to, leaving the turn aside.</summary>
+        public CastPlan PlanCastFrom(Combatant caster, GridPosition from, SpellCast cast) => encounter.PlanCastFrom(caster, from, cast, checkTurn: false);
+
+        /// <summary>Why <paramref name="combatant"/> can't Sacrifice now, or null if they can.</summary>
+        public static string? SacrificeRefusal(Combatant combatant) => Encounter.SacrificeRefusal(combatant);
+
+        /// <summary>Spells still at work on the board.</summary>
+        public IReadOnlyList<SpellInPlay> SpellsInPlay => encounter.SpellsInPlay;
+
         /// <summary>Why <paramref name="combatant"/> can't make a tactical Stamina spend now, or null if they can.</summary>
         public static string? TacticalSpendRefusal(Combatant combatant) => Encounter.TacticalSpendRefusal(combatant);
     }

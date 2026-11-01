@@ -46,6 +46,16 @@ namespace WoundBound.Game.Combat.Brains
         /// leaving their reach: one of <see cref="PendingReaction.Options"/>.
         /// </summary>
         LeaverResponse ReactsToLeaver(BattleView view, PendingReaction reaction);
+
+        /// <summary>
+        /// Whether to Backlash Mind or Soul damage onto Body — <see cref="PendingReaction.ImpactWounds"/>
+        /// of it, Direct — rather than be Stunned or Numbed (Core Rules §4). By default, whenever it
+        /// leaves them standing.
+        /// </summary>
+        bool Backlashes(BattleView view, PendingReaction reaction) => reaction.Defender.Body - reaction.ImpactWounds >= 2;
+
+        /// <summary>Whether to pay 1 Stamina to go on holding the spell the character Sustains.</summary>
+        bool Sustains(BattleView view, PendingReaction reaction) => reaction.Defender.Stamina > 2;
     }
 
     /// <summary>One thing a party member does on their turn — one click.</summary>
@@ -57,7 +67,11 @@ namespace WoundBound.Game.Combat.Brains
 
         public sealed record Move(GridPosition Square) : PartyStep;
 
-        public sealed record Attack(Combatant Target) : PartyStep;
+        /// <param name="Sacrifice">Pay 1 Body first for Advantage on the roll (Core Rules §3).</param>
+        public sealed record Attack(Combatant Target, bool Sacrifice = false) : PartyStep;
+
+        /// <summary>Cast a spell with the action (Core Rules §9, "Magic").</summary>
+        public sealed record Cast(SpellCast Spell) : PartyStep;
 
         /// <summary>Swap the loadout in hand for the one at the ready.</summary>
         public sealed record Swap : PartyStep;

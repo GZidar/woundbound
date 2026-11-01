@@ -29,12 +29,12 @@ namespace WoundBound.Game.Combat
 
         public int Body { get; internal set; }
 
-        /// <summary>The Mind track (Core Rules §4). Nothing in the slice deals Mind damage yet.</summary>
+        /// <summary>The Mind track (Core Rules §4): Aether spells deal it, and at 0 the creature is Stunned.</summary>
         public int MindMax { get; init; }
 
         public int Mind { get; internal set; }
 
-        /// <summary>The Soul track. Nothing in the slice deals Soul damage yet.</summary>
+        /// <summary>The Soul track: Divine spells deal it, and at 0 the creature is Numbed.</summary>
         public int SoulMax { get; init; }
 
         public int Soul { get; internal set; }
@@ -102,10 +102,24 @@ namespace WoundBound.Game.Combat
         /// stable (who can still be reached, healed — and stabbed), or a foe who gave up.
         /// </summary>
         public bool OccupiesSquare => !HasFled
-            && (!IsOutOfFight || HasSurrendered || (Side == Side.Party && BodyStatus is BodyStatus.Dying or BodyStatus.Stable));
+            && (!IsOutOfFight || HasSurrendered || (IsDazed && Body > 0) || (Side == Side.Party && BodyStatus is BodyStatus.Dying or BodyStatus.Stable));
 
-        /// <summary>A character on 0 Body or below and not yet dead — defenceless: attacks on them have Advantage (Core Rules §4, "Dying").</summary>
-        public bool IsDefenceless => Side == Side.Party && BodyStatus is BodyStatus.Dying or BodyStatus.Stable && !HasFled;
+        /// <summary>
+        /// Defenceless — attacks on them have Advantage: a character on 0 Body or below and not yet
+        /// dead (Core Rules §4, "Dying"), or anybody Stunned or Numbed and still breathing ("Like a
+        /// dying or stable character, any attack against them rolls with Advantage").
+        /// </summary>
+        public bool IsDefenceless => !HasFled
+            && ((Side == Side.Party && BodyStatus is BodyStatus.Dying or BodyStatus.Stable) || (IsDazed && Body > 0));
+
+        /// <summary>At 0 Mind (Core Rules §4, "Stunned and Numbed"): no actions, no moves, no tactical spends, until someone restores a point.</summary>
+        public bool IsStunned => MindMax > 0 && Mind <= 0;
+
+        /// <summary>At 0 Soul: as Stunned, by the other track.</summary>
+        public bool IsNumbed => SoulMax > 0 && Soul <= 0;
+
+        /// <summary>Stunned or Numbed — lying out of the fight until Meditation, Prayer or magic brings them back.</summary>
+        public bool IsDazed => IsStunned || IsNumbed;
 
         /// <summary>Stabilized at 0 Body (Core Rules §4). Only ever true of a player character.</summary>
         public bool IsStable { get; internal set; }
@@ -306,14 +320,37 @@ namespace WoundBound.Game.Combat
         /// state (GM Reference §2); a character at 0 is Dying, which the slice treats as out of the
         /// fight since nobody is left to stabilise them.
         /// </summary>
-        public bool IsOutOfFight => IsUnconscious || HasFled || HasSurrendered
+        public bool IsOutOfFight => IsUnconscious || HasFled || HasSurrendered || IsDazed
             || (Side == Side.Party ? BodyStatus != BodyStatus.Healthy : Body <= 0);
 
         /// <summary>
         /// Has cast a spell in this fight — which is how a caster gives themselves away, and why
-        /// the other side goes for them first from then on. Nothing casts yet.
+        /// the other side goes for them first from then on.
         /// </summary>
         public bool HasCastSpell { get; internal set; }
+
+        /// <summary>The spells on a character's sheet (Core Rules §11). A generic foe casts none yet.</summary>
+        public IReadOnlyList<SpellDefinition> Spells => Build?.Spells ?? (IReadOnlyList<SpellDefinition>)[];
+
+        /// <summary>Which Magic sources this character can cast from, and how (Core Rules §11).</summary>
+        public IReadOnlyList<MagicAccessEntry> MagicAccess => magicAccess ??= Build is { } build ? SpellCalculator.GetMagicAccess(build) : [];
+
+        private IReadOnlyList<MagicAccessEntry>? magicAccess;
+
+        /// <summary>A Cerebral character: once a round, 1 Stamina may pay 1 wound of a spell's cost (Core Rules §3, "Overclock").</summary>
+        public bool HasOverclock => Build?.ClassPrinciple == ClassPrinciple.Cerebral;
+
+        /// <summary>Body as the Secondary Wound: once a round, 1 Body before an attack or a cast buys Advantage on it (Core Rules §3, "Sacrifice").</summary>
+        public bool HasSacrifice => Build?.SecondaryWound == WoundType.Body;
+
+        /// <summary>Has Overclocked this round.</summary>
+        public bool HasOverclockedThisRound { get; internal set; }
+
+        /// <summary>Has used Sacrifice this round.</summary>
+        public bool HasSacrificedThisRound { get; internal set; }
+
+        /// <summary>The one spell this caster is Sustaining, if any (Core Rules §11, "One at a time").</summary>
+        public string? Sustaining { get; internal set; }
 
         /// <summary>The statblock's Role, for a foe; null for a character.</summary>
         public Rules.Enums.AdversaryRole? Role { get; init; }

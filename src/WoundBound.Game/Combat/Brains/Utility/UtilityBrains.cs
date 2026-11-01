@@ -80,6 +80,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 OptionKind.Move => new GmStep.Move(choice.Square!.Value),
                 OptionKind.Attack => new GmStep.Attack(choice.Target!, choice.WithAdvantage && turn.BonusAvailable, choice.With),
+                OptionKind.Cast => new GmStep.Cast(choice.Cast!),
                 OptionKind.Control => new GmStep.Control(choice.Control!.Value, choice.Target!),
                 OptionKind.Aid => new GmStep.Aid(choice.Action!.Value, choice.Target!),
                 OptionKind.Tend => new GmStep.Tend(choice.Action!.Value, choice.Target!),
@@ -207,6 +208,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 OptionKind.Move => new PartyStep.Move(choice.Square!.Value),
                 OptionKind.Attack => new PartyStep.Attack(choice.Target!),
+                OptionKind.Cast => new PartyStep.Cast(choice.Cast!),
                 OptionKind.Control => new PartyStep.Control(choice.Control!.Value, choice.Target!),
                 OptionKind.Aid => new PartyStep.Aid(choice.Action!.Value, choice.Target!),
                 OptionKind.Tend => new PartyStep.Tend(choice.Action!.Value, choice.Target!),

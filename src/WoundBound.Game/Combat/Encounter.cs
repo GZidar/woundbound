@@ -103,7 +103,7 @@ namespace WoundBound.Game.Combat
     /// choose their own order: at the start of each round and after each gap, whoever is left to
     /// act may go next.</para>
     /// </summary>
-    public sealed class Encounter
+    public sealed partial class Encounter
     {
         /// <summary>"The GM may hold a maximum of 3 banked Opportunities at any time" (Core Rules §9).</summary>
         public const int MaxBankedOpportunities = 3;
@@ -954,9 +954,11 @@ namespace WoundBound.Game.Combat
             return true;
         }
 
-        public AttackOutcome? TryAttack(Combatant target)
+        /// <param name="sacrifice">Pay 1 Body first for Advantage on the roll (Core Rules §3, "Sacrifice").</param>
+        public AttackOutcome? TryAttack(Combatant target, bool sacrifice = false)
         {
-            if (Phase != EncounterPhase.PartyTurn || Active is not { } attacker || !CanAttack(attacker, target))
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } attacker || !CanAttack(attacker, target)
+                || (sacrifice && SacrificeRefusal(attacker) is not null))
             {
                 return null;
             }
@@ -966,7 +968,7 @@ namespace WoundBound.Game.Combat
             {
                 result = outcome;
                 CheckForEnd();
-            });
+            }, sacrifice: sacrifice);
 
             return result;
         }
@@ -1183,7 +1185,7 @@ namespace WoundBound.Game.Combat
                 return false;
             }
 
-            if (spend)
+            if (spend && pending.Kind != ReactionKind.Backlash)
             {
                 if (TacticalSpendRefusal(pending.Defender) is not null)
                 {
@@ -1191,7 +1193,17 @@ namespace WoundBound.Game.Combat
                 }
 
                 PayTacticalSpend(pending.Defender, CombatActionCatalog.ReactionStaminaCost);
-                GrantImmediateOpportunity(pending.Defender);
+
+                // Holding a spell hands the GM the kind of Opportunity it can bank, since the spell
+                // works through the whole round (Core Rules §11, "Sustaining a Spell").
+                if (pending.Kind == ReactionKind.Sustain)
+                {
+                    GrantBankedOpportunity();
+                }
+                else
+                {
+                    GrantImmediateOpportunity(pending.Defender);
+                }
             }
 
             Pending = null;
@@ -1251,7 +1263,11 @@ namespace WoundBound.Game.Combat
             {
                 combatant.TacticalSpendsThisRound = 0;
                 combatant.HasActedThisRound = false;
+                combatant.HasOverclockedThisRound = false;
+                combatant.HasSacrificedThisRound = false;
             }
+
+            EndSpellsOfFallenCasters(roundEnd: true);
 
             // Everyone on the party's side keeps their place in the round, fighting or not: a
             // character with no turn to take still leaves the GM the adversary turn that follows it.
@@ -1344,6 +1360,7 @@ namespace WoundBound.Game.Combat
             next.HasActedThisRound = true;
             Phase = EncounterPhase.PartyTurn;
             Write($"{next.Name}'s turn.");
+            OfferSustain(next, () => { });
         }
 
         private void AfterPartyTurn()
@@ -1507,6 +1524,8 @@ namespace WoundBound.Game.Combat
             {
                 Write($"{combatant.Name} stops standing their ground ({string.Join(", ", wasStanding)}).");
             }
+
+            ExpireSpellsAtTurnStart(combatant);
         }
 
         private void TakeAdversaryTurn(Combatant actor, bool allowOpportunityBonus, Action done)
@@ -1520,7 +1539,7 @@ namespace WoundBound.Game.Combat
             var turn = new GmTurn(actor, isExtraTurn: !allowOpportunityBonus,
                 bonusAvailable: allowOpportunityBonus && !actor.HasActedThisRound && GmOpportunities > 0);
 
-            TakeStep(turn, done);
+            OfferSustain(actor, () => TakeStep(turn, done));
         }
 
         private void TakeStep(GmTurn turn, Action done)
@@ -1567,6 +1586,16 @@ namespace WoundBound.Game.Combat
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !attack.WithAdvantage;
                     ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done), attack.With);
+                    return;
+
+                case GmStep.Cast cast:
+                    if (PlanCast(actor, cast.Spell) is not { CanCast: true } castPlan)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} cast {cast.Spell.Spell.Name}: {PlanCast(actor, cast.Spell).Refusal}");
+                    }
+
+                    turn.HasAttacked = true;
+                    Cast(actor, cast.Spell, castPlan, () => TakeStep(turn, done));
                     return;
 
                 case GmStep.Control control:
@@ -2073,9 +2102,16 @@ namespace WoundBound.Game.Combat
         /// </summary>
         /// <param name="with">Which of the attacker's attacks; null for whichever does most from where it stands.</param>
         private void ResolveAttack(Combatant attacker, Combatant target, bool asReaction, bool opportunityBonus, Action<AttackOutcome> then,
-            AttackProfile? with = null)
+            AttackProfile? with = null, bool sacrifice = false)
         {
             var plan = with is null ? PlanAttack(attacker, target) : PlanAttackWith(attacker, with, attacker.Position, target);
+            if (sacrifice)
+            {
+                attacker.Body--;
+                attacker.HasSacrificedThisRound = true;
+                attacker.TendEligible[WoundType.Body] = true;
+                Write($"{attacker.Name} Sacrifices 1 Body for Advantage ({attacker.Body}/{attacker.BodyMax} Body).");
+            }
 
             if (opportunityBonus)
             {
@@ -2092,7 +2128,7 @@ namespace WoundBound.Game.Combat
                 Write($"{target.Name} is defenceless, lying {target.BodyStatus.ToString().ToLowerInvariant()}: Advantage.");
             }
 
-            var advantage = opportunityBonus || helped || target.IsDefenceless;
+            var advantage = opportunityBonus || helped || target.IsDefenceless || sacrifice;
             var disadvantage = AttacksAtDisadvantage(attacker) || harried;
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
@@ -2399,7 +2435,7 @@ namespace WoundBound.Game.Combat
         private void OfferReaction(PendingReaction offer, Action<bool> then)
         {
             var defender = offer.Defender;
-            if (TacticalSpendRefusal(defender) is not null)
+            if (offer.Kind != ReactionKind.Backlash && TacticalSpendRefusal(defender) is not null)
             {
                 then(false);
                 return;
@@ -2410,17 +2446,22 @@ namespace WoundBound.Game.Combat
                 var takes = offer.Kind switch
                 {
                     ReactionKind.PanicDodge or ReactionKind.RaiseShield => gm.PanicDodges(view, offer),
-                    ReactionKind.StandFirm => gm.StandsFirm(view, offer),
+                    ReactionKind.StandFirm or ReactionKind.BraceResolve => gm.StandsFirm(view, offer),
+                    ReactionKind.Backlash => gm.Backlashes(view, offer),
+                    ReactionKind.Sustain => gm.Sustains(view, offer),
                     _ => gm.ArrestsShove(view, offer),
                 };
 
-                if (takes)
+                if (takes && offer.Kind != ReactionKind.Backlash)
                 {
-                    PayTacticalSpend(defender, CombatActionCatalog.ReactionStaminaCost);
+                    // An adversary's spend hands the GM nothing, a held spell's included (GM Reference §9).
+                    PayTacticalSpend(defender, offer.Kind == ReactionKind.Sustain ? SpellCalculator.SustainStaminaCost : CombatActionCatalog.ReactionStaminaCost);
                     Write(offer.Kind switch
                     {
                         ReactionKind.PanicDodge => $"{defender.Name} panic dodges (1 Stamina).",
                         ReactionKind.StandFirm => $"{defender.Name} stands firm (1 Stamina, +2 ST).",
+                        ReactionKind.BraceResolve => $"{defender.Name} steels themselves (1 Stamina, +2).",
+                        ReactionKind.Sustain => $"{defender.Name} pays 1 Stamina to keep holding the spell.",
                         _ => $"{defender.Name} arrests the shove (1 Stamina).",
                     });
                 }
@@ -2910,6 +2951,7 @@ namespace WoundBound.Game.Combat
             // Whoever just went down lets go, or is let go of; a shield's cover ends out of Reach.
             CheckHolds();
             CheckCover();
+            EndSpellsOfFallenCasters(roundEnd: false);
             CheckMorale();
 
             if (!Fighting(Side.Party).Any())

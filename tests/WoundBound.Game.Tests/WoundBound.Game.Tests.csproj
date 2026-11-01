@@ -29,6 +29,7 @@
     <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\environment.json" Link="TestData\environment.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-adversaries.json" Link="TestData\starting-adversaries.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-weapons.json" Link="TestData\starting-weapons.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-spells.json" Link="TestData\starting-spells.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

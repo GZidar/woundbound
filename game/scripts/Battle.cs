@@ -108,11 +108,61 @@ namespace WoundBoundGame
         private static readonly Color Gloom = new(0f, 0f, 0.03f, 0.35f);
         private static readonly Color Darkness = new(0f, 0f, 0.03f, 0.62f);
 
+        /// <summary>A spell chosen from the spell row; the next square or creature clicked is where it goes.</summary>
+        private WoundBound.Rules.Models.SpellDefinition? armedSpell;
+
+        private HFlowContainer spellButtons = null!;
+        private string spellButtonsFor = string.Empty;
+        private CheckBox payInBodyBox = null!;
+        private CheckBox overclockBox = null!;
+        private CheckBox sacrificeBox = null!;
+        private CheckBox sustainBox = null!;
+        private CheckBox backlashBox = null!;
+        private OptionButton thresholdPicker = null!;
+        private static readonly Color SpellArea = new(0.65f, 0.35f, 0.95f, 0.35f);
+        private static readonly ThresholdType[] BuffThresholds = [ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve];
+
         private void Disarm()
         {
             armed = null;
             armedAction = null;
             armedDrag = false;
+            armedSpell = null;
+        }
+
+        /// <summary>
+        /// The casting the armed spell would be with the mouse on <paramref name="square"/>: into
+        /// whoever stands there, or — for a Volume — a block with that square as its corner nearest
+        /// the caster, spreading away from them.
+        /// </summary>
+        private SpellCast? CastAt(Combatant caster, GridPosition square)
+        {
+            if (armedSpell is not { } spell)
+            {
+                return null;
+            }
+
+            var cast = new SpellCast(spell)
+            {
+                PayInBody = payInBodyBox.ButtonPressed,
+                Overclock = overclockBox.ButtonPressed,
+                Sacrifice = sacrificeBox.ButtonPressed,
+                Sustain = sustainBox.ButtonPressed,
+                Backlash = backlashBox.ButtonPressed,
+                Threshold = spell.SpellType is SpellType.Buff or SpellType.Bane ? BuffThresholds[Mathf.Max(0, thresholdPicker.Selected)] : null,
+            };
+
+            if (spell.Shape == SpellShape.Volume)
+            {
+                var across = WoundBound.Game.Combat.SpellArea.Across(spell.Size) - 1;
+                return cast with
+                {
+                    Corner = new GridPosition(square.X >= caster.Position.X ? square.X : square.X - across,
+                        square.Y >= caster.Position.Y ? square.Y : square.Y - across),
+                };
+            }
+
+            return encounter.At(square) is { } target ? cast with { Target = target } : null;
         }
 
         /// <summary>Whether the armed Help, Harry, Heal, Meditate, Pray or Shield could be aimed at <paramref name="target"/>.</summary>
@@ -175,7 +225,14 @@ namespace WoundBoundGame
                 return;
             }
 
-            if (encounter.At(clicked) is { } occupant)
+            if (armedSpell is not null && encounter.Active is { } caster)
+            {
+                if (CastAt(caster, clicked) is { } cast)
+                {
+                    encounter.TryCast(cast);
+                }
+            }
+            else if (encounter.At(clicked) is { } occupant)
             {
                 if (armed is { } action)
                 {
@@ -192,7 +249,7 @@ namespace WoundBoundGame
                 }
                 else
                 {
-                    encounter.TryAttack(occupant);
+                    encounter.TryAttack(occupant, sacrificeBox.ButtonPressed);
                 }
             }
             else if (armedDrag)
@@ -273,6 +330,16 @@ namespace WoundBoundGame
                 DrawCircle(SquareRect(light).GetCenter(), CellSize * 0.12f, new Color(1f, 0.7f, 0.25f));
             }
 
+            // The armed spell's ground, where the mouse would put it.
+            if (active is not null && hovered is { } aim && CastAt(active, aim) is { } preview
+                && encounter.PlanCast(active, preview) is { CanCast: true } aimed)
+            {
+                foreach (var square in aimed.Area.Count > 0 ? aimed.Area : aimed.Targets.Select(t => t.Position))
+                {
+                    DrawRect(SquareRect(square), SpellArea);
+                }
+            }
+
             if (hovered is { } hover)
             {
                 DrawRect(SquareRect(hover).Grow(-2), HoverOutline, filled: false, width: 2);
@@ -321,6 +388,14 @@ namespace WoundBoundGame
             {
                 DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, ChoosableRing, 3);
             }
+            else if (active is not null && armedSpell is not null)
+            {
+                if (CastAt(active, combatant.Position) is { } aimAt && encounter.PlanCast(active, aimAt) is { CanCast: true } aimedAt
+                    && aimedAt.Targets.Contains(combatant))
+                {
+                    DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, new Color(0.75f, 0.5f, 1f), 3);
+                }
+            }
             else if (active is not null && (armed is { } action
                          ? Encounter.ControlRefusal(active, action, combatant) is null
                          : armedAction is { } combatAction
@@ -360,6 +435,12 @@ namespace WoundBoundGame
                 combatant.IsHarried ? "harried" : null,
                 combatant.CarriedLights > 0 ? "light" : null,
                 combatant.NeedsFooting ? "off footing" : null,
+                combatant.IsStunned ? "stunned" : null,
+                combatant.IsNumbed ? "numbed" : null,
+                combatant.Conditions.Contains(CharacterCondition.Slowed) ? "slowed" : null,
+                combatant.Conditions.Contains(CharacterCondition.Hastened) ? "hastened" : null,
+                encounter.SpellsInPlay.Any(e => e.Target == combatant && e.Type == SpellType.Buff) ? "blessed" : null,
+                encounter.SpellsInPlay.Any(e => e.Target == combatant && e.Type == SpellType.Bane) ? "cursed" : null,
             }.Where(m => m is not null));
             if (marks.Length > 0)
             {
@@ -379,10 +460,11 @@ namespace WoundBoundGame
         {
             encounter = fightPicker.Selected switch
             {
-                1 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm(), fourPlayers: true),
-                2 => SampleEncounters.FerryShrineAmbush(data, new RandomDiceRoller(), PickedGm()),
-                3 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller(), PickedGm()),
-                4 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller(), PickedGm()),
+                1 => SampleEncounters.SignpostWithCasters(data, new RandomDiceRoller(), PickedGm()),
+                2 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm(), fourPlayers: true),
+                3 => SampleEncounters.FerryShrineAmbush(data, new RandomDiceRoller(), PickedGm()),
+                4 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller(), PickedGm()),
+                5 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm()),
             };
             shown = null;
@@ -458,7 +540,12 @@ namespace WoundBoundGame
 
             reactionLabel.Text = pending.Prompt +
                 (pending.WouldRiposte ? "\nIt's a critical, so the miss would be a Riposte: the attacker takes the wound." : string.Empty) +
-                "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM an Immediate Opportunity.";
+                pending.Kind switch
+                {
+                    ReactionKind.Backlash => "\nA choice, not a spend: no Stamina, and nothing for the GM.",
+                    ReactionKind.Sustain => "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM a banked Opportunity.",
+                    _ => "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM an Immediate Opportunity.",
+                };
 
             // Somebody leaving reach: a button for each thing the character may do about it.
             var isLeaver = pending.Kind == ReactionKind.LeaverReaction;
@@ -500,6 +587,9 @@ namespace WoundBoundGame
                 ReactionKind.PanicDodge => ("Panic dodge (1 Stamina)", "Take the hit"),
                 ReactionKind.StandFirm => ("Stand firm (1 Stamina, +2 ST)", "Let it happen"),
                 ReactionKind.RaiseShield => ($"Raise shield (1 Stamina, +{pending.Bonus})", "Take the hit"),
+                ReactionKind.Backlash => ($"Backlash ({pending.ImpactWounds} Body)", "Drop to 0"),
+                ReactionKind.Sustain => ("Hold it (1 Stamina)", "Let it go"),
+                ReactionKind.BraceResolve => ("Steel yourself (1 Stamina, +2)", "Let it take hold"),
                 _ => ("Arrest (1 Stamina)", "Let it carry them"),
             };
         }
@@ -534,7 +624,7 @@ namespace WoundBoundGame
             var armourAbsorbs = InventoryCalculator.ArmourDamageAbsorbed(character.Armour);
             characterLabel.Text =
                 $"{character.Name}\n" +
-                $"Body {character.Body}/{character.BodyMax} ({character.BodyStatus})   Stamina {character.Stamina}/{character.StaminaMax}\n" +
+                $"Body {character.Body}/{character.BodyMax} ({character.BodyStatus})   Mind {character.Mind}/{character.MindMax}   Soul {character.Soul}/{character.SoulMax}   Stamina {character.Stamina}/{character.StaminaMax}\n" +
                 $"Tactical spends this round: {character.TacticalSpendsThisRound}/{character.TacticalSpendsPerRound}\n" +
                 $"Move: {(character.HasMove ? "available" : "used")}   Actions left: {character.ActionsRemaining}\n" +
                 $"In hand: {attack.Name} +{attack.AttackModifier}, 1d{attack.DamageDieSides}+{attack.DamageModifier}" +
@@ -561,7 +651,12 @@ namespace WoundBoundGame
                 (encounter.Setting.GroundAt(character.Position) is var ground && ground != Terrain.Firm
                     ? $"\nStanding on {ground} ground" + (encounter.Setting.Water.TryGetValue(character.Position, out var wet) ? $" — {wet.ToString().ToLowerInvariant()} water." : ".")
                     : string.Empty) +
-                (character.NeedsFooting ? "\nOff your footing: your action goes on regaining it." : string.Empty);
+                (character.NeedsFooting ? "\nOff your footing: your action goes on regaining it." : string.Empty) +
+                (character.IsDazed ? $"\n{(character.IsStunned ? "Stunned" : "Numbed")}: no actions until an ally Meditates, Prays or heals the track." : string.Empty) +
+                (character.Sustaining is { } holding ? $"\nSustaining {holding}: 1 Stamina at the start of each turn to keep it." : string.Empty) +
+                string.Concat(encounter.SpellsInPlay.Where(e => e.Target == character)
+                    .Select(e => $"\nUnder {e.Caster.Name}'s {e.Spell}" + (e.Threshold is { } t ? $" ({e.Amount:+0;−0} {t})" : e.Condition is { } c ? $" ({c})" : string.Empty)
+                                 + (e.Sustained ? ", held" : string.Empty)));
 
             static string Threshold(string name, int? now, int? baseValue) =>
                 now is null ? $"{name} —" : now == baseValue ? $"{name} {now}" : $"{name} {now} ({baseValue}{now - baseValue:+0;−0})";
@@ -635,12 +730,69 @@ namespace WoundBoundGame
                 } + " Unarmed roll against their ST; your action, no Stamina, no damage. Then click the foe.";
             }
 
+            UpdateSpellRow(acting);
+
             var me = isPartyTurn ? encounter.Active : null;
             standUpButton.Disabled = me is null || Encounter.StandUpRefusal(me) is not null;
             breakFreeButton.Disabled = me is null || Encounter.BreakFreeRefusal(me) is not null;
             letGoButton.Disabled = me?.Holding is null;
 
             endTurnButton.Disabled = !isPartyTurn;
+        }
+
+        /// <summary>A button for each spell on the acting character's sheet, and the casting options that apply to them.</summary>
+        private void UpdateSpellRow(Combatant? caster)
+        {
+            var spells = caster?.Spells ?? [];
+            var wanted = caster is null ? string.Empty : caster.Name + "|" + string.Join("|", spells.Select(sp => sp.Name));
+            if (wanted != spellButtonsFor)
+            {
+                foreach (var child in spellButtons.GetChildren())
+                {
+                    child.QueueFree();
+                }
+
+                foreach (var spell in spells)
+                {
+                    var button = new Button
+                    {
+                        Text = spell.Name,
+                        ToggleMode = true,
+                        TooltipText = $"{spell.SpellType} · {spell.Target} · {(spell.Range == SpellRange.Touch ? "Touch" : spell.Shape?.ToString() ?? "Ray")} · " +
+                                      $"{SpellCalculator.SourceLabel(spell.Source)}\n{spell.Notes}\nThen click " +
+                                      (spell.Shape == SpellShape.Volume ? "a square: the block spreads away from you from there." : "who it's for."),
+                    };
+                    button.Pressed += () =>
+                    {
+                        var was = armedSpell;
+                        Disarm();
+                        armedSpell = was == spell ? null : spell;
+                        Refresh();
+                    };
+                    spellButtons.AddChild(button);
+                }
+
+                spellButtonsFor = wanted;
+            }
+
+            foreach (var child in spellButtons.GetChildren())
+            {
+                if (child is Button button)
+                {
+                    button.ButtonPressed = armedSpell?.Name == button.Text;
+                    button.Disabled = caster is null || caster.ActionsRemaining < 1;
+                }
+            }
+
+            spellButtons.Visible = spells.Count > 0;
+            payInBodyBox.Visible = caster?.MagicAccess.Any(a => a.CanBleedForPower) == true;
+            overclockBox.Visible = caster?.HasOverclock == true;
+            overclockBox.Disabled = caster?.HasOverclockedThisRound != false;
+            sacrificeBox.Visible = caster?.HasSacrifice == true;
+            sacrificeBox.Disabled = caster is null || Encounter.SacrificeRefusal(caster) is not null;
+            backlashBox.Visible = spells.Count > 0;
+            sustainBox.Visible = armedSpell is { } s && SpellCalculator.CanBeSustained(s.SpellType);
+            thresholdPicker.Visible = armedSpell is { SpellType: SpellType.Buff or SpellType.Bane };
         }
 
         /// <summary>
@@ -709,11 +861,33 @@ namespace WoundBoundGame
                 "• Dodge / Grounded / Resolute: +2 to a Threshold in place of your move — but no moving, and attacks at Disadvantage.\n" +
                 "• Attack: click a foe with a red ring — in Reach for a blade, beyond Close for a bow.\n" +
                 "• Grab / Shove / Trip: press one, then click a foe beside you. An unarmed roll against their ST.\n" +
+                "• Spells: press one on a caster's spell row, then click who it's for — or, for an area, where it goes.\n" +
                 "• End turn when you're done, and the GM takes one adversary turn.";
 
             if (hovered is not { } square)
             {
                 return howToPlay;
+            }
+
+            if (active is not null && armedSpell is { } armedOne)
+            {
+                if (CastAt(active, square) is not { } cast)
+                {
+                    return $"{armedOne.Name}: click who it's for.";
+                }
+
+                var plan = encounter.PlanCast(active, cast);
+                if (!plan.CanCast)
+                {
+                    return $"{armedOne.Name}: {plan.Refusal}";
+                }
+
+                var paid = plan.WoundsPaid > 0 ? $"{plan.WoundsPaid} {plan.Track}" : "no wounds";
+                var roll = SpellCalculator.FixedThresholdFor(armedOne.SpellType) is { } against && armedOne.SpellType != SpellType.Heal
+                    ? $", rolling 2d12+{plan.CastBonus} ({plan.CastAbility}) vs {against}"
+                    : ", no roll to land";
+                return $"Click to cast {armedOne.Name} at {plan.Range} — {paid}{(cast.Overclock ? " and 1 Stamina" : string.Empty)}{roll}, " +
+                       $"catching {string.Join(", ", plan.Targets.Select(t => t.Name))}.";
             }
 
             if (encounter.Phase == EncounterPhase.ChoosingCharacter && encounter.At(square) is { Side: Side.Party } candidate)
@@ -960,6 +1134,29 @@ namespace WoundBoundGame
             };
             buttons.AddChild(endTurnButton);
 
+            // Magic: a button per spell, and the choices made in the same breath as the cast.
+            spellButtons = new HFlowContainer();
+            spellButtons.AddThemeConstantOverride("h_separation", 8);
+            column.AddChild(spellButtons);
+            var castOptions = new HFlowContainer();
+            castOptions.AddThemeConstantOverride("h_separation", 8);
+            column.AddChild(castOptions);
+            payInBodyBox = new CheckBox { Text = "Pay in Body", TooltipText = "Bleeding for Power: pay an Aether or Divine spell's cost from Body instead. Never below 1 Body." };
+            overclockBox = new CheckBox { Text = "Overclock", TooltipText = "Once a round: 1 Stamina pays 1 wound of the cost. Not a tactical spend." };
+            sacrificeBox = new CheckBox { Text = "Sacrifice", TooltipText = "Once a round: 1 Body before an attack or a cast, for Advantage on its roll." };
+            sustainBox = new CheckBox { Text = "Sustain", TooltipText = "Declare it held: 1 Stamina at the start of each of your turns keeps it going." };
+            backlashBox = new CheckBox { Text = "Backlash", TooltipText = "If paying would take Mind or Soul to 0, hold at 1 and pay the rest from Body." };
+            thresholdPicker = new OptionButton { TooltipText = "Which Threshold a Buff or Bane moves." };
+            foreach (var threshold in BuffThresholds)
+            {
+                thresholdPicker.AddItem(threshold.ToString());
+            }
+
+            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker })
+            {
+                castOptions.AddChild(option);
+            }
+
             var restartButton = new Button { Text = "Restart" };
             restartButton.Pressed += StartEncounter;
             buttons.AddChild(restartButton);
@@ -971,6 +1168,7 @@ namespace WoundBoundGame
 
             fightPicker = new OptionButton();
             fightPicker.AddItem("Signpost ambush (Quickstart)");
+            fightPicker.AddItem("Signpost ambush, the Quickstart five (with casters)");
             fightPicker.AddItem("Signpost ambush, four players");
             fightPicker.AddItem("Ambush at the Ferry Shrine ford (Inner Sea)");
             fightPicker.AddItem("Roadside ambush (party of three)");

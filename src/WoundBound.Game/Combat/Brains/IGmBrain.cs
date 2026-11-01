@@ -60,6 +60,16 @@ namespace WoundBound.Game.Combat.Brains
         /// no more are moving. <paramref name="stillIdle"/> shrinks as each one goes.
         /// </summary>
         GmCloseIn? NextCloseIn(BattleView view, IReadOnlyList<Combatant> stillIdle);
+
+        /// <summary>
+        /// Whether the adversary <see cref="PendingReaction.Defender"/> Backlashes Mind or Soul damage
+        /// onto Body rather than drop to 0 (Core Rules §4). "Let most of them simply go down"
+        /// (GM Reference §3), so by default none does.
+        /// </summary>
+        bool Backlashes(BattleView view, PendingReaction reaction) => false;
+
+        /// <summary>Whether the adversary pays 1 Stamina to go on holding the spell it Sustains.</summary>
+        bool Sustains(BattleView view, PendingReaction reaction) => reaction.Defender.Stamina > 1;
     }
 
     /// <summary>One thing an adversary does on its turn.</summary>
@@ -94,6 +104,9 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Stand up from Prone, for a move.</summary>
         public sealed record StandUp : GmStep;
+
+        /// <summary>Cast a spell with the action (Core Rules §9, "Magic").</summary>
+        public sealed record Cast(SpellCast Spell) : GmStep;
 
         /// <summary>Spend the action regaining the footing a hazard took.</summary>
         public sealed record RegainFooting : GmStep;

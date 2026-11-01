@@ -15,6 +15,7 @@ namespace WoundBound.Game.Data
         public const string StartingAdversariesFile = "starting-adversaries.json";
         public const string StartingWeaponsFile = "starting-weapons.json";
         public const string EnvironmentFile = "environment.json";
+        public const string StartingSpellsFile = "starting-spells.json";
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -31,6 +32,9 @@ namespace WoundBound.Game.Data
         /// <summary>The three environmental levers' grades (Core Rules §9, "Environment").</summary>
         public required EnvironmentTables Environment { get; init; }
 
+        /// <summary>The Starting Spells catalogue (Core Rules §14).</summary>
+        public required IReadOnlyList<StartingSpellInfo> Spells { get; init; }
+
         /// <param name="readFile">Returns the text of one of the catalogue files named above.</param>
         public static GameData Load(Func<string, string> readFile) => new()
         {
@@ -38,6 +42,7 @@ namespace WoundBound.Game.Data
             Adversaries = Parse<List<StartingAdversaryInfo>>(readFile, StartingAdversariesFile),
             Weapons = Parse<List<StartingWeaponInfo>>(readFile, StartingWeaponsFile),
             Environment = Parse<EnvironmentTables>(readFile, EnvironmentFile),
+            Spells = Parse<List<StartingSpellInfo>>(readFile, StartingSpellsFile),
         };
 
         public StartingAdversaryInfo Adversary(string name) =>
@@ -47,6 +52,11 @@ namespace WoundBound.Game.Data
         public StartingWeaponInfo Weapon(string name) =>
             Weapons.FirstOrDefault(w => w.Name == name)
             ?? throw new KeyNotFoundException($"No weapon named '{name}' in {StartingWeaponsFile}.");
+
+        /// <summary>A Starting Spells entry as a spell of a character's own (Core Rules §14).</summary>
+        public Rules.Models.SpellDefinition Spell(string name) => Rules.Calculation.SpellCalculator.FromReference(
+            Spells.FirstOrDefault(s => s.Name == name)
+            ?? throw new KeyNotFoundException($"No spell named '{name}' in {StartingSpellsFile}."));
 
         private static T Parse<T>(Func<string, string> readFile, string file) =>
             JsonSerializer.Deserialize<T>(readFile(file), JsonOptions)

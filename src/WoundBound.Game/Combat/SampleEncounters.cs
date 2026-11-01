@@ -129,6 +129,63 @@ namespace WoundBound.Game.Combat
         };
 
         /// <summary>
+        /// Mirella Vask, Spiritual Warden, from the Quickstart Adventure: a sword in hand and her
+        /// lantern in the other, and the four spells on her sheet — Smite, Scourging Light, Vital
+        /// Transfer (Blood Magic, reached by Bleeding for Power) and Blessing. She casts with
+        /// Presence, keeps it when she bleeds, and Grace adds her Intellect to her spells' dice.
+        /// </summary>
+        /// <param name="lantern">Her lantern lit, in her free hand.</param>
+        public static CharacterBuild MirellaVask(GameData data, bool lantern = false) => new()
+        {
+            CharacterName = "Mirella Vask",
+            ClassPrinciple = ClassPrinciple.Spiritual,
+            SecondaryWound = WoundType.Body,
+            Tier = Tier.T1,
+            AbilityModifiers = new Dictionary<Ability, int>
+            {
+                [Ability.Strength] = -1,
+                [Ability.Agility] = 0,
+                [Ability.Intellect] = 1,
+                [Ability.Vitality] = 2,
+                [Ability.Focus] = 1,
+                [Ability.Presence] = 3,
+            },
+            Experiences = { "Has ministered in the many villages that dot the land, and travelled the region extensively", "Cross Trained (Agility)" },
+            Weapons = { CombatantFactory.InHand(data.Weapon("Short Sword")) },
+            Armour = { new ArmourDefinition { Name = "Leather", Weight = ArmourWeight.Light, IsEquipped = true } },
+            InventoryItems = { new InventoryItemDefinition { Name = "Lantern", Quantity = 1, IsLit = lantern } },
+            Spells = { data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Vital Transfer"), data.Spell("Blessing") },
+        };
+
+        /// <summary>
+        /// Elthric Dane, Cerebral Blood Mage, from the Quickstart Adventure: a dagger, a torch, and
+        /// the four spells on his sheet — Mind Spike, Foresight, Telekinetic Shove and Blood Mist. He
+        /// casts with Focus whichever pool pays, and Overclocks once a round. He is Trained in
+        /// Elemental Magic (Fire), which isn't in yet.
+        /// </summary>
+        /// <param name="torch">A lit torch in his free hand.</param>
+        public static CharacterBuild ElthricDane(GameData data, bool torch = false) => new()
+        {
+            CharacterName = "Elthric Dane",
+            ClassPrinciple = ClassPrinciple.Cerebral,
+            SecondaryWound = WoundType.Body,
+            Tier = Tier.T1,
+            AbilityModifiers = new Dictionary<Ability, int>
+            {
+                [Ability.Strength] = -1,
+                [Ability.Agility] = 1,
+                [Ability.Intellect] = 1,
+                [Ability.Vitality] = 2,
+                [Ability.Focus] = 3,
+                [Ability.Presence] = 0,
+            },
+            Experiences = { "Studied ancient languages and cyphers", "Trained in Elemental Magic (Fire)" },
+            Weapons = { CombatantFactory.InHand(data.Weapon("Dagger")) },
+            InventoryItems = { new InventoryItemDefinition { Name = "Torches (bundle of 3)", Quantity = 6, IsLit = torch } },
+            Spells = { data.Spell("Mind Spike"), data.Spell("Foresight"), data.Spell("Telekinetic Shove"), data.Spell("Blood Mist") },
+        };
+
+        /// <summary>
         /// Three characters — the Dumb Fighter, Salla and Drovan — ambushed on the road: a Tollroad
         /// Bandit, his Timber Wolf, and two Bramble Ratkin. 1.5 + 1 + 0.25 × 2 is a Threat Value
         /// of 3, a Standard fight's budget for a party of three (GM Reference §5), and the GM has
@@ -236,6 +293,38 @@ namespace WoundBound.Game.Combat
                 combatants.Insert(3, CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(2, 4)));
                 combatants.Add(CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3)));
             }
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                objectives: [new Objective.DontLetEscape("Take the lantern-bearer — he can be made to talk", lanternBearer)],
+                setting: setting, environment: data.Environment);
+        }
+
+        /// <summary>
+        /// The signpost with the Quickstart's own party of five — Salla, Drovan, Joren, Mirella and
+        /// Elthric, the two casters among them — against one Skirmisher each: the lantern-bearer, the
+        /// bandit round the corner, and three Bandit Ambushers. At night Mirella's lantern and
+        /// Elthric's torch are the party's lights.
+        /// </summary>
+        public static Encounter SignpostWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, Setting? setting = null)
+        {
+            setting ??= SignpostNight;
+            var dark = setting.IsUnlit;
+            var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4));
+            lanternBearer.StatblockLights = dark ? 1 : 0;
+
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(1, 3)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(1, 5)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(2, 4)),
+                CombatantFactory.FromCharacter(MirellaVask(data, lantern: dark), new GridPosition(0, 4)),
+                CombatantFactory.FromCharacter(ElthricDane(data, torch: dark), new GridPosition(0, 3)),
+                lanternBearer,
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", new GridPosition(7, 1)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", new GridPosition(7, 6)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the stones", new GridPosition(9, 5)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3)),
+            };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
                 objectives: [new Objective.DontLetEscape("Take the lantern-bearer — he can be made to talk", lanternBearer)],

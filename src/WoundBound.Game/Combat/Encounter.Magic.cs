@@ -1,0 +1,946 @@
+using WoundBound.Game.Combat.Brains;
+using WoundBound.Rules.Calculation;
+using WoundBound.Rules.Catalog;
+using WoundBound.Rules.Enums;
+using WoundBound.Rules.Models;
+
+namespace WoundBound.Game.Combat
+{
+    /// <summary>
+    /// A spell still doing something to somebody: a Buff or Bane on a Threshold, or a Bind or a
+    /// Quicken on their pace. Each lasts until the start of its caster's next turn, unless declared
+    /// Sustained and paid for (Core Rules §11, "Duration and the Caster", "Sustaining a Spell").
+    /// </summary>
+    public sealed record SpellInPlay(Combatant Caster, Combatant Target, string Spell, SpellType Type, bool Sustained,
+        ThresholdType? Threshold, int Amount, CharacterCondition? Condition)
+    {
+        /// <summary>A willing target accepts a held spell, and isn't rolled against while it does.</summary>
+        public bool Accepts => Target.Side == Caster.Side;
+    }
+
+    public sealed partial class Encounter
+    {
+        private sealed class SpellEffect
+        {
+            public required Combatant Caster { get; init; }
+            public required Combatant Target { get; init; }
+            public required SpellDefinition Spell { get; init; }
+            public ThresholdModifier? Modifier { get; init; }
+            public CharacterCondition? Condition { get; init; }
+            public bool Sustained { get; init; }
+            public int CastBonus { get; init; }
+            public bool Accepts => Target.Side == Caster.Side;
+        }
+
+        private readonly List<SpellEffect> spellEffects = new();
+
+        /// <summary>Every spell still at work on the board, by whom and on whom.</summary>
+        public IReadOnlyList<SpellInPlay> SpellsInPlay => spellEffects
+            .Select(e => new SpellInPlay(e.Caster, e.Target, e.Spell.Name, e.Spell.SpellType, e.Sustained,
+                e.Modifier?.Threshold, e.Modifier?.Amount ?? 0, e.Condition))
+            .ToList();
+
+        /// <summary>What <paramref name="caster"/> casting <paramref name="cast"/> from where they stand would come to, or why it can't be cast.</summary>
+        public CastPlan PlanCast(Combatant caster, SpellCast cast) => PlanCastFrom(caster, caster.Position, cast, checkTurn: true);
+
+        /// <summary>
+        /// As <see cref="PlanCast"/>, as though <paramref name="caster"/> stood on <paramref name="from"/>.
+        /// Leaving out the turn — the action and the footing — lets a brain weigh a casting it
+        /// would make after a move.
+        /// </summary>
+        internal CastPlan PlanCastFrom(Combatant caster, GridPosition from, SpellCast cast, bool checkTurn)
+        {
+            var spell = cast.Spell;
+            if (caster.Build is not { } build || !caster.Spells.Contains(spell))
+            {
+                return CastPlan.Refused($"{spell.Name} isn't one of {caster.Name}'s spells.");
+            }
+
+            if (checkTurn)
+            {
+                if (caster.IsOutOfFight)
+                {
+                    return CastPlan.Refused($"{caster.Name} is in no state to.");
+                }
+
+                if (caster.ActionsRemaining < 1)
+                {
+                    return CastPlan.Refused("Casting takes an action, and there's none left.");
+                }
+
+                if (caster.NeedsFooting)
+                {
+                    return CastPlan.Refused(FootingFirst);
+                }
+            }
+
+            if (spell.SpellType is SpellType.Control or SpellType.Illusion or SpellType.Utility)
+            {
+                return CastPlan.Refused($"{spell.SpellType} spells aren't in the game yet.");
+            }
+
+            if (spell.Source == MagicSource.ElementalMagic)
+            {
+                return CastPlan.Refused("Elemental Magic isn't in the game yet.");
+            }
+
+            // Which access pays for it, and what it rolls (Core Rules §11, "Pure Magic", "Bleeding for Power").
+            if (caster.MagicAccess.FirstOrDefault(a => a.Source == spell.Source) is not { } access)
+            {
+                return CastPlan.Refused($"{caster.Name} has no access to {SpellCalculator.SourceLabel(spell.Source)}.");
+            }
+
+            if ((int)spell.SpellTier > (int)access.MaxSpellTier)
+            {
+                return CastPlan.Refused($"{spell.Name} is {spell.SpellTier}, past the {access.MaxSpellTier} {caster.Name} can cast.");
+            }
+
+            WoundType track;
+            Ability ability;
+            if (spell.Source == MagicSource.BloodMagic)
+            {
+                (track, ability) = (WoundType.Body, access.CastAbility);
+            }
+            else if (cast.PayInBody)
+            {
+                if (!access.CanBleedForPower || access.BleedCastAbility is not { } bleed)
+                {
+                    return CastPlan.Refused($"{caster.Name} can't pay for {spell.Name} in Body.");
+                }
+
+                (track, ability) = (WoundType.Body, bleed);
+            }
+            else
+            {
+                (track, ability) = (access.NativeCostTrack ?? WoundType.Body, access.CastAbility);
+            }
+
+            var castBonus = CharacterCalculator.CastBonus(build, ability);
+
+            // Where it lands (Core Rules §11, "Spell Shape", "Placing a Volume").
+            var touch = spell.Range == SpellRange.Touch || spell.Shape == SpellShape.None;
+            GridPosition origin;
+            List<GridPosition> squares;
+            List<Combatant> caught;
+            if (touch || spell.Shape is null or SpellShape.Ray)
+            {
+                if (cast.Target is not { } target)
+                {
+                    return CastPlan.Refused($"{spell.Name} needs somebody to go into.");
+                }
+
+                if (target.HasFled || !target.OccupiesSquare)
+                {
+                    return CastPlan.Refused($"{target.Name} isn't on the board.");
+                }
+
+                if (touch && from.DistanceTo(target.Position) > 1)
+                {
+                    return CastPlan.Refused($"{spell.Name} is cast at Touch — {target.Name} has to be in reach of a hand.");
+                }
+
+                origin = target.Position;
+                squares = touch ? [] : [origin];
+                caught = [target];
+            }
+            else if (spell.Shape == SpellShape.Volume)
+            {
+                if (cast.Corner is not { } corner)
+                {
+                    return CastPlan.Refused($"{spell.Name} needs a place for its block.");
+                }
+
+                var block = SpellArea.Block(corner, spell.Size).Where(sq => !Setting.IsWall(sq)).ToList();
+                if (block.Count == 0)
+                {
+                    return CastPlan.Refused("There's no open ground in that block to put the spell into.");
+                }
+
+                origin = block.OrderBy(sq => from.DistanceTo(sq)).ThenBy(sq => Math.Abs(sq.X - from.X) + Math.Abs(sq.Y - from.Y)).First();
+                squares = SpellArea.Reached(corner, spell.Size, origin, Setting.IsWall);
+                var covered = squares.ToHashSet();
+                caught = combatants.Where(c => c.OccupiesSquare && covered.Contains(c.Position)).ToList();
+            }
+            else
+            {
+                return CastPlan.Refused($"{spell.Shape} spells aren't in the game yet.");
+            }
+
+            var distance = from.DistanceTo(origin);
+            if (!touch)
+            {
+                if (distance > LongRangeSquares)
+                {
+                    return CastPlan.Refused($"Beyond Long — the point of origin is {distance} squares off.");
+                }
+
+                if (distance > 1 && Setting.Walls.Count > 0 && !Sight.Clear(from, origin, Setting.IsWall))
+                {
+                    return CastPlan.Refused("Something solid is in the way.");
+                }
+
+                var seen = environment is not { } tables || RangeBandCalculator.BandForSquares(bands, distance) is not { } band
+                    || (caught.Count == 1 && squares.Count == 1
+                        ? CanBeTargeted(caught[0], origin, distance)
+                        : EnvironmentCalculator.AllowsTargeting(tables, VisibilityAtSquare(origin), band));
+                if (!seen)
+                {
+                    return CastPlan.Refused("Too dark to see where it would go — nothing can be targeted beyond Close at Visibility None.");
+                }
+            }
+
+            var range = touch ? SpellRange.Touch : RangeBandCalculator.BandForSquares(bands, distance) switch
+            {
+                DistanceBand.Middle => SpellRange.Middle,
+                DistanceBand.Long => SpellRange.Long,
+                DistanceBand.Short => SpellRange.Short,
+                _ => SpellRange.Close,
+            };
+
+            // Who it works on, by Type (Core Rules §11).
+            MotionKind? motion = spell.SpellType == SpellType.Motion ? SpellArea.MotionOf(spell) : null;
+            var willingOnly = spell.SpellType == SpellType.Buff || motion == MotionKind.Quicken;
+            if (willingOnly)
+            {
+                caught = caught.Where(c => c.Side == caster.Side && !c.IsOutOfFight).ToList();
+                if (caught.Count == 0)
+                {
+                    return CastPlan.Refused($"A {spell.SpellType} is laid on a willing target, and nobody willing is there.");
+                }
+            }
+
+            switch (spell.SpellType)
+            {
+                case SpellType.Heal:
+                    var patient = caught[0];
+                    if (patient == caster)
+                    {
+                        return CastPlan.Refused("A Heal can never target its own caster — blood given closes someone else's wound.");
+                    }
+
+                    if (patient.BodyStatus == BodyStatus.Dead)
+                    {
+                        return CastPlan.Refused($"{patient.Name} is beyond healing.");
+                    }
+
+                    var mends = cast.Restores ?? spell.DamageType ?? WoundType.Body;
+                    if (patient.Track(mends) is var (now, max) && now >= max)
+                    {
+                        return CastPlan.Refused($"{patient.Name} carries no {mends} wound.");
+                    }
+
+                    break;
+
+                case SpellType.Buff or SpellType.Bane:
+                    var moves = cast.Threshold ?? spell.Threshold ?? ThresholdType.Dodge;
+                    if (moves == ThresholdType.Fortitude)
+                    {
+                        return CastPlan.Refused("Fortitude isn't in the game yet.");
+                    }
+
+                    break;
+
+                case SpellType.Motion when motion == MotionKind.Bind && spell.SpellTier != Tier.T1:
+                    return CastPlan.Refused("Only a T1 Bind — Slowed — is in the game yet.");
+            }
+
+            if (caught.Count == 0)
+            {
+                return CastPlan.Refused($"{spell.Name} would catch nobody there.");
+            }
+
+            // What it costs, and whether it can be paid (Core Rules §11, "Spell Wound Cost"; §4).
+            var cost = SpellCalculator.SpellCost(spell.SpellTier, spell.Size, range);
+            var wounds = cost;
+            if (cast.Overclock)
+            {
+                if (!caster.HasOverclock)
+                {
+                    return CastPlan.Refused("Only a Cerebral character can Overclock.");
+                }
+
+                if (caster.HasOverclockedThisRound)
+                {
+                    return CastPlan.Refused("Already Overclocked this round.");
+                }
+
+                if (caster.Stamina < 1 || cost < 1)
+                {
+                    return CastPlan.Refused(cost < 1 ? "Nothing to Overclock — it costs no wounds." : "No Stamina to Overclock with.");
+                }
+
+                wounds--;
+            }
+
+            var rolls = spell.SpellType == SpellType.Harm || (spell.SpellType == SpellType.Motion && motion != MotionKind.Quicken);
+            if (cast.Sacrifice && SacrificeRefusal(caster) is { } noSacrifice)
+            {
+                return CastPlan.Refused(noSacrifice);
+            }
+
+            if (cast.Sacrifice && !rolls)
+            {
+                return CastPlan.Refused($"{spell.Name} rolls nothing to land, so Sacrifice has nothing to improve.");
+            }
+
+            if (cast.Sustain && (!SpellCalculator.CanBeSustained(spell.SpellType) || motion == MotionKind.Shift))
+            {
+                return CastPlan.Refused($"A {(motion == MotionKind.Shift ? "Shift" : spell.SpellType.ToString())} is over the moment it lands — there's nothing to Sustain.");
+            }
+
+            var sacrificed = cast.Sacrifice ? 1 : 0;
+            var payRefusal = track == WoundType.Body
+                ? PlayStateCalculator.SpendRefusal(WoundType.Body, caster.Body, caster.Body, wounds + sacrificed, false)
+                : PlayStateCalculator.SpendRefusal(WoundType.Body, caster.Body, caster.Body, sacrificed, false)
+                  ?? PlayStateCalculator.SpendRefusal(track, caster.Track(track).Current, caster.Body - sacrificed, wounds, cast.Backlash);
+            if (payRefusal is not null)
+            {
+                return CastPlan.Refused(payRefusal);
+            }
+
+            return new CastPlan(null, origin, range, cost, track, ability, castBonus, squares, caught, motion) { WoundsPaid = wounds };
+        }
+
+        /// <summary>Why <paramref name="combatant"/> can't Sacrifice now, or null if they can (Core Rules §3, "Sacrifice").</summary>
+        public static string? SacrificeRefusal(Combatant combatant) =>
+            !combatant.HasSacrifice ? "Only a character with Body as their Secondary Wound can Sacrifice."
+            : combatant.HasSacrificedThisRound ? "Already Sacrificed this round."
+            : !PlayStateCalculator.CanSpendBody(combatant.Body, 1) ? "At 1 Body there's nothing left to give."
+            : null;
+
+        /// <summary>Casts <paramref name="cast"/> with the active character's action (Core Rules §9, "Magic").</summary>
+        public bool TryCast(SpellCast cast)
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } caster || PlanCast(caster, cast) is not { CanCast: true } plan)
+            {
+                return false;
+            }
+
+            Cast(caster, cast, plan, () => CheckForEnd());
+            return true;
+        }
+
+        private void Cast(Combatant caster, SpellCast cast, CastPlan plan, Action then)
+        {
+            var spell = cast.Spell;
+            caster.ActionsRemaining--;
+            caster.HasCastSpell = true;
+
+            // Paid before anything is rolled; a cost never cancels the thing it paid for (Core Rules §4).
+            var paid = new List<string>();
+            if (cast.Overclock)
+            {
+                caster.Stamina--;
+                caster.HasOverclockedThisRound = true;
+                paid.Add("1 Stamina (Overclock)");
+            }
+
+            if (plan.WoundsPaid > 0)
+            {
+                var track = plan.Track!.Value;
+                if (track == WoundType.Body)
+                {
+                    caster.Body -= plan.WoundsPaid;
+                }
+                else
+                {
+                    var current = caster.Track(track).Current;
+                    PlayStateCalculator.TrySpendMindOrSoul(current, caster.Body, plan.WoundsPaid, cast.Backlash, out var left, out var body);
+                    SetTrack(caster, track, left);
+                    if (body < caster.Body)
+                    {
+                        paid.Add($"{caster.Body - body} Body in Backlash");
+                    }
+
+                    caster.Body = body;
+                }
+
+                caster.TendEligible[track] = true;
+                paid.Insert(0, $"{plan.WoundsPaid} {track}");
+            }
+
+            if (cast.Sacrifice)
+            {
+                caster.Body--;
+                caster.HasSacrificedThisRound = true;
+                caster.TendEligible[WoundType.Body] = true;
+                paid.Add("1 Body (Sacrifice, for Advantage)");
+            }
+
+            if (cast.Sustain && caster.Sustaining is not null)
+            {
+                ReleaseHeld(caster, "to hold a new one");
+            }
+
+            var where = plan.Range == SpellRange.Touch ? $"with a hand on {plan.Targets[0].Name}"
+                : plan.Area.Count > 1 ? $"over {plan.Area.Count} squares at {plan.Range}"
+                : $"at {plan.Targets[0].Name}, {plan.Range}";
+            Write($"{caster.Name} casts {spell.Name} {where} — {(paid.Count == 0 ? "free" : string.Join(", ", paid))}" +
+                  (cast.Sustain ? ", declared Sustained." : "."));
+
+            void Finish()
+            {
+                if (caster.IsDazed)
+                {
+                    Write($"{caster.Name} has spent the last of their {(caster.IsStunned ? "Mind, and is Stunned" : "Soul, and is Numbed")}.");
+                }
+
+                then();
+            }
+
+            switch (spell.SpellType)
+            {
+                case SpellType.Harm:
+                    CastHarm(caster, cast, plan, Finish);
+                    return;
+                case SpellType.Heal:
+                    CastHeal(caster, cast, plan);
+                    Finish();
+                    return;
+                case SpellType.Buff or SpellType.Bane:
+                    foreach (var target in plan.Targets)
+                    {
+                        LayOn(caster, cast, plan, target);
+                    }
+
+                    Finish();
+                    return;
+                default:
+                    CastMotion(caster, cast, plan, Finish);
+                    return;
+            }
+        }
+
+        private static void SetTrack(Combatant c, WoundType track, int value)
+        {
+            switch (track)
+            {
+                case WoundType.Body:
+                    c.Body = value;
+                    break;
+                case WoundType.Mind:
+                    c.Mind = value;
+                    break;
+                default:
+                    c.Soul = value;
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// The dice a Heal or Harm rolls — d6 for one target, d4 for many, one die a Tier — plus Grace;
+        /// on a critical, the dice's maximum and one more die (Core Rules §10, §11).
+        /// </summary>
+        private int SpellDice(Combatant caster, SpellDefinition spell, bool critical)
+        {
+            var count = SpellCalculator.HealHarmDiceCount(spell.SpellTier);
+            var sides = DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target));
+            var rolled = critical
+                ? count * sides + dice.Roll(sides)
+                : Enumerable.Range(0, count).Sum(_ => dice.Roll(sides));
+            return Math.Max(0, rolled + (caster.Build is { } build ? SpellCalculator.GraceBonus(build, spell) : 0));
+        }
+
+        /// <summary>
+        /// A Harm spell: one roll for each target it catches, each against that target's own Dodge
+        /// Threshold — which they may raise after seeing it, as against any attack — and each
+        /// standing alone for criticals. A double one wounds the caster once per casting, of the
+        /// spell's own damage type (Core Rules §11, "Resolving a spell against several targets").
+        /// </summary>
+        private void CastHarm(Combatant caster, SpellCast cast, CastPlan plan, Action then)
+        {
+            var spell = cast.Spell;
+            var type = spell.DamageType ?? WoundType.Body;
+            var (helped, harried) = TakeAid(caster);
+            var backfired = false;
+            var targets = new Queue<Combatant>(plan.Targets);
+
+            void Next()
+            {
+                if (!targets.TryDequeue(out var target))
+                {
+                    if (backfired)
+                    {
+                        Write($"{caster.Name}'s working turns on them — a double one, and a {type} wound of their own.");
+                        Wound(caster, type, 1, direct: true, Done);
+                        return;
+                    }
+
+                    Done();
+                    return;
+                }
+
+                if (!target.OccupiesSquare)
+                {
+                    Next();
+                    return;
+                }
+
+                var threshold = target.DodgeThreshold + VisibilityDodgeModifier(target);
+                var advantage = cast.Sacrifice || helped || target.IsDefenceless;
+                var disadvantage = AttacksAtDisadvantage(caster) || harried;
+                var roll = RollAgainst(plan.CastBonus, threshold, advantage, disadvantage, caster);
+                var shieldGain = target.InHandShield is { } shield && target.CoveredBy.All(c => c.Bearer != target) && !target.IsOutOfFight
+                    ? Math.Max(0, InventoryCalculator.ShieldDodgeThresholdBonus(shield.Weight) - target.ShieldBonus)
+                    : 0;
+
+                void Land(int boost, string? boostedBy)
+                {
+                    var final = boost > 0 ? Reread(roll, threshold + boost) : roll;
+                    var line = $"{spell.Name} at {target.Name}: {DescribeRoll(final)} vs DT {final.Threshold}" + (boost > 0 ? $" (+{boost} {boostedBy})" : string.Empty);
+                    if (final.Success != true)
+                    {
+                        // A double that misses — rolled so, or Riposted into it — is a critical failure.
+                        backfired |= final.IsCritical;
+                        Write(line + (final.IsCritical && roll.Success == true ? " — Riposte! The critical becomes a critical failure."
+                            : final.IsCritical ? " — critical failure!" : " — miss."));
+                        Next();
+                        return;
+                    }
+
+                    var amount = SpellDice(caster, spell, final.IsCritical);
+                    Write(line + (final.IsCritical ? $" — critical! {amount} {type}." : $" — hit, {amount} {type}."));
+                    Wound(target, type, amount, direct: false, Next);
+                }
+
+                if (!target.IsOutOfFight && shieldGain > 0 && BoostWouldTurn(roll, threshold, shieldGain))
+                {
+                    OfferReaction(new PendingReaction(ReactionKind.RaiseShield, target, caster, roll, threshold,
+                            $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. Raising the shield now (1 Stamina, +{shieldGain}, and it stays up) would make it miss.",
+                            Bonus: shieldGain),
+                        raised =>
+                        {
+                            if (raised)
+                            {
+                                RaiseShield(target, target, reactive: true);
+                            }
+
+                            Land(raised ? shieldGain : 0, "shield raised");
+                        });
+                    return;
+                }
+
+                if (!target.IsOutOfFight && BoostWouldTurn(roll, threshold))
+                {
+                    OfferReaction(new PendingReaction(ReactionKind.PanicDodge, target, caster, roll, threshold,
+                            $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. A panic dodge (1 Stamina, +2) would make it miss."),
+                        dodged => Land(dodged ? ThresholdModifierCalculator.ReactionBonus : 0, "panic dodge"));
+                    return;
+                }
+
+                Land(0, null);
+            }
+
+            void Done()
+            {
+                CheckHolds();
+                then();
+            }
+
+            Next();
+        }
+
+        /// <summary>
+        /// Wounds of any type landing on <paramref name="target"/>. Body is soaked by armour unless
+        /// <paramref name="direct"/>; Mind and Soul never are, and may be Backlashed onto Body instead
+        /// of dropping the track to 0 (Core Rules §4). A Minion hit on Mind or Soul simply goes down
+        /// (GM Reference §3).
+        /// </summary>
+        private void Wound(Combatant target, WoundType type, int amount, bool direct, Action then)
+        {
+            if (amount <= 0)
+            {
+                then();
+                return;
+            }
+
+            if (type == WoundType.Body)
+            {
+                var absorbed = direct ? 0 : Math.Min(amount, InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false));
+                TakeBodyWounds(target, amount - absorbed);
+                Write($"{target.Name}: {amount} Body" + (absorbed > 0 ? $", armour absorbs {absorbed}" : string.Empty) +
+                      (target.IsOutOfFight ? " — out of the fight." : $" — {target.Body}/{target.BodyMax} Body."));
+                then();
+                return;
+            }
+
+            target.TendEligible[type] = true;
+            if (target.IsMinion)
+            {
+                target.Body = 0;
+                Write($"{target.Name} takes {amount} {type} and goes down.");
+                then();
+                return;
+            }
+
+            var current = target.Track(type).Current;
+            var excess = amount - (current - 1);
+            void Apply(bool backlash)
+            {
+                var (track, body) = PlayStateCalculator.ApplyMindOrSoulDamage(current, target.Body, amount, backlash);
+                SetTrack(target, type, track);
+                if (body != target.Body)
+                {
+                    target.TendEligible[WoundType.Body] = true;
+                    target.Body = body;
+                }
+
+                var (now, max) = target.Track(type);
+                Write($"{target.Name}: {amount} {type}" +
+                      (backlash ? $", Backlashed — held at 1, {excess} Body instead ({target.Body}/{target.BodyMax})." : $" — {now}/{max} {type}.") +
+                      (target.IsOutOfFight && !backlash ? target.IsDazed ? $" {target.Name} is {(type == WoundType.Mind ? "Stunned" : "Numbed")}." : " Out of the fight." : string.Empty) +
+                      (backlash && target.IsOutOfFight ? $" {target.Name} is out of the fight." : string.Empty));
+                then();
+            }
+
+            if (current > 0 && current - amount <= 0 && target.Body > 0)
+            {
+                OfferReaction(new PendingReaction(ReactionKind.Backlash, target, target, null, 0,
+                        $"{amount} {type} would take {target.Name} to 0 {type} — {(type == WoundType.Mind ? "Stunned" : "Numbed")}. " +
+                        $"Backlash holds them at 1 and puts the excess, {excess}, on Body instead, Direct.",
+                        ImpactWounds: excess),
+                    Apply);
+                return;
+            }
+
+            Apply(false);
+        }
+
+        /// <summary>A Heal: rolls nothing to land; its dice, plus Grace, back onto the chosen track (Core Rules §11).</summary>
+        private void CastHeal(Combatant caster, SpellCast cast, CastPlan plan)
+        {
+            var patient = plan.Targets[0];
+            var track = cast.Restores ?? cast.Spell.DamageType ?? WoundType.Body;
+            var amount = SpellDice(caster, cast.Spell, critical: false);
+            var wasDown = patient.IsOutOfFight;
+            var (before, max) = patient.Track(track);
+            SetTrack(patient, track, PlayStateCalculator.ApplyHeal(before, amount, max));
+            if (track == WoundType.Body && patient.Body > 0)
+            {
+                patient.IsStable = false;
+            }
+
+            var (now, _) = patient.Track(track);
+            Write($"{cast.Spell.Name} restores {amount} {track} to {patient.Name}: {now}/{max}." +
+                  (wasDown && !patient.IsOutOfFight ? $" {patient.Name} is back in the fight!" : string.Empty));
+        }
+
+        /// <summary>A Buff or a Bane takes hold without a roll: its Tier's bonus or penalty to the chosen Threshold (Core Rules §11).</summary>
+        private void LayOn(Combatant caster, SpellCast cast, CastPlan plan, Combatant target)
+        {
+            var spell = cast.Spell;
+            var threshold = cast.Threshold ?? spell.Threshold ?? ThresholdType.Dodge;
+            var amount = spell.SpellType == SpellType.Buff
+                ? ThresholdModifierCalculator.BuffAmount(spell.SpellTier)
+                : ThresholdModifierCalculator.BaneAmount(spell.SpellTier);
+            var modifier = new ThresholdModifier
+            {
+                Threshold = threshold,
+                Amount = amount,
+                Source = spell.Name,
+                Duration = ThresholdModifierDuration.UntilCastersTurn,
+                Caster = caster.Name,
+                Sustained = cast.Sustain,
+            };
+            target.ThresholdModifiers = ThresholdModifierCalculator.Add(target.ThresholdModifiers, modifier);
+            Hold(caster, cast, plan, target, modifier, condition: null);
+            Write($"{target.Name}: {(amount > 0 ? "+" : "−")}{Math.Abs(amount)} {threshold} until the start of {caster.Name}'s next turn — {ThresholdLine(target, threshold)}.");
+        }
+
+        private static string ThresholdLine(Combatant c, ThresholdType threshold) => threshold switch
+        {
+            ThresholdType.Dodge => $"DT {c.DodgeThreshold}",
+            ThresholdType.Stability => $"ST {c.StabilityThreshold}",
+            _ => $"RT {c.ResolveThreshold}",
+        };
+
+        private void Hold(Combatant caster, SpellCast cast, CastPlan plan, Combatant target, ThresholdModifier? modifier, CharacterCondition? condition)
+        {
+            spellEffects.Add(new SpellEffect
+            {
+                Caster = caster,
+                Target = target,
+                Spell = cast.Spell,
+                Modifier = modifier,
+                Condition = condition,
+                Sustained = cast.Sustain,
+                CastBonus = plan.CastBonus,
+            });
+
+            if (cast.Sustain)
+            {
+                caster.Sustaining = cast.Spell.Name;
+            }
+        }
+
+        /// <summary>
+        /// A Motion spell, rolled against each unwilling target's Stability Threshold — which they
+        /// may raise by standing firm — and laid on a willing one without a roll. A Shift is Forced
+        /// Movement in a straight line, which the target may still arrest; a Bind leaves them Slowed,
+        /// a Quicken Hastened, until the start of the caster's next turn (Core Rules §11).
+        /// </summary>
+        private void CastMotion(Combatant caster, SpellCast cast, CastPlan plan, Action then)
+        {
+            var spell = cast.Spell;
+            var kind = plan.Motion!.Value;
+            var (helped, harried) = TakeAid(caster);
+            var targets = new Queue<Combatant>(plan.Targets);
+
+            void Next()
+            {
+                if (!targets.TryDequeue(out var target))
+                {
+                    CheckHolds();
+                    then();
+                    return;
+                }
+
+                if (!target.OccupiesSquare)
+                {
+                    Next();
+                    return;
+                }
+
+                void Takes(string line)
+                {
+                    switch (kind)
+                    {
+                        case MotionKind.Shift:
+                            var step = cast.Direction ?? AwayFrom(caster.Position, target.Position);
+                            var squares = Math.Min(cast.Squares ?? int.MaxValue, SpellArea.ShiftSquares(spell.SpellTier));
+                            Write(line);
+                            ForcedMove(target, step, squares, $"{caster.Name}'s {spell.Name}", caster, meetHazards: true, Next);
+                            return;
+                        case MotionKind.Bind:
+                            Write(line + $" {target.Name} is Slowed until the start of {caster.Name}'s next turn.");
+                            target.SetCondition(CharacterCondition.Slowed, true);
+                            Hold(caster, cast, plan, target, modifier: null, CharacterCondition.Slowed);
+                            Next();
+                            return;
+                        default:
+                            Write(line + $" {target.Name} is Hastened until the start of {caster.Name}'s next turn.");
+                            target.SetCondition(CharacterCondition.Hastened, true);
+                            Hold(caster, cast, plan, target, modifier: null, CharacterCondition.Hastened);
+                            Next();
+                            return;
+                    }
+                }
+
+                if (target.Side == caster.Side || kind == MotionKind.Quicken)
+                {
+                    Takes($"{spell.Name} on {target.Name}, who is willing — nothing to roll.");
+                    return;
+                }
+
+                var threshold = target.StabilityThreshold;
+                var roll = RollAgainst(plan.CastBonus, threshold, cast.Sacrifice || helped || target.IsDefenceless, AttacksAtDisadvantage(caster) || harried, caster);
+
+                void Resolve(bool stoodFirm)
+                {
+                    var final = stoodFirm ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                    var line = $"{spell.Name} at {target.Name}: {DescribeRoll(final)} vs ST {final.Threshold}" + (stoodFirm ? " (+2 standing firm)" : string.Empty);
+                    if (final.Success != true)
+                    {
+                        Write(line + " — it doesn't take.");
+                        Next();
+                        return;
+                    }
+
+                    Takes(line + " —");
+                }
+
+                if (!target.IsOutOfFight && BoostWouldTurn(roll, threshold))
+                {
+                    OfferReaction(new PendingReaction(ReactionKind.StandFirm, target, caster, roll, threshold,
+                        $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s ST {threshold}. Standing firm (1 Stamina, +2 ST) would stop it."), Resolve);
+                    return;
+                }
+
+                Resolve(false);
+            }
+
+            Next();
+        }
+
+        private static (int X, int Y) AwayFrom(GridPosition from, GridPosition at)
+        {
+            var step = (Math.Sign(at.X - from.X), Math.Sign(at.Y - from.Y));
+            return step == (0, 0) ? (1, 0) : step;
+        }
+
+        /// <summary>
+        /// The start of <paramref name="caster"/>'s turn: everything they laid on that lasted "until the
+        /// start of the caster's next turn" ends, but for what they declared Sustained — which waits on
+        /// whether they pay. A caster with no turn to take can't pay, and lets it go.
+        /// </summary>
+        private void ExpireSpellsAtTurnStart(Combatant caster)
+        {
+            foreach (var effect in spellEffects.Where(e => e.Caster == caster && !e.Sustained).ToList())
+            {
+                End(effect, $"{effect.Spell.Name} on {effect.Target.Name} ends as {caster.Name}'s turn begins.");
+            }
+
+            if (caster.Sustaining is not null && (caster.IsOutOfFight || caster.Stamina <= 0))
+            {
+                ReleaseHeld(caster, "with nothing to pay for it");
+            }
+        }
+
+        /// <summary>
+        /// Offers <paramref name="caster"/> the Sustain payment, if they are holding a spell: 1 Stamina,
+        /// a tactical spend, and every target fighting it rechecked. Unpaid, it ends here.
+        /// </summary>
+        private void OfferSustain(Combatant caster, Action then)
+        {
+            if (caster.Sustaining is not { } name)
+            {
+                then();
+                return;
+            }
+
+            var held = spellEffects.Where(e => e.Caster == caster && e.Sustained).ToList();
+            OfferReaction(new PendingReaction(ReactionKind.Sustain, caster, caster, null, 0,
+                    $"{caster.Name}'s {name} would end now, holding {string.Join(", ", held.Select(e => e.Target.Name))}. " +
+                    "Sustaining it (1 Stamina, a tactical spend) keeps it until their next turn; anyone fighting it is rechecked."),
+                paid =>
+                {
+                    if (!paid)
+                    {
+                        ReleaseHeld(caster, "and lets it go");
+                        then();
+                        return;
+                    }
+
+                    Write($"{caster.Name} holds {name} for another round ({caster.Stamina} Stamina left).");
+                    Recheck(new Queue<SpellEffect>(held.Where(e => !e.Accepts)), then);
+                });
+        }
+
+        /// <summary>
+        /// Each held target fighting the spell, rechecked: the cast total again against a Bind's
+        /// Stability, or against what a Bane lowers at its value without the Bane; the target may spend
+        /// Stamina for +2 against it, as against the cast. A failed recheck frees that target and no other.
+        /// </summary>
+        private void Recheck(Queue<SpellEffect> fighting, Action then)
+        {
+            if (!fighting.TryDequeue(out var effect))
+            {
+                then();
+                return;
+            }
+
+            var target = effect.Target;
+            var caster = effect.Caster;
+            ThresholdType checks;
+            int threshold;
+            if (effect.Modifier is { } bane)
+            {
+                checks = bane.Threshold;
+                var without = checks switch
+                {
+                    ThresholdType.Dodge => target.DodgeThreshold,
+                    ThresholdType.Stability => target.StabilityThreshold,
+                    _ => target.ResolveThreshold ?? 0,
+                };
+                threshold = without - bane.Amount;
+            }
+            else
+            {
+                checks = ThresholdType.Stability;
+                threshold = target.StabilityThreshold;
+            }
+
+            var roll = RollAgainst(effect.CastBonus, threshold, advantage: false, disadvantage: false);
+
+            void Resolve(bool boosted)
+            {
+                var final = boosted ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                var label = checks switch { ThresholdType.Dodge => "DT", ThresholdType.Stability => "ST", _ => "RT" };
+                if (final.Success == true)
+                {
+                    Write($"{effect.Spell.Name} rechecked against {target.Name}: {DescribeRoll(final)} vs {label} {final.Threshold} — it holds.");
+                }
+                else
+                {
+                    End(effect, $"{effect.Spell.Name} rechecked against {target.Name}: {DescribeRoll(final)} vs {label} {final.Threshold} — {target.Name} throws it off.");
+                }
+
+                Recheck(fighting, then);
+            }
+
+            if (!target.IsOutOfFight && BoostWouldTurn(roll, threshold))
+            {
+                var kind = checks switch
+                {
+                    ThresholdType.Dodge => ReactionKind.PanicDodge,
+                    ThresholdType.Resolve => ReactionKind.BraceResolve,
+                    _ => ReactionKind.StandFirm,
+                };
+                OfferReaction(new PendingReaction(kind, target, caster, roll, threshold,
+                    $"{caster.Name}'s held {effect.Spell.Name} rechecks at {roll.Total} against {target.Name}'s {threshold}. 1 Stamina for +2 would throw it off."), Resolve);
+                return;
+            }
+
+            Resolve(false);
+        }
+
+        /// <summary>Lets go of everything <paramref name="caster"/> is Sustaining.</summary>
+        private void ReleaseHeld(Combatant caster, string how)
+        {
+            var name = caster.Sustaining;
+            foreach (var effect in spellEffects.Where(e => e.Caster == caster && e.Sustained).ToList())
+            {
+                End(effect, null);
+            }
+
+            caster.Sustaining = null;
+            if (name is not null)
+            {
+                Write($"{caster.Name} stops holding {name}, {how}.");
+            }
+        }
+
+        private void End(SpellEffect effect, string? line)
+        {
+            spellEffects.Remove(effect);
+            var target = effect.Target;
+            if (effect.Modifier is { } modifier)
+            {
+                target.ThresholdModifiers = ThresholdModifierCalculator.Remove(target.ThresholdModifiers, modifier.Id);
+            }
+
+            if (effect.Condition is { } condition && !spellEffects.Any(e => e.Target == target && e.Condition == condition))
+            {
+                target.SetCondition(condition, false);
+            }
+
+            if (effect.Sustained && !spellEffects.Any(e => e.Caster == effect.Caster && e.Sustained))
+            {
+                effect.Caster.Sustaining = null;
+            }
+
+            if (line is not null)
+            {
+                Write(line);
+            }
+        }
+
+        /// <summary>
+        /// A held spell is anchored to its caster: it ends at once if they fall unconscious, start
+        /// dying, or leave (Core Rules §11). What lasts only until their next turn runs to the round's
+        /// end if they have no next turn to start.
+        /// </summary>
+        private void EndSpellsOfFallenCasters(bool roundEnd)
+        {
+            foreach (var effect in spellEffects.ToList())
+            {
+                var caster = effect.Caster;
+                var gone = caster.IsUnconscious || caster.HasFled || caster.Body <= 0 || (roundEnd && caster.IsOutOfFight);
+                if (gone && (effect.Sustained || roundEnd))
+                {
+                    End(effect, $"{effect.Spell.Name} on {effect.Target.Name} ends with {caster.Name} out of the fight.");
+                }
+            }
+        }
+    }
+}

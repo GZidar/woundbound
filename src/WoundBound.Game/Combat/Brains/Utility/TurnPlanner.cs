@@ -15,6 +15,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         BreakFree,
         BuyExtraAction,
         RegainFooting,
+        Cast,
         End,
     }
 
@@ -24,7 +25,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// </summary>
     public sealed record Option(OptionKind Kind, double Score, string Why,
         GridPosition? Square = null, Combatant? Target = null, AttackProfile? With = null,
-        CombatAction? Action = null, ControlAction? Control = null, bool WithAdvantage = false);
+        CombatAction? Action = null, ControlAction? Control = null, bool WithAdvantage = false, SpellCast? Cast = null);
 
     /// <summary>
     /// Runs through everything a creature could do with what it has left of its turn — every
@@ -38,11 +39,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
     {
         private readonly Assessor assess;
         private readonly BrainSkill skill;
+        private readonly SpellPlanner spells;
 
         public TurnPlanner(Assessor assess, BrainSkill skill)
         {
             this.assess = assess;
             this.skill = skill;
+            spells = new SpellPlanner(assess);
         }
 
         private BattleView View => assess.View;
@@ -169,6 +172,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     ? actor.Role == AdversaryRole.Skirmisher ? 0.3 : 0
                     : actor.Role == AdversaryRole.Brute ? 0.2 : 0;
                 yield return new Option(OptionKind.Attack, worth, $"{with.Name} at {target.Name}", Target: target, With: with, WithAdvantage: advantage);
+            }
+
+            foreach (var cast in spells.Options(actor, at, checkRules, care, skill.UsesTricks))
+            {
+                yield return cast;
             }
 
             if (actor.HeldBy is { } holder && at == actor.Position && (!checkRules || BattleView.BreakFreeRefusal(actor) is null))
@@ -335,9 +343,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return 0.1 * Math.Min(nearest, 20);
             }
 
+            // A caster fights like a Skirmisher: from Short, out of reach.
+            var keepsDistance = actor.Role == AdversaryRole.Skirmisher && actor.HasRangedAttack
+                                || actor.Spells.Any(s => s.SpellType == SpellType.Harm);
             return actor.Role switch
             {
-                AdversaryRole.Skirmisher when actor.HasRangedAttack => nearest <= 1 ? -0.6 : nearest <= 4 ? 0.4 : nearest <= 8 ? 0.1 : -0.1,
+                _ when keepsDistance => nearest <= 1 ? -0.6 : nearest <= 4 ? 0.4 : nearest <= 8 ? 0.1 : -0.1,
                 AdversaryRole.Brute => nearest <= 1 ? 0.3 : 0,
                 _ => 0,
             };
@@ -368,6 +379,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
+            best = Math.Max(best, spells.BestHarmFrom(actor, square));
             var nearest = Pursued(actor).Select(e => e.Position.DistanceTo(square)).DefaultIfEmpty(0).Min();
             return best - 0.05 * nearest;
         }

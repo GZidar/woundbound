@@ -42,6 +42,26 @@ namespace WoundBound.Game.Combat
         /// <see cref="Encounter.RespondToLeaver"/>, not a yes or no.
         /// </summary>
         LeaverReaction,
+
+        /// <summary>
+        /// Mind or Soul damage is about to take a track to 0: hold at 1 instead and take the excess
+        /// as Body, Direct (Core Rules §4, "Metaphysical Backlash"). A choice, not a Stamina spend —
+        /// it costs no Stamina and hands the GM nothing.
+        /// </summary>
+        Backlash,
+
+        /// <summary>
+        /// A spell the caster declared Sustained would end now, at the start of their turn: 1 Stamina
+        /// keeps it until the start of the next — a tactical spend that hands the GM a banked
+        /// Opportunity (Core Rules §11, "Sustaining a Spell").
+        /// </summary>
+        Sustain,
+
+        /// <summary>
+        /// +2 Resolve Threshold against a spell that would land or hold — the reactive boost against
+        /// a Control spell, or against a held Bane on Resolve (Core Rules §10, §11).
+        /// </summary>
+        BraceResolve,
     }
 
     /// <summary>What a character does about an enemy leaving their reach.</summary>
