@@ -33,6 +33,7 @@ namespace WoundBoundGame
         private static readonly Color AdversaryToken = new(0.75f, 0.25f, 0.22f);
         private static readonly Color ActiveRing = new(1f, 0.85f, 0.3f);
         private static readonly Color TargetRing = new(1f, 0.35f, 0.3f);
+        private static readonly Color ChoosableRing = new(0.6f, 0.85f, 1f);
 
         private GameData data = null!;
         private Encounter encounter = null!;
@@ -44,6 +45,12 @@ namespace WoundBoundGame
         private BotDriver? bot;
         private CheckButton botToggle = null!;
         private OptionButton tacticPicker = null!;
+        private OptionButton fightPicker = null!;
+        private HFlowContainer chooseRow = null!;
+        private Label partyLabel = null!;
+
+        /// <summary>The character whose sheet is shown: whoever is acting, else the last one hovered or acting.</summary>
+        private Combatant? shown;
         private Button panicDodgeButton = null!;
         private Button takeHitButton = null!;
 
@@ -84,8 +91,24 @@ namespace WoundBoundGame
 
             if (@event is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }
                 || bot is not null
-                || encounter.Phase != EncounterPhase.PartyTurn
                 || hovered is not { } clicked)
+            {
+                return;
+            }
+
+            // Choosing who goes next: click one of the characters still to act.
+            if (encounter.Phase == EncounterPhase.ChoosingCharacter)
+            {
+                if (encounter.At(clicked) is { } chosen)
+                {
+                    encounter.TryBeginTurn(chosen);
+                    Refresh();
+                }
+
+                return;
+            }
+
+            if (encounter.Phase != EncounterPhase.PartyTurn)
             {
                 return;
             }
@@ -158,6 +181,10 @@ namespace WoundBoundGame
             {
                 DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, ActiveRing, 3);
             }
+            else if (encounter.Phase == EncounterPhase.ChoosingCharacter && encounter.PartyStillToAct.Contains(combatant))
+            {
+                DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, ChoosableRing, 3);
+            }
             else if (active is not null && encounter.CanAttack(active, combatant))
             {
                 DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, TargetRing, 3);
@@ -175,7 +202,10 @@ namespace WoundBoundGame
 
         private void StartEncounter()
         {
-            encounter = SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller());
+            encounter = fightPicker.Selected == 1
+                ? SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller())
+                : SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller());
+            shown = null;
             stepPending = false;
             bot = null;
             UpdateBot();
@@ -246,16 +276,17 @@ namespace WoundBoundGame
             var roll = pending.Roll;
             reactionLabel.Text =
                 $"{pending.Attacker.Name}'s {pending.Attacker.Attack.Name} rolls ({string.Join("+", roll.CountedDice)})" +
-                $"{(roll.Modifier >= 0 ? "+" : "−")}{System.Math.Abs(roll.Modifier)} = {roll.Total} against your DT {pending.DodgeThreshold}: a hit.\n" +
-                $"A panic dodge raises your DT to {pending.RaisedDodgeThreshold} and makes it miss" +
+                $"{(roll.Modifier >= 0 ? "+" : "−")}{System.Math.Abs(roll.Modifier)} = {roll.Total} against {pending.Defender.Name}'s DT {pending.DodgeThreshold}: a hit.\n" +
+                $"A panic dodge raises their DT to {pending.RaisedDodgeThreshold} and makes it miss" +
                 (pending.WouldRiposte ? " — and it's a critical, so the miss is a Riposte: the attacker takes the wound." : ".") +
-                "\nIt costs 1 Stamina and your tactical spend for the round, and hands the GM an Immediate Opportunity.";
+                "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM an Immediate Opportunity.";
         }
 
         private void UpdateHud()
         {
             statusLabel.Text = $"Round {encounter.Round} · " + encounter.Phase switch
             {
+                EncounterPhase.ChoosingCharacter => "Choose who acts next",
                 EncounterPhase.PartyTurn => $"Your turn: {encounter.Active?.Name}",
                 EncounterPhase.AdversaryTurn => "The GM is acting…",
                 EncounterPhase.AwaitingReaction => "React?",
@@ -266,7 +297,9 @@ namespace WoundBoundGame
 
             UpdateReactionPrompt();
 
-            var character = encounter.Combatants.First(c => c.Side == Side.Party);
+            UpdateParty();
+
+            var character = shown ?? encounter.Combatants.First(c => c.Side == Side.Party);
             var attack = character.Attack;
             var armourAbsorbs = InventoryCalculator.ArmourDamageAbsorbed(character.Armour);
             characterLabel.Text =
@@ -315,20 +348,82 @@ namespace WoundBoundGame
             endTurnButton.Disabled = !isPartyTurn;
         }
 
+        /// <summary>
+        /// Picks whose sheet to show, lists the party, and offers a button for each character the
+        /// players could send in next.
+        /// </summary>
+        private void UpdateParty()
+        {
+            if (encounter.Active is { Side: Side.Party } acting)
+            {
+                shown = acting;
+            }
+            else if (hovered is { } square && encounter.At(square) is { Side: Side.Party } pointedAt)
+            {
+                shown = pointedAt;
+            }
+
+            var party = encounter.Combatants.Where(c => c.Side == Side.Party).ToList();
+            partyLabel.Visible = party.Count > 1;
+            partyLabel.Text = string.Join("\n", party.Select(c =>
+                $"{(c == encounter.Active ? "▶ " : "   ")}{c.Name}: Body {c.Body}/{c.BodyMax}, Stamina {c.Stamina}/{c.StaminaMax} — " +
+                (c.IsOutOfFight ? "out of the fight"
+                    : c == encounter.Active ? "acting"
+                    : encounter.PartyStillToAct.Contains(c) ? "still to act"
+                    : "has acted")));
+
+            // Rebuilt only when who can be chosen changes, so a button isn't freed under the mouse.
+            var choosing = bot is null && encounter.Phase == EncounterPhase.ChoosingCharacter;
+            var candidates = choosing ? encounter.PartyStillToAct.ToList() : new List<Combatant>();
+            var wanted = string.Join("|", candidates.Select(c => c.Name));
+            if (wanted != chooseRowFor)
+            {
+                foreach (var child in chooseRow.GetChildren())
+                {
+                    child.QueueFree();
+                }
+
+                foreach (var candidate in candidates)
+                {
+                    var button = new Button { Text = $"{candidate.Name} acts" };
+                    button.Pressed += () =>
+                    {
+                        encounter.TryBeginTurn(candidate);
+                        Refresh();
+                    };
+                    chooseRow.AddChild(button);
+                }
+
+                chooseRowFor = wanted;
+            }
+
+            chooseRow.Visible = candidates.Count > 0;
+        }
+
+        private string chooseRowFor = string.Empty;
+
         /// <summary>What clicking the square under the mouse would do, or how to play when it's over nothing useful.</summary>
         private string DescribeHovered(Combatant? active)
         {
             const string howToPlay =
-                "You are the blue token (yellow ring on your turn).\n" +
+                "Your characters are the blue tokens. You choose who goes next — click a token with a pale ring, " +
+                "or its button — and the GM acts between your turns.\n" +
                 "• Move: click a highlighted square. Blue costs your move; amber spends your action too.\n" +
                 "• Swap: trade the loadout in hand for the one at the ready, for a move.\n" +
                 "• Dodge / Grounded / Resolute: +2 to a Threshold in place of your move — but no moving, and attacks at Disadvantage.\n" +
-                "• Attack: click a ratkin with a red ring — in Reach for a blade, beyond Close for a bow.\n" +
-                "• End turn when you're done, and the GM moves one ratkin.";
+                "• Attack: click a foe with a red ring — in Reach for a blade, beyond Close for a bow.\n" +
+                "• End turn when you're done, and the GM takes one adversary turn.";
 
             if (hovered is not { } square)
             {
                 return howToPlay;
+            }
+
+            if (encounter.Phase == EncounterPhase.ChoosingCharacter && encounter.At(square) is { Side: Side.Party } candidate)
+            {
+                return encounter.PartyStillToAct.Contains(candidate)
+                    ? $"Click to have {candidate.Name} act next."
+                    : $"{candidate.Name} has already acted this round.";
             }
 
             if (encounter.At(square) is { Side: Side.Adversaries } foe)
@@ -400,6 +495,10 @@ namespace WoundBoundGame
 
             statusLabel = WrappingLabel(column);
             statusLabel.AddThemeFontSizeOverride("font_size", 20);
+            partyLabel = WrappingLabel(column);
+            chooseRow = new HFlowContainer();
+            chooseRow.AddThemeConstantOverride("h_separation", 8);
+            column.AddChild(chooseRow);
             characterLabel = WrappingLabel(column);
             hoverLabel = WrappingLabel(column);
             hoverLabel.AddThemeColorOverride("font_color", new Color(0.75f, 0.75f, 0.8f));
@@ -455,7 +554,13 @@ namespace WoundBoundGame
             botRow.AddThemeConstantOverride("separation", 8);
             column.AddChild(botRow);
 
-            botToggle = new CheckButton { Text = "Bot plays the fighter" };
+            fightPicker = new OptionButton();
+            fightPicker.AddItem("Roadside ambush (party of three)");
+            fightPicker.AddItem("The Dumb Fighter v three ratkin");
+            fightPicker.ItemSelected += _ => StartEncounter();
+            botRow.AddChild(fightPicker);
+
+            botToggle = new CheckButton { Text = "Bot plays the party" };
             botToggle.Toggled += _ =>
             {
                 UpdateBot();

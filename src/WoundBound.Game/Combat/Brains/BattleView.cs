@@ -28,6 +28,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>The party still fighting.</summary>
         public IEnumerable<Combatant> Characters => encounter.Fighting(Side.Party);
 
+        /// <summary>The party members yet to take a turn this round.</summary>
+        public IReadOnlyList<Combatant> PartyStillToAct => encounter.PartyStillToAct;
+
         public int BankedOpportunities => encounter.BankedOpportunities;
 
         public int ImmediateOpportunities => encounter.ImmediateOpportunities;

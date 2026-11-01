@@ -94,6 +94,8 @@ public class RoundEndTests
         }, Data.RangeBands, new ScriptedDice(2, 3));
         Assert.Equal(2, encounter.AdversaryTurnsPerRound);
 
+        Assert.Equal(EncounterPhase.ChoosingCharacter, encounter.Phase);
+        Assert.True(encounter.TryBeginTurn(encounter.Combatants.Single(c => c.Name == "The Dumb Fighter")));
         encounter.Combatants.Single(c => c.Name == "The Other Fighter").Body = 0;
         encounter.EndTurn();
         encounter.RunAdversaryTurn();

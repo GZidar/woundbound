@@ -15,6 +15,13 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>A short name for reports: "Charge", "Bow first".</summary>
         string Name { get; }
 
+        /// <summary>
+        /// Which of <paramref name="stillToAct"/> takes the next turn (Core Rules §9, "Players
+        /// choose their own order"). Asked only when there are at least two to choose between,
+        /// all of them still fighting. Must answer one of them.
+        /// </summary>
+        Combatant ChooseNextCharacter(BattleView view, IReadOnlyList<Combatant> stillToAct);
+
         /// <summary>What <paramref name="character"/> does next on their turn. Asked until it answers <see cref="PartyStep.End"/>.</summary>
         PartyStep NextStep(BattleView view, Combatant character);
 

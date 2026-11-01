@@ -10,6 +10,7 @@ namespace WoundBound.Game.Simulation
         int PartyBodyLeft,
         int PartyStaminaLeft,
         int FoesDropped,
+        int CharactersStanding,
         BotTally Tally)
     {
         public bool Won => Outcome == EncounterPhase.Victory;
@@ -36,6 +37,9 @@ namespace WoundBound.Game.Simulation
         public double AverageBodyLeftOnWin => Wins == 0 ? 0 : Fights.Where(f => f.Won).Average(f => f.PartyBodyLeft);
 
         public double AverageFoesDropped => Fights.Average(f => f.FoesDropped);
+
+        /// <summary>Characters still fighting at the end of the fights the party won.</summary>
+        public double AverageStandingOnWin => Wins == 0 ? 0 : Fights.Where(f => f.Won).Average(f => f.CharactersStanding);
 
         public double Per(Func<BotTally, int> count) => Fights.Average(f => count(f.Tally));
     }
@@ -78,6 +82,7 @@ namespace WoundBound.Game.Simulation
                 members.Sum(c => c.Body),
                 members.Sum(c => c.Stamina),
                 encounter.Combatants.Count(c => c.Side == Side.Adversaries && c.IsOutOfFight),
+                members.Count(c => !c.IsOutOfFight),
                 driver.Tally);
         }
 
@@ -89,12 +94,12 @@ namespace WoundBound.Game.Simulation
 
             var lines = new List<string>
             {
-                $"{"Tactic".PadRight(width)}  Win%   W/L/S         Rounds  Body left  Foes  Attacks  Swaps  Extra  Braces  Dodges",
+                $"{"Tactic".PadRight(width)}  Win%   W/L/S         Rounds  Body left  Up   Foes  Attacks  Swaps  Extra  Braces  Dodges",
             };
 
             lines.AddRange(rows.Select(r =>
                 $"{r.Tactic.PadRight(width)}  {r.WinRate,5:P0}  {$"{r.Wins}/{r.Losses}/{r.Stalemates}",-12}  " +
-                $"{r.AverageRounds,6:0.0}  {r.AverageBodyLeftOnWin,9:0.0}  {r.AverageFoesDropped,4:0.0}  " +
+                $"{r.AverageRounds,6:0.0}  {r.AverageBodyLeftOnWin,9:0.0}  {r.AverageStandingOnWin,3:0.0}  {r.AverageFoesDropped,4:0.0}  " +
                 $"{r.Per(t => t.Attacks),7:0.0}  {r.Per(t => t.Swaps),5:0.0}  {r.Per(t => t.ExtraActions),5:0.0}  " +
                 $"{r.Per(t => t.StoodGround),6:0.0}  {r.Per(t => t.DodgesTaken),6:0.0}"));
 

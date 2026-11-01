@@ -87,6 +87,21 @@ namespace WoundBound.Game.Combat.Brains
                 : WithBladeInHand(view, character, nearest);
         }
 
+        /// <summary>
+        /// Whoever can strike now goes first, so a blow lands before the GM's next turn — the
+        /// weakest target in reach decides between two who can. Otherwise whoever is nearest an
+        /// enemy, so the next to act is the one with most to do.
+        /// </summary>
+        public virtual Combatant ChooseNextCharacter(BattleView view, IReadOnlyList<Combatant> stillToAct) =>
+            stillToAct
+                .OrderBy(c => CanStrikeWithoutMoving(view, c) ? 0 : 1)
+                .ThenBy(c => view.NearestEnemy(c) is { } e ? c.Position.DistanceTo(e.Position) : int.MaxValue)
+                .First();
+
+        /// <summary>Whether an attack could be made at somebody from where <paramref name="character"/> stands, armed as they are.</summary>
+        protected static bool CanStrikeWithoutMoving(BattleView view, Combatant character) =>
+            view.EnemiesOf(character).Any(e => view.PlanAttack(character, e).CanAttack);
+
         public virtual bool PanicDodges(BattleView view, PendingReaction reaction) => Tactics.PanicDodges switch
         {
             PanicDodgePolicy.Always => CanSpare(reaction.Defender),

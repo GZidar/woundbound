@@ -8,6 +8,13 @@ namespace WoundBound.Game.Combat
 {
     public enum EncounterPhase
     {
+        /// <summary>
+        /// The players are choosing which of them acts next (Core Rules §9, "Players choose their
+        /// own order"); <see cref="Encounter.TryBeginTurn"/> starts that character's turn. Skipped
+        /// when only one character is left to act.
+        /// </summary>
+        ChoosingCharacter,
+
         /// <summary>A party member is taking their turn and the player is choosing what they do.</summary>
         PartyTurn,
 
@@ -60,8 +67,9 @@ namespace WoundBound.Game.Combat
     /// and in the gap after each one the GM is owed one adversary turn, never more owed turns in a
     /// round than there are characters. That cap is counted when the fight begins and never falls,
     /// however many characters go down. Opportunities buy turns past it ("GM Opportunities"). At
-    /// the round's end every adversary that took no turn closes in with a single move. The slice plays the party in list order rather than letting the players choose, which only
-    /// matters once there is more than one of them.</para>
+    /// the round's end every adversary that took no turn closes in with a single move. The players
+    /// choose their own order: at the start of each round and after each gap, whoever is left to
+    /// act may go next.</para>
     /// </summary>
     public sealed class Encounter
     {
@@ -72,7 +80,7 @@ namespace WoundBound.Game.Combat
         private readonly RangeBandTables bands;
         private readonly IDiceRoller dice;
         private readonly List<string> log = new();
-        private readonly Queue<Combatant> partyStillToAct = new();
+        private readonly List<Combatant> partyStillToAct = new();
 
         /// <summary>
         /// Immediate Opportunities, each remembered by the character whose spend made it: it "must
@@ -136,6 +144,9 @@ namespace WoundBound.Game.Combat
         public int GmOpportunities => BankedOpportunities + ImmediateOpportunities;
 
         public IReadOnlyList<string> Log => log;
+
+        /// <summary>The party members yet to take a turn this round, in the order they're listed — not the order they'll act in.</summary>
+        public IReadOnlyList<Combatant> PartyStillToAct => partyStillToAct;
 
         public event Action<string>? Logged;
 
@@ -532,10 +543,7 @@ namespace WoundBound.Game.Combat
             // Everyone on the party's side keeps their place in the round, fighting or not: a
             // character with no turn to take still leaves the GM the adversary turn that follows it.
             partyStillToAct.Clear();
-            foreach (var member in combatants.Where(c => c.Side == Side.Party))
-            {
-                partyStillToAct.Enqueue(member);
-            }
+            partyStillToAct.AddRange(combatants.Where(c => c.Side == Side.Party));
 
             // "The cap is set when the fight begins, and it never falls" (Core Rules §9): counted
             // once, raised by anyone who joins, never lowered by anyone who drops.
@@ -546,39 +554,74 @@ namespace WoundBound.Game.Combat
 
         public int AdversaryTurnsPerRound => adversaryTurnCap ?? 0;
 
+        /// <summary>
+        /// Whose turn is next: a character with no turn to take is passed over first, still
+        /// leaving the GM the adversary turn that follows it (Core Rules §9, "The cap is set when
+        /// the fight begins"); otherwise the players choose, unless only one of them is left.
+        /// </summary>
         private void BeginNextPartyTurn()
         {
-            while (partyStillToAct.TryDequeue(out var next))
+            Active = null;
+
+            if (partyStillToAct.FirstOrDefault(c => c.IsOutOfFight) is { } passedOver)
             {
-                if (next.IsOutOfFight)
-                {
-                    Write($"{next.Name} has no turn to take.");
-                    AfterPartyTurn();
-                    return;
-                }
-
-                ExpireImmediateOpportunities(next);
-                StartTurnFor(next);
-
-                if (next.Stamina <= 0)
-                {
-                    // "If a character starts their turn with 0 Stamina, they fall unconscious" (Core Rules §6).
-                    next.IsUnconscious = true;
-                    Write($"{next.Name} starts their turn with no Stamina and falls unconscious.");
-                    AfterPartyTurn();
-                    return;
-                }
-
-                Active = next;
-                next.HasMove = true;
-                next.ActionsRemaining = 1;
-                next.HasActedThisRound = true;
-                Phase = EncounterPhase.PartyTurn;
-                Write($"{next.Name}'s turn.");
+                partyStillToAct.Remove(passedOver);
+                Write($"{passedOver.Name} has no turn to take.");
+                AfterPartyTurn();
                 return;
             }
 
-            AfterPartyTurn();
+            switch (partyStillToAct.Count)
+            {
+                case 0:
+                    AfterPartyTurn();
+                    return;
+                case 1:
+                    StartPartyTurn(partyStillToAct[0]);
+                    return;
+                default:
+                    Phase = EncounterPhase.ChoosingCharacter;
+                    return;
+            }
+        }
+
+        /// <summary>
+        /// Starts <paramref name="character"/>'s turn, while the players are choosing who goes next
+        /// (Core Rules §9, "Players choose their own order"). False if it isn't that moment, or
+        /// they've already had their turn this round.
+        /// </summary>
+        public bool TryBeginTurn(Combatant character)
+        {
+            if (Phase != EncounterPhase.ChoosingCharacter || !partyStillToAct.Contains(character))
+            {
+                return false;
+            }
+
+            StartPartyTurn(character);
+            return true;
+        }
+
+        private void StartPartyTurn(Combatant next)
+        {
+            partyStillToAct.Remove(next);
+            ExpireImmediateOpportunities(next);
+            StartTurnFor(next);
+
+            if (next.Stamina <= 0)
+            {
+                // "If a character starts their turn with 0 Stamina, they fall unconscious" (Core Rules §6).
+                next.IsUnconscious = true;
+                Write($"{next.Name} starts their turn with no Stamina and falls unconscious.");
+                AfterPartyTurn();
+                return;
+            }
+
+            Active = next;
+            next.HasMove = true;
+            next.ActionsRemaining = 1;
+            next.HasActedThisRound = true;
+            Phase = EncounterPhase.PartyTurn;
+            Write($"{next.Name}'s turn.");
         }
 
         private void AfterPartyTurn()

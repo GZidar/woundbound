@@ -46,6 +46,15 @@ namespace WoundBound.Game.Combat.Brains
         {
             switch (encounter.Phase)
             {
+                case EncounterPhase.ChoosingCharacter:
+                    var next = party.ChooseNextCharacter(encounter.View, encounter.PartyStillToAct);
+                    if (!encounter.TryBeginTurn(next))
+                    {
+                        throw Refused($"{next.Name} to act next", "they aren't waiting for a turn this round");
+                    }
+
+                    return true;
+
                 case EncounterPhase.PartyTurn when encounter.Active is { } character:
                     TakePartyStep(character);
                     return true;

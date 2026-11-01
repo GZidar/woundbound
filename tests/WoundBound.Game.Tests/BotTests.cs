@@ -83,6 +83,8 @@ public class BotTests
     {
         public string Name => "Cheat";
 
+        public Combatant ChooseNextCharacter(BattleView view, IReadOnlyList<Combatant> stillToAct) => stillToAct[0];
+
         public PartyStep NextStep(BattleView view, Combatant character) => new PartyStep.Attack(view.Adversaries.First());
 
         public bool PanicDodges(BattleView view, PendingReaction reaction) => true;

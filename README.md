@@ -36,10 +36,24 @@ opening Godot lives in `src/`.
 4. Play: open `game/project.godot` in Godot and press **F5** (or Build, then Run). The first build
    copies the rules catalogues into `game/data/rules/`.
 
-## The first slice
+## The fights
 
-The Dumb Fighter of Core Rules §12 (light armour, longsword in hand, short bow at the ready) against
-three Bramble Ratkin from the starting adversaries. What it exercises, all through `WoundBound.Rules`:
+Pick one on the battle screen:
+
+- **Roadside ambush:** a party of three — the Dumb Fighter of Core Rules §12, and Salla Rinehart
+  (Nimble Duelist, rapier) and Drovan Thale (Nimble Ranger, short bow, knife at the ready) from the
+  Quickstart Adventure — against a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin: a Threat
+  Value of 3, a Standard fight for three (GM Reference §5). The catalogue has no stiletto or hunting
+  knife, so a dagger stands in for each.
+- **The first slice:** the Dumb Fighter alone (light armour, longsword in hand, short bow at the
+  ready) against three Bramble Ratkin.
+
+What they exercise, all through `WoundBound.Rules`:
+
+- Players choose their own order: at the start of each round, and after each gap, the players pick
+  which character still to act goes next (click a token with a pale ring, or its button). The last
+  one left goes without being asked. A character who is down is passed over, and the GM still takes
+  the adversary turn that follows them.
 
 - Moves priced by distance band and Speed — up to Short for one move, Middle spends the action too.
 - Two loadouts, in hand and at the ready, swapped for a move (or an action once the move is spent).
@@ -65,7 +79,7 @@ three Bramble Ratkin from the starting adversaries. What it exercises, all throu
 
 ## The GM brain
 
-Every choice the rules leave to the GM goes through `IGmBrain` (`src/WoundBound.Game/Combat/Gm/`):
+Every choice the rules leave to the GM goes through `IGmBrain` (`src/WoundBound.Game/Combat/Brains/`):
 - who takes an owed turn
 - whether to buy an extra turn with an Opportunity
 - each step of an adversary's turn (move, attack, with or without Advantage, or end)
@@ -73,7 +87,7 @@ Every choice the rules leave to the GM goes through `IGmBrain` (`src/WoundBound.
 - where idle adversaries close in at the round's end
 
 The `Encounter` owns the rules. It asks the brain, checks the answer, and carries it out, so a brain
-can never break a rule. An illegal answer throws. Brains see the fight through `GmView`, which
+can never break a rule. An illegal answer throws. Brains see the fight through `BattleView`, which
 answers rule questions ("could I hit them from there?") but can't change anything. A turn is asked
 for one step at a time, so a brain can re-plan after a dodge or a Riposte.
 
@@ -81,25 +95,32 @@ for one step at a time, so a brain can re-plan after a dodge or a Riposte.
 brain to `Encounter` (or `SampleEncounters.FighterVersusRatkin`) to change how the GM plays.
 
 Not yet: manoeuvres, Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting,
-shields, shoves and frights (so Grounded and Resolute have nothing to resist yet), multiple party members choosing
-their own order, obstacles, movement paths (a move is a hop from square to square).
+shields, shoves and frights (so Grounded and Resolute have nothing to resist yet), obstacles, movement
+paths (a move is a hop from square to square). Characters make no reaction attacks yet against an
+adversary leaving their reach. The Quickstart characters' class features — Nimble's free step and
+Exploits, Sacrifice, Interrupt — aren't in, and statblock ranged attacks (the Reedmarsh Skulker's
+bow) aren't modelled, so the sample fights use melee foes. The GM can't yet hold an owed turn for a
+later gap.
 
 ## Bot v bot
 
-A party brain (`IPartyBrain`) can take the player's seat while the GM brain keeps its own, so a
-fight plays itself.
+A party brain (`IPartyBrain`) can take the players' seat while the GM brain keeps its own, so a
+fight plays itself. It also chooses who acts next: `TacticalPartyBrain` sends in whoever can
+already strike, and otherwise whoever is nearest an enemy.
 - **The driver:** `BotDriver` carries out the party's choices through the same `Encounter` commands
   the buttons call, so a bot gets exactly the rules a player does. A refused choice throws.
 - **The tactics:** `TacticalPartyBrain` plays by `PartyTactics`, a handful of switches the
   simulator can measure. They cover shooting first with a bow at the ready, buying extra attacks,
   bracing when hurt, a Stamina reserve, and when to panic dodge. The presets are
   `PartyTactics.Presets`.
-- **In the game:** turn on **Bot plays the fighter** and pick a tactic to watch it play.
+- **In the game:** turn on **Bot plays the party** and pick a tactic to watch it play.
 - **The simulator:** plays every preset over the same seeded fights and compares them.
 
   ```
   dotnet run --project tools/WoundBound.Sim -- --fights 1000 --seed 1
   ```
+
+  The party ambush is the default; `--fight solo` plays the Dumb Fighter against the ratkin.
 
 As the rules grow, each new choice becomes a new switch, and the simulator says whether it wins
 fights.
