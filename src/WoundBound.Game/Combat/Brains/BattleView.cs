@@ -87,8 +87,9 @@ namespace WoundBound.Game.Combat.Brains
         public int? MoveCostTo(Combatant combatant, GridPosition square) => encounter.MoveCostTo(combatant, square);
 
         /// <summary>Every free square <paramref name="combatant"/> could reach for at most <paramref name="moves"/> moves, with each one's cost.</summary>
+        /// <remarks>None at all for a creature that can't move itself just now — standing its ground, Held, or Frightened and already withdrawn.</remarks>
         public IReadOnlyDictionary<GridPosition, int> SquaresWithin(Combatant combatant, int moves) =>
-            encounter.SquaresWithin(combatant, moves);
+            Encounter.CanMoveItself(combatant) ? encounter.SquaresWithin(combatant, moves) : new Dictionary<GridPosition, int>();
 
         /// <summary>Whether <paramref name="attacker"/> could attack <paramref name="target"/> right now, action and all.</summary>
         public bool CanAttack(Combatant attacker, Combatant target) => encounter.CanAttack(attacker, target);
@@ -166,6 +167,12 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>What casting <paramref name="cast"/> from <paramref name="from"/> would come to, leaving the turn aside.</summary>
         public CastPlan PlanCastFrom(Combatant caster, GridPosition from, SpellCast cast) => encounter.PlanCastFrom(caster, from, cast, checkTurn: false);
+
+        /// <summary>Why <paramref name="character"/> can't buy <paramref name="exploit"/> now, or null if they can.</summary>
+        public static string? ExploitRefusal(Combatant character, Rules.Enums.NimbleExploit exploit) => Encounter.ExploitRefusal(character, exploit);
+
+        /// <summary>Why <paramref name="attacker"/> can't declare <paramref name="manoeuvre"/> at <paramref name="target"/>, or null if they can.</summary>
+        public static string? ManoeuvreRefusal(Combatant attacker, Combatant target, Manoeuvre manoeuvre) => Encounter.ManoeuvreRefusal(attacker, target, manoeuvre);
 
         /// <summary>Why <paramref name="combatant"/> can't Sacrifice now, or null if they can.</summary>
         public static string? SacrificeRefusal(Combatant combatant) => Encounter.SacrificeRefusal(combatant);

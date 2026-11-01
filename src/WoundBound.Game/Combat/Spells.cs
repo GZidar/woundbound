@@ -233,6 +233,20 @@ namespace WoundBound.Game.Combat
                 : null;
         }
 
+        /// <summary>
+        /// The one Control effect a spell is written to produce, where it names one — a statblock's
+        /// "Withering Glare (Control - Fear)", a catalogue entry that "applies the Compulsion effect" —
+        /// or null where the caster picks on a success, as the rules' own framework has it.
+        /// </summary>
+        public static ControlEffect? FixedEffectOf(SpellDefinition spell)
+        {
+            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            return text.Contains("control - fear") || text.Contains("applies frightened") ? ControlEffect.Fear
+                : text.Contains("control - confusion") || text.Contains("confusion effect") ? ControlEffect.Confusion
+                : text.Contains("control - compulsion") || text.Contains("compulsion effect") ? ControlEffect.Compulsion
+                : null;
+        }
+
         /// <summary>How far a Shift carries its target, by Tier: Short, Middle, Long — 4, 8 or 16 squares (Core Rules §11).</summary>
         public static int ShiftSquares(Tier tier) => tier switch
         {

@@ -37,6 +37,15 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Struck at, or reached for, an enemy leaving reach.</summary>
         public int LeaverReactions { get; internal set; }
 
+        /// <summary>Nimble Exploits bought.</summary>
+        public int Exploits { get; internal set; }
+
+        /// <summary>Interrupts taken.</summary>
+        public int Interrupts { get; internal set; }
+
+        /// <summary>Shelters given.</summary>
+        public int Shelters { get; internal set; }
+
         /// <summary>Spells cast.</summary>
         public int Casts { get; internal set; }
 
@@ -102,9 +111,13 @@ namespace WoundBound.Game.Combat.Brains
                         ReactionKind.StandFirm or ReactionKind.BraceResolve => party.StandsFirm(encounter.View, pending),
                         ReactionKind.Backlash => party.Backlashes(encounter.View, pending),
                         ReactionKind.Sustain => party.Sustains(encounter.View, pending),
+                        ReactionKind.Interrupt => party.Interrupts(encounter.View, pending),
+                        ReactionKind.Shelter => party.Shelters(encounter.View, pending),
                         _ => party.ArrestsShove(encounter.View, pending),
                     };
 
+                    Tally.Interrupts += pending.Kind == ReactionKind.Interrupt && spend ? 1 : 0;
+                    Tally.Shelters += pending.Kind == ReactionKind.Shelter && spend ? 1 : 0;
                     if (pending.Kind is ReactionKind.PanicDodge or ReactionKind.RaiseShield)
                     {
                         Tally.DodgesOffered++;
@@ -148,11 +161,13 @@ namespace WoundBound.Game.Combat.Brains
             var done = step switch
             {
                 PartyStep.Move move => Count(encounter.TryMove(move.Square), () => Tally.Moves++),
-                PartyStep.Attack attack => Count(encounter.TryAttack(attack.Target, attack.Sacrifice) is not null, () =>
+                PartyStep.Attack attack => Count(encounter.TryAttack(attack.Target, attack.Sacrifice, attack.Manoeuvre) is not null, () =>
                 {
                     Tally.Attacks++;
                     Tally.Sacrifices += attack.Sacrifice ? 1 : 0;
+                    Tally.Manoeuvres += attack.Manoeuvre is null ? 0 : 1;
                 }),
+                PartyStep.Exploit exploit => Count(encounter.TryExploit(exploit.Which), () => Tally.Exploits++),
                 PartyStep.Cast cast => Count(encounter.TryCast(cast.Spell), () =>
                 {
                     Tally.Casts++;
@@ -190,7 +205,9 @@ namespace WoundBound.Game.Combat.Brains
                     PartyStep.RaiseShield raise => Encounter.ShieldRefusal(character, raise.Ally),
                     PartyStep.Drag => "they can't drag there",
                     PartyStep.Attack attack => encounter.PlanAttack(character, attack.Target).Refusal
-                        ?? (attack.Sacrifice ? Encounter.SacrificeRefusal(character) : null) ?? "no action left",
+                        ?? (attack.Sacrifice ? Encounter.SacrificeRefusal(character) : null)
+                        ?? (attack.Manoeuvre is { } m ? Encounter.ManoeuvreRefusal(character, attack.Target, m) : null) ?? "no action left",
+                    PartyStep.Exploit exploit => Encounter.ExploitRefusal(character, exploit.Which),
                     PartyStep.Cast cast => encounter.PlanCast(character, cast.Spell).Refusal,
                     _ => null,
                 });

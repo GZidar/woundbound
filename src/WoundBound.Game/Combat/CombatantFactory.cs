@@ -55,7 +55,87 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>A generic foe from the starting adversaries catalogue (GM Reference §7).</summary>
-        public static Combatant FromAdversary(StartingAdversaryInfo info, string name, GridPosition position) => new()
+        /// <param name="spellCatalogue">The Starting Spells, for a Caster's SPELLS rows, which name catalogue spells.</param>
+        public static Combatant FromAdversary(StartingAdversaryInfo info, string name, GridPosition position, IReadOnlyList<StartingSpellInfo>? spellCatalogue = null)
+        {
+            var casting = info.Traits?.Contains(AdversaryTrait.Caster) == true && info.Casting is { } c ? c : null;
+            var foe = Plain(info, name, position);
+            if (casting is null)
+            {
+                return foe;
+            }
+
+            var attackSpell = AttackLineSpell(info, casting);
+            var spells = new List<SpellDefinition>();
+            if (attackSpell is not null)
+            {
+                spells.Add(attackSpell);
+            }
+
+            foreach (var line in info.Spells ?? [])
+            {
+                if (spellCatalogue?.FirstOrDefault(s => s.Name == line.Name) is { } known)
+                {
+                    spells.Add(SpellCalculator.FromReference(known));
+                }
+            }
+
+            return new Combatant
+            {
+                Name = foe.Name, Side = foe.Side, Position = foe.Position,
+                BodyMax = foe.BodyMax, Body = foe.Body, MindMax = foe.MindMax, Mind = foe.Mind, SoulMax = foe.SoulMax, Soul = foe.Soul,
+                BaseDodgeThreshold = foe.BaseDodgeThreshold, BaseStabilityThreshold = foe.BaseStabilityThreshold, BaseResolveThreshold = foe.BaseResolveThreshold,
+                // The Attack line was the spell; what is left in the hands is a punch.
+                StatblockAttacks = attackSpell is null && !string.IsNullOrWhiteSpace(info.AttackName)
+                    ? foe.StatblockAttacks
+                    : [StatblockLine("Unarmed", AdversarySkillCalculator.Baseline(info.Tier), 1, "d4", 0, info.Reach)],
+                Armour = foe.Armour, InnateSpeed = foe.InnateSpeed, IsSwarm = foe.IsSwarm, Role = foe.Role, Morale = foe.Morale,
+                SkillBonusFor = foe.SkillBonusFor, IsMinion = foe.IsMinion, StaminaMax = foe.StaminaMax, Stamina = foe.Stamina,
+                TacticalSpendsPerRound = foe.TacticalSpendsPerRound,
+                Tier = info.Tier,
+                Casting = casting,
+                StatblockSpells = spells,
+                StatblockCastBonus = AdversaryTraitCatalog.CastBonus(info.ToTemplate()),
+                StatblockBleedBonus = AdversarySkillCalculator.Baseline(info.Tier),
+            };
+        }
+
+        /// <summary>
+        /// A Caster's Attack line, where it is a spell: "a spell that is the creature's attack sits here
+        /// with its cost" (GM Reference §9). Harm against Dodge, Control against Resolve, Motion against
+        /// Stability, at the creature's own Tier, one target, at Touch where the line says so.
+        /// </summary>
+        private static SpellDefinition? AttackLineSpell(StartingAdversaryInfo info, AdversaryCasting casting)
+        {
+            if (string.IsNullOrWhiteSpace(info.AttackName) || info.AttackName.Equals("None", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var touch = info.AttackName.Contains("Touch", StringComparison.OrdinalIgnoreCase);
+            var type = info.AttackVsThreshold switch
+            {
+                ThresholdType.Resolve => SpellType.Control,
+                ThresholdType.Stability => SpellType.Motion,
+                _ => SpellType.Harm,
+            };
+            return new SpellDefinition
+            {
+                Name = info.AttackName.Split(" (")[0],
+                Source = casting.Source,
+                SpellTier = info.Tier,
+                SpellType = type,
+                Target = SpellTarget.One,
+                Shape = touch ? SpellShape.None : SpellShape.Ray,
+                Size = SpellSize.Small,
+                Range = touch ? SpellRange.Touch : SpellRange.Short,
+                Threshold = info.AttackVsThreshold,
+                DamageType = type == SpellType.Harm ? info.DamageType : null,
+                Notes = $"{info.AttackName}. {info.AttackEffect}".Trim(),
+            };
+        }
+
+        private static Combatant Plain(StartingAdversaryInfo info, string name, GridPosition position) => new()
         {
             Name = name,
             Side = Side.Adversaries,
@@ -82,6 +162,7 @@ namespace WoundBound.Game.Combat
             StaminaMax = info.Stamina,
             Stamina = info.Stamina,
             TacticalSpendsPerRound = CharacterCalculator.TacticalSpendsPerRound(info.Tier),
+            Tier = info.Tier,
         };
 
         /// <summary>

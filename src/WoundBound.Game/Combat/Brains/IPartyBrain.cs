@@ -54,6 +54,25 @@ namespace WoundBound.Game.Combat.Brains
         /// </summary>
         bool Backlashes(BattleView view, PendingReaction reaction) => reaction.Defender.Body - reaction.ImpactWounds >= 2;
 
+        /// <summary>
+        /// Whether <see cref="PendingReaction.Defender"/> Interrupts the adversary <see cref="PendingReaction.Attacker"/>'s
+        /// declared action — at <see cref="PendingReaction.Against"/> — taking their whole turn now for 1 Mind.
+        /// By default, never.
+        /// </summary>
+        bool Interrupts(BattleView view, PendingReaction reaction) => false;
+
+        /// <summary>
+        /// Whether <see cref="PendingReaction.Defender"/> Shelters <see cref="PendingReaction.Attacker"/> — taking
+        /// <see cref="PendingReaction.ImpactWounds"/> of their damage as Soul. By default, when it would drop them and the
+        /// Soul can take it.
+        /// </summary>
+        bool Shelters(BattleView view, PendingReaction reaction)
+        {
+            var ally = reaction.Attacker;
+            var left = reaction.DamageType == Rules.Enums.WoundType.Body ? ally.Body : ally.Track(reaction.DamageType).Current;
+            return reaction.ImpactWounds >= left && reaction.Defender.Soul > reaction.ImpactWounds;
+        }
+
         /// <summary>Whether to pay 1 Stamina to go on holding the spell the character Sustains.</summary>
         bool Sustains(BattleView view, PendingReaction reaction) => reaction.Defender.Stamina > 2;
     }
@@ -68,7 +87,11 @@ namespace WoundBound.Game.Combat.Brains
         public sealed record Move(GridPosition Square) : PartyStep;
 
         /// <param name="Sacrifice">Pay 1 Body first for Advantage on the roll (Core Rules §3).</param>
-        public sealed record Attack(Combatant Target, bool Sacrifice = false) : PartyStep;
+        /// <param name="Manoeuvre">A Martial manoeuvre declared with it (Core Rules §9).</param>
+        public sealed record Attack(Combatant Target, bool Sacrifice = false, Manoeuvre? Manoeuvre = null) : PartyStep;
+
+        /// <summary>Buy a Nimble Exploit — Slip, Precise or Patient — for 1 Stamina.</summary>
+        public sealed record Exploit(Rules.Enums.NimbleExploit Which) : PartyStep;
 
         /// <summary>Cast a spell with the action (Core Rules §9, "Magic").</summary>
         public sealed record Cast(SpellCast Spell) : PartyStep;

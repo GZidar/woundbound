@@ -112,14 +112,14 @@ namespace WoundBound.Game.Simulation
 
             var lines = new List<string>
             {
-                $"{"Tactic".PadRight(width)}  Obj%  Win%   W/L/S/X       Rounds  Body left  Up   Foes  Fled  Attacks  Trips  Swaps  Extra  Braces  Dodges  Leavers  Heals  Helps  Casts",
+                $"{"Tactic".PadRight(width)}  Obj%  Win%   W/L/S/X       Rounds  Body left  Up   Foes  Fled  Attacks  Trips  Swaps  Extra  Braces  Dodges  Leavers  Heals  Helps  Casts  Intr  Shelt  Expl  Man",
             };
 
             lines.AddRange(rows.Select(r =>
                 $"{r.Tactic.PadRight(width)}  {(r.ObjectiveRate is { } obj ? obj.ToString("P0") : "—"),4}  {r.WinRate,5:P0}  {$"{r.Wins}/{r.Losses}/{r.Stalemates}/{r.Withdrawals}",-12}  " +
                 $"{r.AverageRounds,6:0.0}  {r.AverageBodyLeftOnWin,9:0.0}  {r.AverageStandingOnWin,3:0.0}  {r.AverageFoesDropped,4:0.0}  {r.AverageFled,4:0.0}  " +
                 $"{r.Per(t => t.Attacks),7:0.0}  {r.Per(t => t.Manoeuvres),5:0.0}  {r.Per(t => t.Swaps),5:0.0}  {r.Per(t => t.ExtraActions),5:0.0}  " +
-                $"{r.Per(t => t.StoodGround),6:0.0}  {r.Per(t => t.DodgesTaken),6:0.0}  {r.Per(t => t.LeaverReactions),7:0.0}  {r.Per(t => t.Tends),5:0.0}  {r.Per(t => t.Aids),5:0.0}  {r.Per(t => t.Casts),5:0.0}"));
+                $"{r.Per(t => t.StoodGround),6:0.0}  {r.Per(t => t.DodgesTaken),6:0.0}  {r.Per(t => t.LeaverReactions),7:0.0}  {r.Per(t => t.Tends),5:0.0}  {r.Per(t => t.Aids),5:0.0}  {r.Per(t => t.Casts),5:0.0}  {r.Per(t => t.Interrupts),4:0.0}  {r.Per(t => t.Shelters),5:0.0}  {r.Per(t => t.Exploits),4:0.0}  {r.Per(t => t.Manoeuvres),4:0.0}"));
 
             return string.Join(Environment.NewLine, lines);
         }

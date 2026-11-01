@@ -22,6 +22,21 @@ public sealed class ScriptedDice(params int[] faces) : IDiceRoller
     public int Remaining => faces.Count;
 }
 
+public static class TestPrompts
+{
+    /// <summary>
+    /// Answers "no" to every Interrupt or Shelter on offer — the free choices a Mind- or Soul-secondary
+    /// character is asked about — so a test can get on to the prompt it is about.
+    /// </summary>
+    public static void DeclineFreeChoices(this Encounter encounter)
+    {
+        while (encounter.Pending is { Kind: ReactionKind.Interrupt or ReactionKind.Shelter })
+        {
+            encounter.RespondToReaction(false);
+        }
+    }
+}
+
 public static class TestData
 {
     public static GameData Load() =>

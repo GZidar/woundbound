@@ -45,7 +45,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         .Where(c => c.Side == actor.Side && !c.IsOutOfFight)
                         .Select(c => (new SpellCast(spell) { Target = c, Threshold = ThresholdType.Dodge }, (Func<CastPlan, double>)(plan => BuffWorth(plan, care)))),
                     SpellType.Control when usesTricks => enemies.Where(e => e.ResolveThreshold is not null && !View.IsControlled(e))
-                        .SelectMany(e => new[] { ControlEffect.Fear, ControlEffect.Compulsion }
+                        .SelectMany(e => (SpellArea.FixedEffectOf(spell) is { } written ? [written] : new[] { ControlEffect.Fear, ControlEffect.Compulsion })
                             .Select(effect => (new SpellCast(spell) { Target = e, Effect = effect }, (Func<CastPlan, double>)(plan => ControlWorth(actor, effect, plan))))),
                     SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Shift => enemies.Where(e => !e.IsBroken)
                         .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => ShiftWorth(actor, plan)))),
@@ -147,8 +147,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 var (now, _) = actor.Track(track);
                 var after = now - plan.WoundsPaid;
+                // A Body wound paid is one fewer between the caster and the floor: worth what the
+                // caster's own wounds are worth — and a creature that casts in blood runs out of both.
                 price += track == WoundType.Body
-                    ? plan.WoundsPaid * 0.9 + (after <= 2 ? 2 : 0)
+                    ? plan.WoundsPaid * Math.Max(0.9, 0.6 * assess.PerWound(actor)) + (after <= 2 ? 2 : 0)
                     : plan.WoundsPaid * 0.45 + (after <= 0 ? 0.6 * assess.Value(actor) : after == 1 ? 0.5 : 0);
             }
 

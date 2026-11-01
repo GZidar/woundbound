@@ -505,6 +505,43 @@ namespace WoundBound.Game.Combat
                 setting: CampAtNight, environment: data.Environment);
         }
 
+        /// <summary>
+        /// The hedge-witches' toll — staged for the game, not taken from a book: the Quickstart's five
+        /// stopped on a daylight road by a Tollroad Bandit and his Timber Wolf, with three casters
+        /// behind them — a Bog Hex-Caller, who breaks a line with fear; a Hollow Bloodwright, who bleeds
+        /// for its Blood Lance; and a Wyrding Chanter, who keeps the ones in front blessed and mended
+        /// (GM Reference §7). The hedges either side of the road are rough going.
+        /// </summary>
+        public static Encounter HedgeWitchesToll(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            Combatant Foe(string statblock, string name, int x, int y) =>
+                CombatantFactory.FromAdversary(data.Adversary(statblock), name, new GridPosition(x, y), data.Spells);
+
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(3, 7)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(2, 11)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(2, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(1, 8)),
+                Foe("Tollroad Bandit", "Tollroad Bandit", 11, 8),
+                Foe("Timber Wolf", "Timber Wolf", 11, 10),
+                Foe("Wyrding Chanter", "Wyrding Chanter", 14, 9),
+                Foe("Hollow Bloodwright", "Hollow Bloodwright", 15, 7),
+                Foe("Bog Hex-Caller", "Bog Hex-Caller", 15, 11),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: HedgeRoad, environment: data.Environment);
+        }
+
+        /// <summary>A road in daylight between two hedgerows of rough going.</summary>
+        public static Setting HedgeRoad { get; } = Setting.Daylight with
+        {
+            Name = "The hedge road",
+            Ground = Setting.Patches(Terrain.Broken, (0, 3, 27, 4), (0, 14, 27, 15)),
+        };
+
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
         public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {

@@ -16,6 +16,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         BuyExtraAction,
         RegainFooting,
         Cast,
+        Exploit,
         End,
     }
 
@@ -25,7 +26,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// </summary>
     public sealed record Option(OptionKind Kind, double Score, string Why,
         GridPosition? Square = null, Combatant? Target = null, AttackProfile? With = null,
-        CombatAction? Action = null, ControlAction? Control = null, bool WithAdvantage = false, SpellCast? Cast = null);
+        CombatAction? Action = null, ControlAction? Control = null, bool WithAdvantage = false, SpellCast? Cast = null,
+        Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null);
 
     /// <summary>
     /// Runs through everything a creature could do with what it has left of its turn — every
@@ -112,6 +114,21 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     : first with { Score = waiting, Why = $"{first.Why}, and wait" });
             }
 
+            // Slip first, where the best way out of here draws blades worth more than the Stamina.
+            if (skill.UsesTricks && actor.IsNimble && canMove && actor.Stamina >= 2 && (!real || BattleView.ExploitRefusal(actor, NimbleExploit.Slip) is null))
+            {
+                var slipped = squares.Keys.Where(sq => sq != here)
+                    .Select(sq => (Square: sq, Saved: care * assess.LeavingCost(actor, sq)))
+                    .Where(x => x.Saved > 0)
+                    .Select(x => x.Saved + options.Where(o => o.Square == x.Square).Select(o => o.Score).DefaultIfEmpty(double.MinValue).Max())
+                    .DefaultIfEmpty(double.MinValue)
+                    .Max();
+                if (slipped > double.MinValue / 2)
+                {
+                    options.Add(new Option(OptionKind.Exploit, slipped - 0.6, "Slip, then go", Exploit: NimbleExploit.Slip));
+                }
+            }
+
             // A dash: the move and an action both spent on ground, nothing struck.
             var dashMoves = (hasMove ? 1 : 0) + actions;
             if (Encounter.CanMoveItself(actor) && dashMoves > (hasMove ? 1 : 0))
@@ -172,6 +189,61 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     ? actor.Role == AdversaryRole.Skirmisher ? 0.3 : 0
                     : actor.Role == AdversaryRole.Brute ? 0.2 : 0;
                 yield return new Option(OptionKind.Attack, worth, $"{with.Name} at {target.Name}", Target: target, With: with, WithAdvantage: advantage);
+
+                if (!skill.UsesTricks || actor.Stamina < 2 || BattleView.TacticalSpendRefusal(actor) is not null || target.IsDefenceless)
+                {
+                    continue;
+                }
+
+                // A Nimble character's Exploits, bought first and spent on this blow.
+                if (actor.IsNimble)
+                {
+                    var moved = actor.HasMovedSinceLastAttack || at != actor.Position;
+                    if (moved && !actor.HoldsPrecise && (!checkRules || BattleView.ExploitRefusal(actor, NimbleExploit.Precise) is null))
+                    {
+                        var precise = assess.BestAttack(actor, at, target, precise: true).Worth;
+                        yield return new Option(OptionKind.Exploit, precise - 0.5, $"Precise, then {with.Name} at {target.Name}", Target: target, Exploit: NimbleExploit.Precise);
+                    }
+
+                    if (!actor.HasBeenAttackedSinceTurnStart && !actor.HoldsPatient && (!checkRules || BattleView.ExploitRefusal(actor, NimbleExploit.Patient) is null))
+                    {
+                        var patient = assess.BestAttack(actor, at, target, advantage: true).Worth;
+                        yield return new Option(OptionKind.Exploit, patient - 0.5, $"Patient, then {with.Name} at {target.Name}", Target: target, Exploit: NimbleExploit.Patient);
+                    }
+                }
+
+                // A Martial character's manoeuvres, declared with the blow — 1 Stamina and a banked Opportunity.
+                var permitted = Encounter.ManoeuvresOf(actor);
+                if (with.IsRanged || permitted.Count == 0)
+                {
+                    continue;
+                }
+
+                if (permitted.Contains(WeaponManoeuvre.Cleave))
+                {
+                    var second = enemies.Where(e => e != target && BattleView.CanReachFrom(actor, at, e.Position))
+                        .Select(e => (Who: e, Worth: assess.BestAttack(actor, at, e).Worth))
+                        .OrderByDescending(x => x.Worth).FirstOrDefault();
+                    if (second.Who is not null)
+                    {
+                        var cleave = new Manoeuvre(WeaponManoeuvre.Cleave, second.Who);
+                        if (!checkRules || BattleView.ManoeuvreRefusal(actor, target, cleave) is null)
+                        {
+                            yield return new Option(OptionKind.Attack, worth + 0.8 * second.Worth - 1.0, $"Cleave through {target.Name} into {second.Who.Name}",
+                                Target: target, With: with, Manoeuvre: cleave);
+                        }
+                    }
+                }
+
+                if (permitted.Contains(WeaponManoeuvre.Topple) && !target.IsProne)
+                {
+                    var topple = new Manoeuvre(WeaponManoeuvre.Topple);
+                    if (!checkRules || BattleView.ManoeuvreRefusal(actor, target, topple) is null)
+                    {
+                        var toppled = TripWorth(actor, target, stillToAct);
+                        yield return new Option(OptionKind.Attack, worth + toppled - 1.0, $"Topple {target.Name}", Target: target, With: with, Manoeuvre: topple);
+                    }
+                }
             }
 
             foreach (var cast in spells.Options(actor, at, checkRules, care, skill.UsesTricks))

@@ -62,6 +62,19 @@ namespace WoundBound.Game.Combat
         /// a Control spell, or against a held Bane on Resolve (Core Rules §10, §11).
         /// </summary>
         BraceResolve,
+
+        /// <summary>
+        /// An adversary has declared an action, and a Mind-secondary character who has yet to act
+        /// this round may take their whole turn now, for 1 Mind, before it is rolled (Core Rules §3,
+        /// "Interrupt"). A choice, not a Stamina spend.
+        /// </summary>
+        Interrupt,
+
+        /// <summary>
+        /// An ally within Short range is about to take damage, and a Soul-secondary character may take
+        /// it instead, as Soul — once a round (Core Rules §3, "Shelter"). A choice, not a Stamina spend.
+        /// </summary>
+        Shelter,
     }
 
     /// <summary>What a character does about an enemy leaving their reach.</summary>

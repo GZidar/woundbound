@@ -182,6 +182,20 @@ namespace WoundBoundGame
         private OptionButton thresholdPicker = null!;
         private OptionButton tapPicker = null!;
         private OptionButton effectPicker = null!;
+        private readonly Dictionary<NimbleExploit, Button> exploitButtons = new();
+        private readonly Dictionary<WeaponManoeuvre, Button> manoeuvreButtons = new();
+
+        /// <summary>A manoeuvre chosen from its button; the next foe clicked is attacked with it.</summary>
+        private WeaponManoeuvre? armedManoeuvre;
+
+        /// <summary>The manoeuvre the armed one would be, at <paramref name="target"/> — Cleave's second target the weakest other foe in reach.</summary>
+        private Manoeuvre? ManoeuvreAt(Combatant attacker, Combatant target) => armedManoeuvre switch
+        {
+            null => null,
+            WeaponManoeuvre.Cleave => new Manoeuvre(WeaponManoeuvre.Cleave, encounter.Fighting(Side.Adversaries)
+                .Where(e => e != target && attacker.CanReach(e.Position)).OrderBy(e => e.Body).FirstOrDefault()),
+            { } kind => new Manoeuvre(kind),
+        };
         private static readonly Color SpellArea = new(0.65f, 0.35f, 0.95f, 0.35f);
         private static readonly ThresholdType[] BuffThresholds = [ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve];
 
@@ -191,6 +205,7 @@ namespace WoundBoundGame
             armedAction = null;
             armedDrag = false;
             armedSpell = null;
+            armedManoeuvre = null;
         }
 
         /// <summary>
@@ -283,7 +298,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -573,7 +588,7 @@ namespace WoundBoundGame
                 }
                 else
                 {
-                    encounter.TryAttack(occupant, sacrificeBox.ButtonPressed);
+                    encounter.TryAttack(occupant, sacrificeBox.ButtonPressed, encounter.Active is { } striker ? ManoeuvreAt(striker, occupant) : null);
                 }
             }
             else if (armedDrag)
@@ -797,6 +812,7 @@ namespace WoundBoundGame
                 5 => SampleEncounters.FerryShrineWithCasters(data, Dice(), PickedGm()),
                 6 => SampleEncounters.PartyVersusAmbush(data, Dice(), PickedGm()),
                 7 => SampleEncounters.FighterVersusRatkin(data, Dice(), PickedGm()),
+                8 => SampleEncounters.HedgeWitchesToll(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
             encounter.Logged += OnLogged;
@@ -890,7 +906,7 @@ namespace WoundBoundGame
                 (pending.WouldRiposte ? "\nIt's a critical, so the miss would be a Riposte: the attacker takes the wound." : string.Empty) +
                 pending.Kind switch
                 {
-                    ReactionKind.Backlash => "\nA choice, not a spend: no Stamina, and nothing for the GM.",
+                    ReactionKind.Backlash or ReactionKind.Interrupt or ReactionKind.Shelter => "\nA choice, not a Stamina spend: nothing for the GM.",
                     ReactionKind.Sustain => "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM a banked Opportunity.",
                     _ => "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM an Immediate Opportunity.",
                 };
@@ -938,6 +954,8 @@ namespace WoundBoundGame
                 ReactionKind.Backlash => ($"Backlash ({pending.ImpactWounds} Body)", "Drop to 0"),
                 ReactionKind.Sustain => ("Hold it (1 Stamina)", "Let it go"),
                 ReactionKind.BraceResolve => ("Steel yourself (1 Stamina, +2)", "Let it take hold"),
+                ReactionKind.Interrupt => ("Interrupt (1 Mind)", "Let it happen"),
+                ReactionKind.Shelter => ($"Shelter them ({pending.ImpactWounds} Soul)", "Let them take it"),
                 _ => ("Arrest (1 Stamina)", "Let it carry them"),
             };
         }
@@ -1079,6 +1097,22 @@ namespace WoundBoundGame
             }
 
             UpdateSpellRow(acting);
+
+            foreach (var (exploit, button) in exploitButtons)
+            {
+                var why = acting is null ? "Not your turn." : Encounter.ExploitRefusal(acting, exploit);
+                button.Visible = acting?.IsNimble == true;
+                button.Disabled = why is not null;
+                button.TooltipText = (why is null ? string.Empty : why + "\n") + ExploitCalculator.ConditionText(exploit) + " — " + ExploitCalculator.EffectText(exploit) +
+                                     "\n1 Stamina, a tactical spend — and no Opportunity for the GM.";
+            }
+
+            var permitted = acting is null ? [] : Encounter.ManoeuvresOf(acting);
+            foreach (var (kind, button) in manoeuvreButtons)
+            {
+                button.Visible = permitted.Contains(kind);
+                button.ButtonPressed = armedManoeuvre == kind;
+            }
 
             var me = isPartyTurn ? encounter.Active : null;
             standUpButton.Disabled = me is null || Encounter.StandUpRefusal(me) is not null;
@@ -1522,6 +1556,39 @@ namespace WoundBoundGame
                 castOptions.AddChild(option);
             }
 
+            // A Nimble character's Exploits, and a Martial character's manoeuvres.
+            foreach (var exploit in ExploitCalculator.All)
+            {
+                var button = new Button { Text = $"{exploit} (1 Stamina)" };
+                button.Pressed += () =>
+                {
+                    encounter.TryExploit(exploit);
+                    Refresh();
+                };
+                castOptions.AddChild(button);
+                exploitButtons[exploit] = button;
+            }
+
+            foreach (var kind in new[] { WeaponManoeuvre.Cleave, WeaponManoeuvre.Topple, WeaponManoeuvre.Ring, WeaponManoeuvre.Hook })
+            {
+                var button = new Button
+                {
+                    Text = kind.ToString(),
+                    ToggleMode = true,
+                    TooltipText = "A manoeuvre with your next attack: 1 Stamina, declared before the roll, and the GM banks an Opportunity. Then click the foe." +
+                                  (kind == WeaponManoeuvre.Cleave ? " The sweep carries into the weakest other foe in your Reach." : string.Empty),
+                };
+                button.Pressed += () =>
+                {
+                    var was = armedManoeuvre;
+                    Disarm();
+                    armedManoeuvre = was == kind ? null : kind;
+                    Refresh();
+                };
+                castOptions.AddChild(button);
+                manoeuvreButtons[kind] = button;
+            }
+
             var restartButton = new Button { Text = "Restart" };
             restartButton.Pressed += StartEncounter;
             buttons.AddChild(restartButton);
@@ -1542,6 +1609,7 @@ namespace WoundBoundGame
             fightPicker.AddItem("The Ferry Shrine ford, the Quickstart five");
             fightPicker.AddItem("Roadside ambush (party of three)");
             fightPicker.AddItem("The Dumb Fighter v three ratkin");
+            fightPicker.AddItem("The hedge-witches' toll (enemy casters)");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 

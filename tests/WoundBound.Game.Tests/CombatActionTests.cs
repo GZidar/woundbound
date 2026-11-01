@@ -81,6 +81,7 @@ public class CombatActionTests
         encounter.EndTurn();
 
         encounter.RunAdversaryTurn();
+        encounter.DeclineFreeChoices();
 
         var pending = Assert.IsType<PendingReaction>(encounter.Pending);
         Assert.Equal(ReactionKind.RaiseShield, pending.Kind);
@@ -111,6 +112,7 @@ public class CombatActionTests
         Assert.Equal(0, salla.ActionsRemaining);
         encounter.EndTurn();
         encounter.RunAdversaryTurn();
+        encounter.DeclineFreeChoices();
 
         encounter.TryBeginTurn(fighter);
         var outcome = encounter.TryAttack(ridge);

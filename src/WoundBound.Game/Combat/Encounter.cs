@@ -69,6 +69,9 @@ namespace WoundBound.Game.Combat
     /// <param name="Prompt">What's happening and what the spend would do, in a line for the player.</param>
     /// <param name="ImpactWounds">For an arrest: the Body wounds, before armour, the Shove would put them into something solid for.</param>
     /// <param name="Options">For a reaction to somebody leaving reach: what the character may do about it, letting them go always among them.</param>
+    /// <param name="ExpectedDamage">For a spell, what a hit would do on average, before armour — its attacker's weapon says nothing about it.</param>
+    /// <param name="DamageType">The track that damage lands on.</param>
+    /// <param name="Against">For an Interrupt, who the declared action is aimed at.</param>
     /// <remarks>
     /// <see cref="Defender"/> is always whoever is being asked — for a reaction to a leaver, the
     /// character whose reach is being left, with the leaver as <see cref="Attacker"/>.
@@ -82,7 +85,10 @@ namespace WoundBound.Game.Combat
         string Prompt,
         int ImpactWounds = 0,
         IReadOnlyList<LeaverResponse>? Options = null,
-        int Bonus = ThresholdModifierCalculator.ReactionBonus)
+        int Bonus = ThresholdModifierCalculator.ReactionBonus,
+        double? ExpectedDamage = null,
+        WoundType DamageType = WoundType.Body,
+        Combatant? Against = null)
     {
         /// <summary>The Threshold the spend would make it: +2, or for a shield raised, what that shield adds.</summary>
         public int RaisedThreshold => Threshold + Bonus;
@@ -425,12 +431,13 @@ namespace WoundBound.Game.Combat
             Fighting(Side.Party).Any(c => RangeBandCalculator.BandForSquares(bands, c.Position.DistanceTo(square)) is not null);
 
         /// <summary>The most squares <paramref name="speed"/> covers for <paramref name="moves"/> moves, by the band prices (Core Rules §9, "Speed").</summary>
-        public int SquaresFor(Speed speed, int moves)
+        /// <param name="nimble">Priced as a Nimble character's: a Long move one cheaper (Core Rules §9, "Footwork").</param>
+        public int SquaresFor(Speed speed, int moves, bool nimble = false)
         {
             var best = 0;
             for (var squares = 1; squares <= LongRangeSquares; squares++)
             {
-                if (RangeBandCalculator.MoveCost(bands, squares, speed) is { } cost && cost <= moves)
+                if (RangeBandCalculator.MoveCost(bands, squares, speed, nimble, freeStep: false) is { } cost && cost <= moves)
                 {
                     best = squares;
                 }
@@ -933,6 +940,11 @@ namespace WoundBound.Game.Combat
                 return "No Stamina left to spend.";
             }
 
+            if (combatant.IsRinged)
+            {
+                return $"{combatant.Name} is Ringed — no tactical spend until the start of their next turn.";
+            }
+
             return TacticalSpendCalculator.IsAtLimit(combatant.TacticalSpendsThisRound, combatant.TacticalSpendsPerRound)
                 ? $"Already made {combatant.TacticalSpendsThisRound} tactical spend(s) this round — the limit at this Tier."
                 : null;
@@ -979,10 +991,12 @@ namespace WoundBound.Game.Combat
         }
 
         /// <param name="sacrifice">Pay 1 Body first for Advantage on the roll (Core Rules §3, "Sacrifice").</param>
-        public AttackOutcome? TryAttack(Combatant target, bool sacrifice = false)
+        /// <param name="manoeuvre">A Martial manoeuvre, declared with the attack (Core Rules §9, "Manoeuvres").</param>
+        public AttackOutcome? TryAttack(Combatant target, bool sacrifice = false, Manoeuvre? manoeuvre = null)
         {
             if (Phase != EncounterPhase.PartyTurn || Active is not { } attacker || !CanAttack(attacker, target)
-                || (sacrifice && SacrificeRefusal(attacker) is not null))
+                || (sacrifice && SacrificeRefusal(attacker) is not null)
+                || (manoeuvre is { } m && ManoeuvreRefusal(attacker, target, m) is not null))
             {
                 return null;
             }
@@ -992,7 +1006,7 @@ namespace WoundBound.Game.Combat
             {
                 result = outcome;
                 CheckForEnd();
-            }, sacrifice: sacrifice);
+            }, sacrifice: sacrifice, manoeuvre: manoeuvre);
 
             return result;
         }
@@ -1215,7 +1229,7 @@ namespace WoundBound.Game.Combat
                 return false;
             }
 
-            if (spend && pending.Kind != ReactionKind.Backlash)
+            if (spend && !IsFreeChoice(pending.Kind))
             {
                 if (TacticalSpendRefusal(pending.Defender) is not null)
                 {
@@ -1242,6 +1256,9 @@ namespace WoundBound.Game.Combat
             resume(spend);
             return true;
         }
+
+        /// <summary>A reaction prompt that costs no Stamina and hands the GM nothing: a Backlash, an Interrupt, a Shelter.</summary>
+        private static bool IsFreeChoice(ReactionKind kind) => kind is ReactionKind.Backlash or ReactionKind.Interrupt or ReactionKind.Shelter;
 
         /// <summary>
         /// Takes the adversary turn the GM has coming: an owed one if any is left in this gap,
@@ -1295,6 +1312,9 @@ namespace WoundBound.Game.Combat
                 combatant.HasActedThisRound = false;
                 combatant.HasOverclockedThisRound = false;
                 combatant.HasSacrificedThisRound = false;
+                combatant.HasShelteredThisRound = false;
+                combatant.HasUsedFreeStep = false;
+                combatant.IsSlipping = false;
             }
 
             EndSpellsOfFallenCasters(roundEnd: true);
@@ -1396,6 +1416,21 @@ namespace WoundBound.Game.Combat
 
         private void AfterPartyTurn()
         {
+            // An Interrupt's turn, over: back inside the GM's turn, to the action it cut into.
+            if (interruptResume is { } resumeDeclared)
+            {
+                interruptResume = null;
+                Active = null;
+                if (CheckForEnd())
+                {
+                    return;
+                }
+
+                Phase = EncounterPhase.AdversaryTurn;
+                resumeDeclared();
+                return;
+            }
+
             Active = null;
             if (CheckForEnd())
             {
@@ -1552,6 +1587,8 @@ namespace WoundBound.Game.Combat
             combatant.ThresholdModifiers = ThresholdModifierCalculator.AtTurnStart(combatant.ThresholdModifiers);
             combatant.HasMovedThisTurn = false;
             combatant.HasWithdrawnThisTurn = false;
+            combatant.HasBeenAttackedSinceTurnStart = false;
+            combatant.IsRinged = false;
 
             if (wasStanding.Count > 0)
             {
@@ -1582,6 +1619,7 @@ namespace WoundBound.Game.Combat
         private void TakeStep(GmTurn turn, Action done)
         {
             var actor = turn.Actor;
+            caughtMidMotion = null;
 
             if (CheckForEnd() || actor.IsOutOfFight)
             {
@@ -1622,7 +1660,10 @@ namespace WoundBound.Game.Combat
 
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !attack.WithAdvantage;
-                    ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done), attack.With);
+                    Declare(actor, $"{(attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack).Name} at {attack.Target.Name}", attack.Target,
+                        () => CanAttack(actor, attack.Target) && (attack.With is not { } with || PlanAttackWith(actor, with, actor.Position, attack.Target).CanAttack),
+                        () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done), attack.With),
+                        () => TakeStep(turn, done));
                     return;
 
                 case GmStep.Cast cast:
@@ -1632,7 +1673,10 @@ namespace WoundBound.Game.Combat
                     }
 
                     turn.HasAttacked = true;
-                    Cast(actor, cast.Spell, castPlan, () => TakeStep(turn, done));
+                    Declare(actor, $"{cast.Spell.Spell.Name} at " + (cast.Spell.Target?.Name ?? "the ground"), cast.Spell.Target,
+                        () => PlanCast(actor, cast.Spell).CanCast,
+                        () => Cast(actor, cast.Spell, PlanCast(actor, cast.Spell), () => TakeStep(turn, done)),
+                        () => TakeStep(turn, done));
                     return;
 
                 case GmStep.Control control:
@@ -1648,7 +1692,10 @@ namespace WoundBound.Game.Combat
 
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !control.WithAdvantage;
-                    ResolveControl(actor, control.Action, control.Target, control.WithAdvantage, () => TakeStep(turn, done));
+                    Declare(actor, $"{control.Action} {control.Target.Name}", control.Target,
+                        () => ControlRefusal(actor, control.Action, control.Target) is null,
+                        () => ResolveControl(actor, control.Action, control.Target, control.WithAdvantage, () => TakeStep(turn, done)),
+                        () => TakeStep(turn, done));
                     return;
 
                 case GmStep.Aid aid:
@@ -1776,6 +1823,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private Queue<Combatant> LeavingReachOf(Combatant mover, IReadOnlyList<GridPosition> path) =>
             new(Fighting(mover.Side == Side.Party ? Side.Adversaries : Side.Party)
+                .Where(_ => !mover.IsSlipping)
                 .Select(e => (Enemy: e, At: LeaveIndex(e, path)))
                 .Where(x => x.At is not null)
                 .OrderBy(x => x.At)
@@ -1835,8 +1883,10 @@ namespace WoundBound.Game.Combat
         {
             var plan = PlanMove(mover, square)!;
             var start = mover.Position;
-            var paidWith = PayMoves(mover, cost);
+            var paidWith = cost == 0 ? "the free step" : PayMoves(mover, cost);
+            mover.HasUsedFreeStep |= cost == 0;
             mover.HasMovedThisTurn = true;
+            mover.HasMovedSinceLastAttack = true;
             if (!Swims(mover, plan, paidWith))
             {
                 then();
@@ -2139,9 +2189,30 @@ namespace WoundBound.Game.Combat
         /// </summary>
         /// <param name="with">Which of the attacker's attacks; null for whichever does most from where it stands.</param>
         private void ResolveAttack(Combatant attacker, Combatant target, bool asReaction, bool opportunityBonus, Action<AttackOutcome> then,
-            AttackProfile? with = null, bool sacrifice = false)
+            AttackProfile? with = null, bool sacrifice = false, Manoeuvre? manoeuvre = null)
         {
             var plan = with is null ? PlanAttack(attacker, target) : PlanAttackWith(attacker, with, attacker.Position, target);
+            target.HasBeenAttackedSinceTurnStart = true;
+            attacker.HasMovedSinceLastAttack = false;
+            var patient = attacker.HoldsPatient;
+            var precise = attacker.HoldsPrecise;
+            attacker.HoldsPatient = false;
+            attacker.HoldsPrecise = false;
+            if (patient || precise)
+            {
+                Write($"{attacker.Name} spends what they were holding: {(patient ? "Patient — Advantage" : string.Empty)}{(patient && precise ? "; " : string.Empty)}{(precise ? "Precise — Direct, and Vitality on the damage" : string.Empty)}.");
+            }
+
+            if (manoeuvre is { } declared)
+            {
+                PayTacticalSpend(attacker, CombatActionCatalog.ReactionStaminaCost);
+                Write($"{attacker.Name} declares {declared.Kind}" + (declared.Second is { } second ? $", sweeping on into {second.Name}" : string.Empty) + $" (1 Stamina, {attacker.Stamina} left).");
+                GrantBankedOpportunity();
+                var finished = then;
+                then = outcome => ApplyManoeuvre(attacker, target, declared, outcome, () => finished(outcome));
+            }
+
+            preciseOn = precise ? attacker : null;
             if (sacrifice)
             {
                 attacker.Body--;
@@ -2165,7 +2236,7 @@ namespace WoundBound.Game.Combat
                 Write($"{target.Name} is defenceless, lying {target.BodyStatus.ToString().ToLowerInvariant()}: Advantage.");
             }
 
-            var advantage = opportunityBonus || helped || target.IsDefenceless || sacrifice;
+            var advantage = opportunityBonus || helped || target.IsDefenceless || sacrifice || patient;
             var disadvantage = AttacksAtDisadvantage(attacker) || harried;
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
@@ -2200,14 +2271,14 @@ namespace WoundBound.Game.Combat
                             RaiseShield(target, target, reactive: true);
                         }
 
-                        then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, raised ? shieldGain : 0, raised ? "shield raised" : null));
+                        FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, raised ? shieldGain : 0, raised ? "shield raised" : null, then);
                     });
                 return;
             }
 
             if (!BoostWouldTurn(roll, plan.DodgeThreshold))
             {
-                then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, boost: 0, boostedBy: null));
+                FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, boost: 0, boostedBy: null, then);
                 return;
             }
 
@@ -2215,8 +2286,8 @@ namespace WoundBound.Game.Combat
                 new PendingReaction(ReactionKind.PanicDodge, target, attacker, roll, plan.DodgeThreshold,
                     $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
                     "A panic dodge (1 Stamina, +2) would make it miss."),
-                dodged => then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
-                    dodged ? ThresholdModifierCalculator.ReactionBonus : 0, dodged ? "panic dodge" : null)));
+                dodged => FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
+                    dodged ? ThresholdModifierCalculator.ReactionBonus : 0, dodged ? "panic dodge" : null, then));
         }
 
         /// <summary>
@@ -2452,8 +2523,9 @@ namespace WoundBound.Game.Combat
                 .Where(sq => sq != centre);
 
         /// <summary>Standing their ground or Off-guard: either puts Disadvantage on an attacker's roll (Core Rules §9, §10).</summary>
-        private static bool AttacksAtDisadvantage(Combatant attacker) =>
-            attacker.IsStandingGround || attacker.IsOffGuard || attacker.Conditions.Contains(CharacterCondition.Frightened);
+        private bool AttacksAtDisadvantage(Combatant attacker) =>
+            attacker.IsStandingGround || attacker.IsOffGuard || attacker.Conditions.Contains(CharacterCondition.Frightened)
+            || attacker == caughtMidMotion;
 
         /// <summary>
         /// Whether +2 to the Threshold, decided after seeing the roll, would turn this success into
@@ -2473,7 +2545,7 @@ namespace WoundBound.Game.Combat
         private void OfferReaction(PendingReaction offer, Action<bool> then)
         {
             var defender = offer.Defender;
-            if (offer.Kind != ReactionKind.Backlash && TacticalSpendRefusal(defender) is not null)
+            if (!IsFreeChoice(offer.Kind) && TacticalSpendRefusal(defender) is not null)
             {
                 then(false);
                 return;
@@ -2851,25 +2923,41 @@ namespace WoundBound.Game.Combat
 
         /// <param name="boost">What a panic dodge or a shield raised in time added to DT after the roll; 0 for neither.</param>
         /// <param name="boostedBy">Which of the two it was, for the log.</param>
-        private AttackOutcome FinishAttack(
+        private void FinishAttack(
             Combatant attacker, Combatant target, RollResult rolled, AttackPlan plan, bool usedOpportunity, bool asReaction,
-            int boost, string? boostedBy)
+            int boost, string? boostedBy, Action<AttackOutcome> then)
         {
             // Re-read the same dice against the raised Threshold. A dodged critical comes back a
             // critical failure, which is exactly what a Riposte is (Core Rules §10).
             var dodged = boost > 0;
             var roll = dodged ? Reread(rolled, plan.DodgeThreshold + boost) : rolled;
 
+            // A held Precise is spent on this attack, hit or miss.
+            var precise = preciseOn == attacker;
+            preciseOn = null;
+
             int rolledDamage = 0, absorbed = 0, dealt = 0;
             var attackerWounded = false;
 
             if (roll.Success == true)
             {
-                rolledDamage = RollDamage(plan.Profile ?? attacker.Attack, plan, roll.IsCritical);
+                rolledDamage = RollDamage(plan.Profile ?? attacker.Attack, plan, roll.IsCritical)
+                               + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
                 absorbed = Math.Min(rolledDamage,
-                    InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false));
+                    InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise));
                 dealt = rolledDamage - absorbed;
-                TakeBodyWounds(target, dealt);
+
+                // What got past the armour may yet be taken by somebody else (Core Rules §3, "Shelter").
+                var (hit, rolledHit, absorbedHit) = (roll, rolledDamage, absorbed);
+                Shelter(target, dealt, WoundType.Body, left =>
+                {
+                    TakeBodyWounds(target, left);
+                    var landed = new AttackOutcome(attacker, target, hit, plan, rolledHit, absorbedHit, left, false,
+                        usedOpportunity, asReaction, dodged, boost, boostedBy);
+                    Write(Describe(landed));
+                    then(landed);
+                });
+                return;
             }
             else if (roll.IsCritical)
             {
@@ -2882,7 +2970,7 @@ namespace WoundBound.Game.Combat
             var outcome = new AttackOutcome(attacker, target, roll, plan, rolledDamage, absorbed, dealt, attackerWounded,
                 usedOpportunity, asReaction, dodged, boost, boostedBy);
             Write(Describe(outcome));
-            return outcome;
+            then(outcome);
         }
 
         /// <summary>
@@ -3051,7 +3139,7 @@ namespace WoundBound.Game.Combat
         {
             // As far as the moves it could have would carry it: two for a fresh turn, more with
             // actions bought.
-            var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover))));
+            var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover)), mover.IsNimble));
             var stamp = HashCode.Combine(BoardStamp(mover), reach);
             if (movementMaps.TryGetValue(mover, out var known) && known.Stamp == stamp)
             {
@@ -3071,7 +3159,7 @@ namespace WoundBound.Game.Combat
                 canStop: square => !standing.ContainsKey(square),
                 isBroken: square => tables is not null && Setting.GroundAt(square) == Terrain.Broken,
                 isDeep: Setting.IsDeepWater,
-                price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed),
+                price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.IsNimble, freeStep: FreeStepFor(mover)),
                 brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken));
             movementMaps[mover] = (stamp, map);
             return map;
@@ -3082,6 +3170,7 @@ namespace WoundBound.Game.Combat
         {
             var hash = new HashCode();
             hash.Add(mover.Speed);
+            hash.Add(FreeStepFor(mover));
             foreach (var c in combatants)
             {
                 hash.Add(c.Position);

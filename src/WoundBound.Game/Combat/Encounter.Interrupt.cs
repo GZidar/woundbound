@@ -1,0 +1,172 @@
+using WoundBound.Rules.Calculation;
+using WoundBound.Rules.Enums;
+
+namespace WoundBound.Game.Combat
+{
+    /// <summary>
+    /// The two Secondary Wound rules that answer the GM: Interrupt (Mind), a turn taken inside the
+    /// GM's when an adversary declares an action; and Shelter (Soul), an ally's damage taken as Soul
+    /// (Core Rules §3, "Secondary Wound Rules").
+    /// </summary>
+    public sealed partial class Encounter
+    {
+        /// <summary>Where the GM's turn picks up again once an Interrupt's turn is over.</summary>
+        private Action? interruptResume;
+
+        /// <summary>An adversary whose declared action an Interrupt landed on: it is made with Disadvantage.</summary>
+        private Combatant? caughtMidMotion;
+
+        /// <summary>
+        /// An adversary's action, declared before it is rolled — "the GM says what each adversary is
+        /// about to do before rolling for it", the moment a Mind-secondary character can Interrupt.
+        /// If an Interrupt has left the action nothing to do, it is spent.
+        /// </summary>
+        private void Declare(Combatant actor, string what, Combatant? against, Func<bool> stillPossible, Action resolve, Action spent)
+        {
+            Write($"{actor.Name} declares: {what}.");
+            lastDeclaredTarget = against;
+            OfferInterrupt(actor, new Queue<Combatant>(InterruptersFor(actor)), () =>
+            {
+                if (actor.IsOutOfFight)
+                {
+                    spent();
+                    return;
+                }
+
+                if (!stillPossible())
+                {
+                    actor.ActionsRemaining = Math.Max(0, actor.ActionsRemaining - 1);
+                    Write($"{actor.Name}'s {what} has nothing left to do — the action is spent.");
+                    caughtMidMotion = null;
+                    spent();
+                    return;
+                }
+
+                resolve();
+            });
+        }
+
+        /// <summary>Who could Interrupt now: a Mind-secondary character still fighting, yet to act this round, with the Mind to pay.</summary>
+        private IEnumerable<Combatant> InterruptersFor(Combatant actor) =>
+            partyStillToAct.Where(c => c.HasInterrupt && !c.IsOutOfFight && Encounter.InterruptRefusal(c) is null);
+
+        /// <summary>Why <paramref name="character"/> can't pay an Interrupt's 1 Mind now, or null if they can — by Backlash where it's their last.</summary>
+        public static string? InterruptRefusal(Combatant character) =>
+            !character.HasInterrupt ? "Only a character with Mind as their Secondary Wound can Interrupt."
+            : PlayStateCalculator.CanSpendMindOrSoul(character.Mind, character.Body, 1, useMetaphysicalBacklash: character.Mind <= 1)
+                ? null
+                : "No Mind to pay for it.";
+
+        private void OfferInterrupt(Combatant actor, Queue<Combatant> candidates, Action then)
+        {
+            if (!candidates.TryDequeue(out var interrupter))
+            {
+                then();
+                return;
+            }
+
+            OfferReaction(new PendingReaction(ReactionKind.Interrupt, interrupter, actor, null, 0,
+                    $"{actor.Name} is about to act. {interrupter.Name} may Interrupt — take their turn now, for 1 Mind, before it is rolled.",
+                    Against: lastDeclaredTarget),
+                takes =>
+                {
+                    if (!takes)
+                    {
+                        OfferInterrupt(actor, candidates, then);
+                        return;
+                    }
+
+                    Interrupt(interrupter, actor, then);
+                });
+        }
+
+        /// <summary>Who the action being declared is aimed at, for the Interrupt prompt.</summary>
+        private Combatant? lastDeclaredTarget;
+
+        /// <summary>
+        /// Takes <paramref name="interrupter"/>'s turn now, inside the GM's: 1 Mind, then the whole of
+        /// their turn, after which the declared action goes ahead — with Disadvantage if the turn landed
+        /// on its maker, unless that is a Solo.
+        /// </summary>
+        private void Interrupt(Combatant interrupter, Combatant actor, Action then)
+        {
+            var backlash = interrupter.Mind <= 1;
+            PlayStateCalculator.TrySpendMindOrSoul(interrupter.Mind, interrupter.Body, 1, backlash, out var mind, out var body);
+            interrupter.Mind = mind;
+            interrupter.Body = body;
+            interrupter.TendEligible[WoundType.Mind] = true;
+            Write($"{interrupter.Name} Interrupts {actor.Name} — 1 Mind{(backlash ? ", Backlashed onto Body" : string.Empty)} — and takes their turn now.");
+
+            var before = Snapshot(actor);
+            interruptResume = () =>
+            {
+                if (!actor.IsOutOfFight && Snapshot(actor) != before)
+                {
+                    if (actor.Role == AdversaryRole.Solo)
+                    {
+                        Write($"{actor.Name} shrugs off being caught mid-motion — a Solo ignores the Disadvantage.");
+                    }
+                    else
+                    {
+                        caughtMidMotion = actor;
+                        Write($"{actor.Name} is caught mid-motion: its action is made with Disadvantage.");
+                    }
+                }
+
+                then();
+            };
+
+            StartPartyTurn(interrupter);
+        }
+
+        /// <summary>Everything an Interrupt's turn could have done to a creature, to tell whether it landed on it.</summary>
+        private static string Snapshot(Combatant c) =>
+            $"{c.Body}|{c.Mind}|{c.Soul}|{c.Position}|{string.Join(",", c.Conditions)}|{c.HeldBy?.Name}|{c.ThresholdModifiers.Count}|{c.IsOutOfFight}";
+
+        /// <summary>
+        /// Damage about to land on <paramref name="hurt"/>, past their armour: a Soul-secondary ally within
+        /// Short range who hasn't Sheltered this round may take it instead, as Soul, their own armour no
+        /// help — <paramref name="then"/> is told how much is left for <paramref name="hurt"/>.
+        /// </summary>
+        private void Shelter(Combatant hurt, int amount, WoundType type, Action<int> then)
+        {
+            if (amount <= 0 || hurt.Side != Side.Party)
+            {
+                then(amount);
+                return;
+            }
+
+            var shelterers = new Queue<Combatant>(combatants.Where(c => c.Side == hurt.Side && c != hurt && c.HasShelter && !c.HasShelteredThisRound
+                && !c.IsOutOfFight && c.Position.DistanceTo(hurt.Position) <= ShortRangeSquares));
+            OfferShelter(hurt, amount, type, shelterers, then);
+        }
+
+        /// <summary>The far edge of Short, in squares — Shelter's reach.</summary>
+        private int ShortRangeSquares => bands.Bands.Where(b => b.Name == DistanceBand.Short).Select(b => b.MaxSquares).DefaultIfEmpty(4).First();
+
+        private void OfferShelter(Combatant hurt, int amount, WoundType type, Queue<Combatant> shelterers, Action<int> then)
+        {
+            if (!shelterers.TryDequeue(out var shelterer))
+            {
+                then(amount);
+                return;
+            }
+
+            OfferReaction(new PendingReaction(ReactionKind.Shelter, shelterer, hurt, null, 0,
+                    $"{amount} {type} is about to land on {hurt.Name}. {shelterer.Name} may Shelter them — take it as Soul instead, once this round.",
+                    ImpactWounds: amount, DamageType: type),
+                takes =>
+                {
+                    if (!takes)
+                    {
+                        OfferShelter(hurt, amount, type, shelterers, then);
+                        return;
+                    }
+
+                    shelterer.HasShelteredThisRound = true;
+                    Write($"{shelterer.Name} Shelters {hurt.Name}, and takes the {amount} {type} as Soul.");
+                    Wound(shelterer, WoundType.Soul, amount, direct: true, () => then(0));
+                });
+        }
+    }
+}

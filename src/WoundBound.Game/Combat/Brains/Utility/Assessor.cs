@@ -78,10 +78,34 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             var best = view.EnemiesOf(c)
-                .SelectMany(e => c.Attacks.Select(a => Blow(c, a, e, a.DamageDieSides, e.DodgeThreshold).ExpectedDealt))
+                .SelectMany(e => c.Attacks.Select(a => Blow(c, a, e, a.DamageDieSides, e.DodgeThreshold).ExpectedDealt).Append(SpellHarm(c, e)))
                 .DefaultIfEmpty(0)
                 .Max();
             threat[c] = best;
+            return best;
+        }
+
+        /// <summary>
+        /// What the best Harm on <paramref name="c"/>'s sheet or statblock would do to <paramref name="e"/>
+        /// on average — the chance the cast lands, times its dice after armour where it's Body. A
+        /// caster's threat is its spells, however feeble the knife in its other hand.
+        /// </summary>
+        private static double SpellHarm(Combatant c, Combatant e)
+        {
+            double best = 0;
+            foreach (var spell in c.Spells.Where(s => s.SpellType == SpellType.Harm))
+            {
+                var bonus = c.Build is { } build
+                    ? c.MagicAccess.FirstOrDefault(a => a.Source == spell.Source) is { } access ? CharacterCalculator.CastBonus(build, access.CastAbility) : 0
+                    : c.StatblockCastBonus;
+                var dice = SpellCalculator.HealHarmDiceCount(spell.SpellTier) * (DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target)) + 1) / 2.0
+                           + (c.Build is { } b ? SpellCalculator.GraceBonus(b, spell) : 0);
+                var absorbs = (spell.DamageType ?? WoundType.Body) == WoundType.Body
+                    ? InventoryCalculator.ArmourAbsorbedAgainst(e.Armour, WoundType.Body, isDirect: false)
+                    : 0;
+                best = Math.Max(best, Odds.Of(bonus, e.DodgeThreshold).Success * Math.Max(0, dice - absorbs));
+            }
+
             return best;
         }
 
@@ -90,10 +114,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// to raise their Dodge Threshold if they can and it would turn the blow — the wounds it deals
         /// after armour, and the chance it takes the target out of the fight.
         /// </summary>
+        /// <param name="precise">As though Precise were held: Direct, and the attacker's Vitality on the damage.</param>
         public (double Hit, double ExpectedDealt, double Kill) Blow(Combatant attacker, AttackProfile attack, Combatant target, int? dieSides, int dodgeThreshold,
-            bool advantage = false, bool disadvantage = false)
+            bool advantage = false, bool disadvantage = false, bool precise = false)
         {
-            advantage |= attacker.IsHelped || target.IsDefenceless;
+            advantage |= attacker.IsHelped || target.IsDefenceless || attacker.HoldsPatient;
+            precise |= attacker.HoldsPrecise;
             disadvantage |= attacker.IsStandingGround || attacker.IsOffGuard || attacker.IsHarried;
 
             // A defender who can still spend will raise their DT against a blow it would turn.
@@ -105,9 +131,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var odds = Odds.Of(attack.AttackModifier, dodgeThreshold + answer, advantage, disadvantage);
             var plainHit = odds.Success - odds.CriticalSuccess;
 
-            var absorbs = Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false);
-            var (plainDealt, plainKill) = Damage(attack.DamageDiceCount, dieSides, attack.DamageModifier, bonusDie: null, absorbs, target);
-            var (critDealt, critKill) = Damage(attack.DamageDiceCount, dieSides, attack.DamageModifier, bonusDie: attack.DamageDieSides, absorbs, target);
+            var absorbs = Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise);
+            var modifier = attack.DamageModifier + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
+            var (plainDealt, plainKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: null, absorbs, target);
+            var (critDealt, critKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: attack.DamageDieSides, absorbs, target);
 
             return (odds.Success,
                 plainHit * plainDealt + odds.CriticalSuccess * critDealt,
@@ -172,7 +199,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <paramref name="from"/>, in wounds' worth: what it deals, and above all the chance of
         /// dropping them.
         /// </summary>
-        public (double Worth, AttackProfile? With) BestAttack(Combatant attacker, GridPosition from, Combatant target, bool advantage = false)
+        public (double Worth, AttackProfile? With) BestAttack(Combatant attacker, GridPosition from, Combatant target, bool advantage = false, bool precise = false)
         {
             var best = (Worth: 0.0, With: (AttackProfile?)null);
             foreach (var attack in attacker.Attacks)
@@ -183,7 +210,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var blow = Blow(attacker, attack, target, plan.DamageDieSides, plan.DodgeThreshold, advantage);
+                var blow = Blow(attacker, attack, target, plan.DamageDieSides, plan.DodgeThreshold, advantage, precise: precise);
                 var worth = Worth(blow, target);
                 if (worth > best.Worth)
                 {
@@ -253,6 +280,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public double LeavingCost(Combatant mover, GridPosition to)
         {
             double cost = 0;
+            if (mover.IsSlipping)
+            {
+                return 0;
+            }
+
             foreach (var enemy in view.EnemiesOf(mover).Where(e => e.CanReach(mover.Position) && !e.CanReach(to) && BattleView.TacticalSpendRefusal(e) is null))
             {
                 var plan = view.PlanAttack(enemy, mover);

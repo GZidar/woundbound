@@ -329,11 +329,53 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public bool HasCastSpell { get; internal set; }
 
-        /// <summary>The spells on a character's sheet (Core Rules §11). A generic foe casts none yet.</summary>
-        public IReadOnlyList<SpellDefinition> Spells => Build?.Spells ?? (IReadOnlyList<SpellDefinition>)[];
+        /// <summary>The spells on a character's sheet, or on a foe's statblock under its Caster trait (Core Rules §11; GM Reference §9).</summary>
+        public IReadOnlyList<SpellDefinition> Spells => Build?.Spells ?? StatblockSpells;
 
-        /// <summary>Which Magic sources this character can cast from, and how (Core Rules §11).</summary>
-        public IReadOnlyList<MagicAccessEntry> MagicAccess => magicAccess ??= Build is { } build ? SpellCalculator.GetMagicAccess(build) : [];
+        /// <summary>A generic foe's spells — its Attack line, where that is a spell, and its SPELLS rows.</summary>
+        internal IReadOnlyList<SpellDefinition> StatblockSpells { get; init; } = [];
+
+        /// <summary>What a foe's Caster trait says it casts, and with what — null for a foe that casts nothing.</summary>
+        public AdversaryCasting? Casting { get; init; }
+
+        /// <summary>A foe's Tier, which caps the spells it casts ("of up to its own Tier").</summary>
+        public Tier Tier { get; init; } = Tier.T1;
+
+        /// <summary>What a foe rolls where a spell has to land: the Caster trait's bonus, its Attack bonus by default (GM Reference §9).</summary>
+        internal int StatblockCastBonus { get; init; }
+
+        /// <summary>What a foe rolls when it pays a Divine or Aether spell from Body instead: its Tier's baseline, +0 / +1 / +2.</summary>
+        internal int StatblockBleedBonus { get; init; }
+
+        /// <summary>Which Magic sources this creature can cast from, and how (Core Rules §11; GM Reference §9, "On Casters").</summary>
+        public IReadOnlyList<MagicAccessEntry> MagicAccess => magicAccess ??= Build is { } build ? SpellCalculator.GetMagicAccess(build) : StatblockAccess();
+
+        /// <summary>
+        /// A Caster trait's access: its own tradition, up to its Tier, paid in that tradition's track —
+        /// and, for Aether or Divine, Body instead at its Tier's baseline, which is also how such a
+        /// creature reaches a Blood Magic Heal.
+        /// </summary>
+        private IReadOnlyList<MagicAccessEntry> StatblockAccess()
+        {
+            if (Casting is not { } casting)
+            {
+                return [];
+            }
+
+            var bleeds = casting.Source is MagicSource.AetherMagic or MagicSource.DivineMagic;
+            WoundType? track = casting.Source switch
+            {
+                MagicSource.AetherMagic => WoundType.Mind,
+                MagicSource.DivineMagic => WoundType.Soul,
+                MagicSource.BloodMagic => WoundType.Body,
+                _ => null,
+            };
+            var native = new MagicAccessEntry(casting.Source, Ability.Intellect, track,
+                CanBleedForPower: bleeds, MaxSpellTier: Tier, Notes: "Caster trait", BleedCastAbility: bleeds ? Ability.Vitality : null);
+            return bleeds
+                ? [native, new MagicAccessEntry(MagicSource.BloodMagic, Ability.Vitality, WoundType.Body, false, Tier, "Caster trait, bleeding", ViaBleedingForPower: true)]
+                : [native];
+        }
 
         private IReadOnlyList<MagicAccessEntry>? magicAccess;
 
@@ -342,6 +384,42 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Body as the Secondary Wound: once a round, 1 Body before an attack or a cast buys Advantage on it (Core Rules §3, "Sacrifice").</summary>
         public bool HasSacrifice => Build?.SecondaryWound == WoundType.Body;
+
+        /// <summary>Mind as the Secondary Wound: once a round, for 1 Mind, take their turn inside the GM's, when an adversary declares an action (Core Rules §3, "Interrupt").</summary>
+        public bool HasInterrupt => Build?.SecondaryWound == WoundType.Mind;
+
+        /// <summary>Soul as the Secondary Wound: once a round, take an ally's damage as Soul (Core Rules §3, "Shelter").</summary>
+        public bool HasShelter => Build?.SecondaryWound == WoundType.Soul;
+
+        /// <summary>Has Sheltered somebody this round.</summary>
+        public bool HasShelteredThisRound { get; internal set; }
+
+        /// <summary>A Nimble character: free footwork, and the Exploits (Core Rules §3, "Exploit").</summary>
+        public bool IsNimble => Build?.ClassPrinciple == ClassPrinciple.Nimble;
+
+        /// <summary>A Martial character: manoeuvres with a weapon that permits them (Core Rules §3, "Prowess").</summary>
+        public bool IsMartial => Build?.ClassPrinciple == ClassPrinciple.Martial;
+
+        /// <summary>Has taken the free step this round — "once per round" (Core Rules §9, "Footwork").</summary>
+        public bool HasUsedFreeStep { get; internal set; }
+
+        /// <summary>Has moved — by its own movement — since its last attack: what Precise asks.</summary>
+        public bool HasMovedSinceLastAttack { get; internal set; }
+
+        /// <summary>Has been attacked since the start of its last turn: what Patient forbids.</summary>
+        public bool HasBeenAttackedSinceTurnStart { get; internal set; }
+
+        /// <summary>Bought Slip this round: leaving an enemy's reach draws no reaction attack, until the round ends.</summary>
+        public bool IsSlipping { get; internal set; }
+
+        /// <summary>Holds Precise: the next attack is Direct and adds Vitality to its damage.</summary>
+        public bool HoldsPrecise { get; internal set; }
+
+        /// <summary>Holds Patient: the next attack is made with Advantage.</summary>
+        public bool HoldsPatient { get; internal set; }
+
+        /// <summary>Ringed (Core Rules §9, "Manoeuvres"): no tactical Stamina expenditure until the start of its next turn.</summary>
+        public bool IsRinged { get; internal set; }
 
         /// <summary>Has Overclocked this round.</summary>
         public bool HasOverclockedThisRound { get; internal set; }

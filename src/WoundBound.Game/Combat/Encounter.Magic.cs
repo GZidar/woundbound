@@ -51,7 +51,8 @@ namespace WoundBound.Game.Combat
         internal CastPlan PlanCastFrom(Combatant caster, GridPosition from, SpellCast cast, bool checkTurn)
         {
             var spell = cast.Spell;
-            if (caster.Build is not { } build || !caster.Spells.Contains(spell))
+            var build = caster.Build;
+            if (!caster.Spells.Contains(spell))
             {
                 return CastPlan.Refused($"{spell.Name} isn't one of {caster.Name}'s spells.");
             }
@@ -150,7 +151,13 @@ namespace WoundBound.Game.Combat
                 (track, ability) = (access.NativeCostTrack ?? WoundType.Body, access.CastAbility);
             }
 
-            var castBonus = CharacterCalculator.CastBonus(build, ability);
+            // A character rolls Tier + the stat; a foe rolls its Caster trait's bonus, or its Tier's
+            // baseline when it pays a Divine or Aether spell in blood (GM Reference §9, "On Casters").
+            var castBonus = build is not null
+                ? CharacterCalculator.CastBonus(build, ability)
+                : track == WoundType.Body && spell.Source != MagicSource.BloodMagic && spell.Source == caster.Casting?.Source
+                    ? caster.StatblockBleedBonus
+                    : caster.StatblockCastBonus;
 
             // Where it lands (Core Rules §11, "Spell Shape", "Placing a Volume").
             var touch = spell.Range == SpellRange.Touch || spell.Shape == SpellShape.None;
@@ -276,6 +283,11 @@ namespace WoundBound.Game.Combat
                     break;
 
                 case SpellType.Control:
+                    if (SpellArea.FixedEffectOf(spell) is { } written && written != cast.Effect)
+                    {
+                        return CastPlan.Refused($"{spell.Name} is written to cause {written}, not {cast.Effect}.");
+                    }
+
                     caught = caught.Where(c => c.ResolveThreshold is not null && !c.IsOutOfFight).ToList();
                     if (cast.Effect == ControlEffect.Compulsion && cast.Directed is { } directed && (directed.HasFled || !directed.OccupiesSquare))
                     {
@@ -341,6 +353,11 @@ namespace WoundBound.Game.Combat
             FuelPayment? fuel = null;
             if (element is { } fuelled)
             {
+                if (build is null)
+                {
+                    return CastPlan.Refused("A creature's Elemental casting isn't in the game yet.");
+                }
+
                 if (FuelRefusal(caster, from, fuelled, cast) is { } noSource)
                 {
                     return CastPlan.Refused(noSource);
@@ -570,9 +587,12 @@ namespace WoundBound.Game.Combat
                 }
 
                 var threshold = target.DodgeThreshold + VisibilityDodgeModifier(target);
+                target.HasBeenAttackedSinceTurnStart = true;
                 var advantage = cast.Sacrifice || helped || target.IsDefenceless;
                 var disadvantage = AttacksAtDisadvantage(caster) || harried;
                 var roll = RollAgainst(plan.CastBonus, threshold, advantage, disadvantage, caster);
+                var expected = SpellCalculator.HealHarmDiceCount(spell.SpellTier) * (DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target)) + 1) / 2.0
+                               + (caster.Build is { } b ? SpellCalculator.GraceBonus(b, spell) : 0);
                 var shieldGain = target.InHandShield is { } shield && target.CoveredBy.All(c => c.Bearer != target) && !target.IsOutOfFight
                     ? Math.Max(0, InventoryCalculator.ShieldDodgeThresholdBonus(shield.Weight) - target.ShieldBonus)
                     : 0;
@@ -600,7 +620,7 @@ namespace WoundBound.Game.Combat
                 {
                     OfferReaction(new PendingReaction(ReactionKind.RaiseShield, target, caster, roll, threshold,
                             $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. Raising the shield now (1 Stamina, +{shieldGain}, and it stays up) would make it miss.",
-                            Bonus: shieldGain),
+                            Bonus: shieldGain, ExpectedDamage: expected, DamageType: type),
                         raised =>
                         {
                             if (raised)
@@ -616,7 +636,7 @@ namespace WoundBound.Game.Combat
                 if (!target.IsOutOfFight && BoostWouldTurn(roll, threshold))
                 {
                     OfferReaction(new PendingReaction(ReactionKind.PanicDodge, target, caster, roll, threshold,
-                            $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. A panic dodge (1 Stamina, +2) would make it miss."),
+                            $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. A panic dodge (1 Stamina, +2) would make it miss.", ExpectedDamage: expected, DamageType: type),
                         dodged => Land(dodged ? ThresholdModifierCalculator.ReactionBonus : 0, "panic dodge"));
                     return;
                 }
@@ -647,9 +667,21 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            var soaked = type == WoundType.Body && !direct ? Math.Min(amount, InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false)) : 0;
+            Shelter(target, amount - soaked, type, left => Land(target, type, left + soaked, soaked, then));
+        }
+
+        /// <summary>The wounds left once Shelter has had its say, landing: Body less what armour took, Mind or Soul with Backlash on offer.</summary>
+        private void Land(Combatant target, WoundType type, int amount, int absorbed, Action then)
+        {
+            if (amount - absorbed <= 0)
+            {
+                then();
+                return;
+            }
+
             if (type == WoundType.Body)
             {
-                var absorbed = direct ? 0 : Math.Min(amount, InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false));
                 TakeBodyWounds(target, amount - absorbed);
                 Write($"{target.Name}: {amount} Body" + (absorbed > 0 ? $", armour absorbs {absorbed}" : string.Empty) +
                       (target.IsOutOfFight ? " — out of the fight." : $" — {target.Body}/{target.BodyMax} Body."));

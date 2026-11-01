@@ -104,11 +104,20 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private static bool WorthAvoiding(BattleView view, PendingReaction reaction)
         {
             var assess = new Assessor(view);
-            var attack = reaction.Attacker.Attack;
-            var average = attack.DamageDiceCount * (attack.DamageDieSides + 1) / 2.0 + attack.DamageModifier;
-            var absorbs = Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(reaction.Defender.Armour, WoundType.Body, isDirect: false);
+            var (average, absorbs) = Incoming(reaction);
             var prevented = Math.Max(0, average - absorbs) * assess.PerWound(reaction.Defender) + (reaction.WouldRiposte ? 1 : 0);
             return prevented >= 0.4 || reaction.Defender.IsMinion;
+        }
+
+        /// <summary>What the blow being answered would do on average, and what armour takes off it — a spell's own dice where it is one.</summary>
+        internal static (double Average, int Absorbs) Incoming(PendingReaction reaction)
+        {
+            var attack = reaction.Attacker.Attack;
+            var average = reaction.ExpectedDamage ?? attack.DamageDiceCount * (attack.DamageDieSides + 1) / 2.0 + attack.DamageModifier;
+            var absorbs = reaction.DamageType == WoundType.Body
+                ? Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(reaction.Defender.Armour, WoundType.Body, isDirect: false)
+                : 0;
+            return (average, absorbs);
         }
 
         /// <summary>Each idle creature's round-end move goes wherever its best next turn is set up from — the runners first.</summary>
@@ -207,7 +216,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
             return choice.Kind switch
             {
                 OptionKind.Move => new PartyStep.Move(choice.Square!.Value),
-                OptionKind.Attack => new PartyStep.Attack(choice.Target!),
+                OptionKind.Attack => new PartyStep.Attack(choice.Target!, Manoeuvre: choice.Manoeuvre),
+                OptionKind.Exploit => new PartyStep.Exploit(choice.Exploit!.Value),
                 OptionKind.Cast => new PartyStep.Cast(choice.Cast!),
                 OptionKind.Control => new PartyStep.Control(choice.Control!.Value, choice.Target!),
                 OptionKind.Aid => new PartyStep.Aid(choice.Action!.Value, choice.Target!),
@@ -229,11 +239,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             var assess = new Assessor(view);
-            var attack = reaction.Attacker.Attack;
-            var average = attack.DamageDiceCount * (attack.DamageDieSides + 1) / 2.0 + attack.DamageModifier;
-            var absorbs = Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(reaction.Defender.Armour, WoundType.Body, isDirect: false);
+            var (average, absorbs) = UtilityGmBrain.Incoming(reaction);
+            var left = reaction.DamageType == WoundType.Body ? reaction.Defender.Body : reaction.Defender.Track(reaction.DamageType).Current;
             var prevented = Math.Max(0, average - absorbs) * assess.PerWound(reaction.Defender) + (reaction.WouldRiposte ? 1.5 : 0);
-            return prevented >= 0.8 || average - absorbs >= reaction.Defender.Body;
+            return prevented >= 0.8 || average - absorbs >= left;
         }
 
         public bool StandsFirm(BattleView view, PendingReaction reaction) => CanSpare(reaction.Defender);
@@ -273,5 +282,48 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         private static bool CanSpare(Combatant c) => c.Stamina - 1 >= StaminaReserve;
+
+        /// <summary>
+        /// Interrupts where the turn taken now does more than the same turn later: the declared action
+        /// caught mid-motion — about a third of its harm spared, or all of it if the blow could drop its
+        /// maker first — worth more than the Mind it costs.
+        /// </summary>
+        public bool Interrupts(BattleView view, PendingReaction reaction)
+        {
+            var me = reaction.Defender;
+            var foe = reaction.Attacker;
+            if (me.Mind < 2 || foe.IsBroken)
+            {
+                return false;
+            }
+
+            var assess = new Assessor(view);
+            var squares = view.SquaresWithin(me, 1).Keys.Append(me.Position);
+            var (hit, kill) = squares
+                .Select(sq => assess.BestAttack(me, sq, foe))
+                .Where(b => b.With is not null)
+                .Select(b => (b.Worth, b.With!))
+                .Select(b => (Hit: b.Worth, Kill: Math.Min(1, b.Worth / Math.Max(0.1, assess.Value(foe)))))
+                .DefaultIfEmpty((0, 0))
+                .MaxBy(b => b.Hit);
+            if (hit <= 0)
+            {
+                return false;
+            }
+
+            var victim = reaction.Against is { Side: Side.Party } v ? v : me;
+            var spared = assess.Threat(foe) * assess.PerWound(victim) * (0.35 + 0.65 * kill);
+            return spared > 0.7;
+        }
+
+        /// <summary>Shelters an ally a hit would drop, or a caster the party can't afford to lose, where Soul can take it.</summary>
+        public bool Shelters(BattleView view, PendingReaction reaction)
+        {
+            var ally = reaction.Attacker;
+            var me = reaction.Defender;
+            var left = reaction.DamageType == WoundType.Body ? ally.Body : ally.Track(reaction.DamageType).Current;
+            var drops = reaction.ImpactWounds >= left;
+            return me.Soul > reaction.ImpactWounds && (drops || (ally.HasCastSpell && reaction.ImpactWounds >= 3));
+        }
     }
 }
