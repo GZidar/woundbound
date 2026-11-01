@@ -100,6 +100,16 @@ namespace WoundBound.Game.Combat.Brains
         public static string? StandGroundRefusal(Combatant combatant, Rules.Enums.CombatAction action) =>
             Encounter.StandGroundRefusal(combatant, action);
 
+        /// <summary>Why <paramref name="actor"/> can't Grab, Shove or Trip <paramref name="target"/> now, or null if they can.</summary>
+        public static string? ControlRefusal(Combatant actor, ControlAction action, Combatant target) =>
+            Encounter.ControlRefusal(actor, action, target);
+
+        /// <summary>Why <paramref name="combatant"/> can't stand up from Prone now, or null if they can.</summary>
+        public static string? StandUpRefusal(Combatant combatant) => Encounter.StandUpRefusal(combatant);
+
+        /// <summary>Why <paramref name="combatant"/> can't try to break free now, or null if they can.</summary>
+        public static string? BreakFreeRefusal(Combatant combatant) => Encounter.BreakFreeRefusal(combatant);
+
         /// <summary>Why <paramref name="combatant"/> can't make a tactical Stamina spend now, or null if they can.</summary>
         public static string? TacticalSpendRefusal(Combatant combatant) => Encounter.TacticalSpendRefusal(combatant);
     }

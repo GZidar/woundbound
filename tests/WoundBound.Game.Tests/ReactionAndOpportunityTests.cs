@@ -37,10 +37,10 @@ public class ReactionAndOpportunityTests
         Assert.Equal(EncounterPhase.AwaitingReaction, board.Encounter.Phase);
         var pending = board.Encounter.Pending!;
         Assert.Same(board.Fighter, pending.Defender);
-        Assert.Equal(16, pending.RaisedDodgeThreshold);
+        Assert.Equal(16, pending.RaisedThreshold);
         Assert.False(pending.WouldRiposte);
 
-        Assert.True(board.Encounter.RespondToReaction(dodge: true));
+        Assert.True(board.Encounter.RespondToReaction(spend: true));
 
         Assert.Equal(board.Fighter.BodyMax, board.Fighter.Body);
         Assert.Equal(stamina - 1, board.Fighter.Stamina);
@@ -56,7 +56,7 @@ public class ReactionAndOpportunityTests
         AdvanceAndEndTurn(board);
         board.Encounter.RunAdversaryTurn();
 
-        board.Encounter.RespondToReaction(dodge: true);
+        board.Encounter.RespondToReaction(spend: true);
 
         Assert.Equal(1, board.Encounter.ImmediateOpportunities);
         Assert.Equal(EncounterPhase.AdversaryTurn, board.Encounter.Phase);
@@ -77,7 +77,7 @@ public class ReactionAndOpportunityTests
         AdvanceAndEndTurn(board);
         board.Encounter.RunAdversaryTurn();
 
-        board.Encounter.RespondToReaction(dodge: false);
+        board.Encounter.RespondToReaction(spend: false);
 
         Assert.Equal(board.Fighter.BodyMax - 2, board.Fighter.Body);
         Assert.Equal(0, board.Encounter.GmOpportunities);
@@ -139,7 +139,7 @@ public class ReactionAndOpportunityTests
         board.Encounter.RunAdversaryTurn();
         Assert.True(board.Encounter.Pending!.WouldRiposte);
 
-        board.Encounter.RespondToReaction(dodge: true);
+        board.Encounter.RespondToReaction(spend: true);
 
         Assert.True(board.Biter.IsOutOfFight);
         Assert.Equal(board.Fighter.BodyMax, board.Fighter.Body);
@@ -158,7 +158,7 @@ public class ReactionAndOpportunityTests
         board.Encounter.EndTurn();
 
         board.Encounter.RunAdversaryTurn();
-        board.Encounter.RespondToReaction(dodge: true);
+        board.Encounter.RespondToReaction(spend: true);
 
         Assert.Equal(2, board.Encounter.Round);
         Assert.Equal(0, board.Encounter.GmOpportunities);
@@ -188,7 +188,7 @@ public class ReactionAndOpportunityTests
 
         board.Encounter.RunAdversaryTurn();
         Assert.True(board.Encounter.Pending!.Roll.AppliedAdvantage);
-        board.Encounter.RespondToReaction(dodge: false);
+        board.Encounter.RespondToReaction(spend: false);
 
         Assert.Equal(Encounter.MaxBankedOpportunities - 1, board.Encounter.BankedOpportunities);
         Assert.Equal(board.Fighter.BodyMax, board.Fighter.Body);
@@ -234,7 +234,7 @@ public class ReactionAndOpportunityTests
         Assert.Equal(EncounterPhase.AwaitingReaction, board.Encounter.Phase);
         Assert.Equal(new GridPosition(1, 4), board.Fighter.Position);
 
-        board.Encounter.RespondToReaction(dodge: true);
+        board.Encounter.RespondToReaction(spend: true);
 
         Assert.Equal(new GridPosition(1, 1), board.Fighter.Position);
         Assert.Equal(board.Fighter.BodyMax, board.Fighter.Body);

@@ -42,6 +42,19 @@ namespace WoundBound.Game.Combat.Brains
         bool PanicDodges(BattleView view, PendingReaction reaction);
 
         /// <summary>
+        /// Whether the adversary <see cref="PendingReaction.Defender"/> spends 1 Stamina for +2
+        /// Stability Threshold against a Grab, Shove, Trip or break-free. Only asked when it would
+        /// stop it and the spend is allowed.
+        /// </summary>
+        bool StandsFirm(BattleView view, PendingReaction reaction);
+
+        /// <summary>
+        /// Whether the adversary <see cref="PendingReaction.Defender"/> spends 1 Stamina to arrest
+        /// a Shove and stay where it is. Only asked when the spend is allowed.
+        /// </summary>
+        bool ArrestsShove(BattleView view, PendingReaction reaction);
+
+        /// <summary>
         /// At the round's end, the next adversary that took no turn to close in, and where to
         /// (Core Rules §9, "Adversaries that didn't act close in"): a single move's worth. Null when
         /// no more are moving. <paramref name="stillIdle"/> shrinks as each one goes.
@@ -72,14 +85,32 @@ namespace WoundBound.Game.Combat.Brains
         /// </summary>
         public sealed record StandGround(Rules.Enums.CombatAction Action) : GmStep;
 
+        /// <summary>
+        /// Grab, Shove or Trip <paramref name="Target"/> with the action (Core Rules §9).
+        /// <paramref name="WithAdvantage"/> spends an Opportunity, as for an attack.
+        /// </summary>
+        public sealed record Control(ControlAction Action, Combatant Target, bool WithAdvantage = false) : GmStep;
+
+        /// <summary>Stand up from Prone, for a move.</summary>
+        public sealed record StandUp : GmStep;
+
+        /// <summary>Spend the action trying to break the hold it's in.</summary>
+        public sealed record BreakFree : GmStep;
+
+        /// <summary>Let go of whatever it's holding. Free.</summary>
+        public sealed record LetGo : GmStep;
+
         /// <summary>Done for this turn, whatever is left unspent.</summary>
         public sealed record EndTurn : GmStep;
 
         public static GmStep End { get; } = new EndTurn();
     }
 
-    /// <summary>A round-end move for an adversary that took no turn.</summary>
-    public sealed record GmCloseIn(Combatant Adversary, GridPosition Square);
+    /// <summary>
+    /// A round-end move for an adversary that took no turn: to <paramref name="Square"/>, or, with
+    /// <paramref name="StandUp"/>, getting up from Prone where it lies (Core Rules §9).
+    /// </summary>
+    public sealed record GmCloseIn(Combatant Adversary, GridPosition Square, bool StandUp = false);
 
     /// <summary>The adversary turn in progress, as the brain choosing its steps sees it.</summary>
     public sealed class GmTurn

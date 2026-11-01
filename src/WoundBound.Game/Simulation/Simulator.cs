@@ -94,13 +94,13 @@ namespace WoundBound.Game.Simulation
 
             var lines = new List<string>
             {
-                $"{"Tactic".PadRight(width)}  Win%   W/L/S         Rounds  Body left  Up   Foes  Attacks  Swaps  Extra  Braces  Dodges",
+                $"{"Tactic".PadRight(width)}  Win%   W/L/S         Rounds  Body left  Up   Foes  Attacks  Trips  Swaps  Extra  Braces  Dodges",
             };
 
             lines.AddRange(rows.Select(r =>
                 $"{r.Tactic.PadRight(width)}  {r.WinRate,5:P0}  {$"{r.Wins}/{r.Losses}/{r.Stalemates}",-12}  " +
                 $"{r.AverageRounds,6:0.0}  {r.AverageBodyLeftOnWin,9:0.0}  {r.AverageStandingOnWin,3:0.0}  {r.AverageFoesDropped,4:0.0}  " +
-                $"{r.Per(t => t.Attacks),7:0.0}  {r.Per(t => t.Swaps),5:0.0}  {r.Per(t => t.ExtraActions),5:0.0}  " +
+                $"{r.Per(t => t.Attacks),7:0.0}  {r.Per(t => t.Manoeuvres),5:0.0}  {r.Per(t => t.Swaps),5:0.0}  {r.Per(t => t.ExtraActions),5:0.0}  " +
                 $"{r.Per(t => t.StoodGround),6:0.0}  {r.Per(t => t.DodgesTaken),6:0.0}"));
 
             return string.Join(Environment.NewLine, lines);

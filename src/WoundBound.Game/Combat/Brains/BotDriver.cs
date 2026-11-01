@@ -16,6 +16,14 @@ namespace WoundBound.Game.Combat.Brains
         public int DodgesOffered { get; internal set; }
 
         public int DodgesTaken { get; internal set; }
+
+        /// <summary>Grabs, Shoves and Trips.</summary>
+        public int Manoeuvres { get; internal set; }
+
+        public int StandUps { get; internal set; }
+
+        /// <summary>Stood firm or arrested a shove.</summary>
+        public int OtherReactions { get; internal set; }
     }
 
     /// <summary>
@@ -60,12 +68,26 @@ namespace WoundBound.Game.Combat.Brains
                     return true;
 
                 case EncounterPhase.AwaitingReaction when encounter.Pending is { } pending:
-                    var dodge = party.PanicDodges(encounter.View, pending);
-                    Tally.DodgesOffered++;
-                    Tally.DodgesTaken += dodge ? 1 : 0;
-                    if (!encounter.RespondToReaction(dodge))
+                    var spend = pending.Kind switch
                     {
-                        throw Refused($"a panic dodge for {pending.Defender.Name}", Encounter.TacticalSpendRefusal(pending.Defender));
+                        ReactionKind.PanicDodge => party.PanicDodges(encounter.View, pending),
+                        ReactionKind.StandFirm => party.StandsFirm(encounter.View, pending),
+                        _ => party.ArrestsShove(encounter.View, pending),
+                    };
+
+                    if (pending.Kind == ReactionKind.PanicDodge)
+                    {
+                        Tally.DodgesOffered++;
+                        Tally.DodgesTaken += spend ? 1 : 0;
+                    }
+                    else
+                    {
+                        Tally.OtherReactions += spend ? 1 : 0;
+                    }
+
+                    if (!encounter.RespondToReaction(spend))
+                    {
+                        throw Refused($"a {pending.Kind} for {pending.Defender.Name}", Encounter.TacticalSpendRefusal(pending.Defender));
                     }
 
                     return true;
@@ -100,6 +122,10 @@ namespace WoundBound.Game.Combat.Brains
                 PartyStep.Swap => Count(encounter.TrySwapLoadout(), () => Tally.Swaps++),
                 PartyStep.BuyExtraAction => Count(encounter.TryBuyExtraAction(), () => Tally.ExtraActions++),
                 PartyStep.StandGround brace => Count(encounter.TryStandGround(brace.Action), () => Tally.StoodGround++),
+                PartyStep.Control control => Count(encounter.TryControl(control.Action, control.Target), () => Tally.Manoeuvres++),
+                PartyStep.StandUp => Count(encounter.TryStandUp(), () => Tally.StandUps++),
+                PartyStep.BreakFree => encounter.TryBreakFree(),
+                PartyStep.LetGo => encounter.TryLetGo(),
                 _ => EndTurn(),
             };
 
@@ -110,6 +136,10 @@ namespace WoundBound.Game.Combat.Brains
                     PartyStep.Swap => Encounter.SwapRefusal(character),
                     PartyStep.BuyExtraAction => encounter.ExtraActionRefusal(character),
                     PartyStep.StandGround brace => Encounter.StandGroundRefusal(character, brace.Action),
+                    PartyStep.Control control => Encounter.ControlRefusal(character, control.Action, control.Target),
+                    PartyStep.StandUp => Encounter.StandUpRefusal(character),
+                    PartyStep.BreakFree => Encounter.BreakFreeRefusal(character),
+                    PartyStep.LetGo => "they're holding nobody",
                     PartyStep.Attack attack => encounter.PlanAttack(character, attack.Target).Refusal ?? "no action left",
                     _ => null,
                 });

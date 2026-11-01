@@ -63,6 +63,13 @@ namespace WoundBoundGame
         private Button extraActionButton = null!;
         private readonly Dictionary<CombatAction, Button> standGroundButtons = new();
         private Button endTurnButton = null!;
+        private readonly Dictionary<ControlAction, Button> controlButtons = new();
+        private Button standUpButton = null!;
+        private Button breakFreeButton = null!;
+        private Button letGoButton = null!;
+
+        /// <summary>Grab, Shove or Trip, chosen from its button; the next foe clicked is the target. Null for a plain attack.</summary>
+        private ControlAction? armed;
         private RichTextLabel logLabel = null!;
 
         private float BoardPixelWidth => SampleEncounters.BoardWidth * CellSize;
@@ -115,10 +122,19 @@ namespace WoundBoundGame
 
             if (encounter.At(clicked) is { } occupant)
             {
-                encounter.TryAttack(occupant);
+                if (armed is { } action)
+                {
+                    encounter.TryControl(action, occupant);
+                    armed = null;
+                }
+                else
+                {
+                    encounter.TryAttack(occupant);
+                }
             }
             else
             {
+                armed = null;
                 encounter.TryMove(clicked);
             }
 
@@ -185,13 +201,28 @@ namespace WoundBoundGame
             {
                 DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, ChoosableRing, 3);
             }
-            else if (active is not null && encounter.CanAttack(active, combatant))
+            else if (active is not null && (armed is { } action
+                         ? Encounter.ControlRefusal(active, action, combatant) is null
+                         : encounter.CanAttack(active, combatant)))
             {
                 DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, TargetRing, 3);
             }
 
             DrawString(font, new Vector2(rect.Position.X, centre.Y + 6), Initials(combatant.Name), HorizontalAlignment.Center,
                 CellSize, 18, Colors.White);
+
+            // What's been done to it, across the top of the square.
+            var marks = string.Join(" ", new[]
+            {
+                combatant.IsProne ? "prone" : null,
+                combatant.HeldBy is not null ? "held" : null,
+                combatant.Holding is not null ? "holding" : null,
+            }.Where(m => m is not null));
+            if (marks.Length > 0)
+            {
+                DrawString(font, new Vector2(rect.Position.X, rect.Position.Y + 13), marks, HorizontalAlignment.Center, CellSize, 11,
+                    new Color(1f, 0.85f, 0.5f));
+            }
 
             // Body bar along the foot of the square.
             var bar = new Rect2(rect.Position.X + 8, rect.End.Y - 10, CellSize - 16, 5);
@@ -206,6 +237,7 @@ namespace WoundBoundGame
                 ? SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller())
                 : SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller());
             shown = null;
+            armed = null;
             stepPending = false;
             bot = null;
             UpdateBot();
@@ -264,7 +296,7 @@ namespace WoundBoundGame
                 : null;
         }
 
-        /// <summary>Shows the panic-dodge choice while the encounter is waiting on it, and hides it otherwise.</summary>
+        /// <summary>Shows the 1-Stamina choice — panic dodge, stand firm, or arrest — while the encounter is waiting on it.</summary>
         private void UpdateReactionPrompt()
         {
             reactionBox.Visible = encounter.Pending is not null;
@@ -273,13 +305,16 @@ namespace WoundBoundGame
                 return;
             }
 
-            var roll = pending.Roll;
-            reactionLabel.Text =
-                $"{pending.Attacker.Name}'s {pending.Attacker.Attack.Name} rolls ({string.Join("+", roll.CountedDice)})" +
-                $"{(roll.Modifier >= 0 ? "+" : "−")}{System.Math.Abs(roll.Modifier)} = {roll.Total} against {pending.Defender.Name}'s DT {pending.DodgeThreshold}: a hit.\n" +
-                $"A panic dodge raises their DT to {pending.RaisedDodgeThreshold} and makes it miss" +
-                (pending.WouldRiposte ? " — and it's a critical, so the miss is a Riposte: the attacker takes the wound." : ".") +
+            reactionLabel.Text = pending.Prompt +
+                (pending.WouldRiposte ? "\nIt's a critical, so the miss would be a Riposte: the attacker takes the wound." : string.Empty) +
                 "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM an Immediate Opportunity.";
+
+            (panicDodgeButton.Text, takeHitButton.Text) = pending.Kind switch
+            {
+                ReactionKind.PanicDodge => ("Panic dodge (1 Stamina)", "Take the hit"),
+                ReactionKind.StandFirm => ("Stand firm (1 Stamina, +2 ST)", "Let it happen"),
+                _ => ("Arrest (1 Stamina)", "Let it carry them"),
+            };
         }
 
         private void UpdateHud()
@@ -316,7 +351,15 @@ namespace WoundBoundGame
                 $"{character.Armour} armour (absorbs {armourAbsorbs})" +
                 (character.IsStandingGround
                     ? $"\nStanding your ground ({string.Join(", ", character.StandingGround)}): no moving, and Disadvantage on attacks, until your next turn."
-                    : string.Empty);
+                    : string.Empty) +
+                (character.Conditions.Count > 0
+                    ? $"\nConditions: {string.Join(", ", character.Conditions.Select(c => ConditionCatalog.For(c).Name))}" +
+                      (character.IsOffGuard ? " — Off-guard: −2 DT, Disadvantage on attacks." : string.Empty)
+                    : string.Empty) +
+                (character.HeldBy is { } holder ? $"\nHeld by {holder.Name}: no moving until you break free." : string.Empty) +
+                (character.Holding is { } held ? $"\nHolding {held.Name}, with a hand." : string.Empty) +
+                $"\nHands-on: 2d12+{character.UnarmedAttackModifier} vs ST, reach {character.OwnReach}" +
+                (character.HasFreeHand ? ", a hand free to grab with." : ", no hand free to grab with.");
 
             static string Threshold(string name, int? now, int? baseValue) =>
                 now is null ? $"{name} —" : now == baseValue ? $"{name} {now}" : $"{name} {now} ({baseValue}{now - baseValue:+0;−0})";
@@ -344,6 +387,31 @@ namespace WoundBoundGame
                     $"{CombatActionCatalog.For(action).Effect}. Takes the move (or the action, if the move's gone). " +
                     "No moving this turn, and Disadvantage on attacks until your next turn. No Opportunity for the GM.";
             }
+
+            if (!isPartyTurn)
+            {
+                armed = null;
+            }
+
+            foreach (var (action, button) in controlButtons)
+            {
+                var actor = isPartyTurn ? encounter.Active : null;
+                var anyTarget = actor is not null && encounter.Fighting(Side.Adversaries)
+                    .Any(foe => Encounter.ControlRefusal(actor, action, foe) is null);
+                button.Disabled = !anyTarget;
+                button.ButtonPressed = armed == action;
+                button.TooltipText = action switch
+                {
+                    ControlAction.Grab => "Grab a foe beside you: they're Held, and can't move until they break free. Needs a free hand.",
+                    ControlAction.Shove => "Shove a foe beside you a square straight away. Into something solid, they take the rest as Body wounds.",
+                    _ => "Trip a foe beside you: Prone, so Off-guard (−2 DT) until they spend a move to stand.",
+                } + " Unarmed roll against their ST; your action, no Stamina, no damage. Then click the foe.";
+            }
+
+            var me = isPartyTurn ? encounter.Active : null;
+            standUpButton.Disabled = me is null || Encounter.StandUpRefusal(me) is not null;
+            breakFreeButton.Disabled = me is null || Encounter.BreakFreeRefusal(me) is not null;
+            letGoButton.Disabled = me?.Holding is null;
 
             endTurnButton.Disabled = !isPartyTurn;
         }
@@ -412,6 +480,7 @@ namespace WoundBoundGame
                 "• Swap: trade the loadout in hand for the one at the ready, for a move.\n" +
                 "• Dodge / Grounded / Resolute: +2 to a Threshold in place of your move — but no moving, and attacks at Disadvantage.\n" +
                 "• Attack: click a foe with a red ring — in Reach for a blade, beyond Close for a bow.\n" +
+                "• Grab / Shove / Trip: press one, then click a foe beside you. An unarmed roll against their ST.\n" +
                 "• End turn when you're done, and the GM takes one adversary turn.";
 
             if (hovered is not { } square)
@@ -432,9 +501,20 @@ namespace WoundBoundGame
                             $"{foe.Attack.Name} +{foe.Attack.AttackModifier}, {foe.Attack.DamageDiceCount}d{foe.Attack.DamageDieSides}" +
                             (foe.IsMinion ? "\nMinion: any hit that gets past its armour drops it." : string.Empty);
 
+                stats += $" · ST {foe.StabilityThreshold}" +
+                         (foe.IsProne ? " · Prone" : string.Empty) + (foe.HeldBy is { } holder ? $" · Held by {holder.Name}" : string.Empty);
+
                 if (active is null)
                 {
                     return stats;
+                }
+
+                if (armed is { } action)
+                {
+                    var verb = action.ToString().ToLowerInvariant();
+                    return stats + (Encounter.ControlRefusal(active, action, foe) is { } why
+                        ? $"\nCan't {verb}: {why}"
+                        : $"\nClick to {verb}: 2d12+{active.UnarmedAttackModifier} vs ST {foe.StabilityThreshold}.");
                 }
 
                 var plan = encounter.PlanAttack(active, foe);
@@ -537,6 +617,42 @@ namespace WoundBoundGame
                 standGroundButtons[action] = button;
             }
 
+            foreach (var action in System.Enum.GetValues<ControlAction>())
+            {
+                var button = new Button { Text = action.ToString(), ToggleMode = true };
+                button.Pressed += () =>
+                {
+                    armed = armed == action ? null : action;
+                    Refresh();
+                };
+                buttons.AddChild(button);
+                controlButtons[action] = button;
+            }
+
+            standUpButton = new Button { Text = "Stand up", TooltipText = "Get up from Prone, for a move. Not movement: it leaves nobody's reach." };
+            standUpButton.Pressed += () =>
+            {
+                encounter.TryStandUp();
+                Refresh();
+            };
+            buttons.AddChild(standUpButton);
+
+            breakFreeButton = new Button { Text = "Break free", TooltipText = "Your action: the Grab's roll against your holder's ST." };
+            breakFreeButton.Pressed += () =>
+            {
+                encounter.TryBreakFree();
+                Refresh();
+            };
+            buttons.AddChild(breakFreeButton);
+
+            letGoButton = new Button { Text = "Let go", TooltipText = "Release whoever you're holding. Free." };
+            letGoButton.Pressed += () =>
+            {
+                encounter.TryLetGo();
+                Refresh();
+            };
+            buttons.AddChild(letGoButton);
+
             endTurnButton = new Button { Text = "End turn" };
             endTurnButton.Pressed += () =>
             {
@@ -604,7 +720,7 @@ namespace WoundBoundGame
             panicDodgeButton = new Button { Text = "Panic dodge (1 Stamina)" };
             panicDodgeButton.Pressed += () =>
             {
-                encounter.RespondToReaction(dodge: true);
+                encounter.RespondToReaction(spend: true);
                 Refresh();
             };
             reactionButtons.AddChild(panicDodgeButton);
@@ -612,7 +728,7 @@ namespace WoundBoundGame
             takeHitButton = new Button { Text = "Take the hit" };
             takeHitButton.Pressed += () =>
             {
-                encounter.RespondToReaction(dodge: false);
+                encounter.RespondToReaction(spend: false);
                 Refresh();
             };
             reactionButtons.AddChild(takeHitButton);

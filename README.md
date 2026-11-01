@@ -70,6 +70,16 @@ What they exercise, all through `WoundBound.Rules`:
   takes the move, a second the action, a third an extra action. None for anyone who has moved,
   none twice a turn, no moving after, and Disadvantage on attacks while it lasts. Stacks with a
   panic dodge. The GM's creatures can do it too, though the simple GM never does.
+- Grab, Shove and Trip (Core Rules §9), for anybody: an unarmed attack roll (a foe's Attack bonus)
+  against the target's Stability Threshold, within the body's own reach, for the action and no
+  Stamina. Trip leaves the target Prone — Off-guard (−2 DT, Disadvantage on attacks), crawling until
+  it spends a move to stand. Shove is Forced Movement a square straight away: into a creature or the
+  field's edge, the rest is Body wounds less armour; the target may arrest it, and being shoved out of
+  a foe's reach draws its reaction. Grab needs a free hand and leaves the target Held — no moving
+  itself until it breaks free with its action, or the hold ends (the holder lets go, moves away, takes
+  up something two-handed, or drops). Criticals add the other effect, a critical failure puts the one
+  who lunged on the ground, and a Swarm can't be put hands on. The target may stand firm after seeing
+  the roll: 1 Stamina for +2 ST, a tactical spend. Grounded finally has something to resist.
 - GM Opportunities: banked from extra actions (at most 3), Immediate from reactions and Threshold
   boosts (lapsing at the spender's next turn); spent on an extra adversary turn — on a creature that
   can strike, ideally one that has already acted — or, with a full bank, on an attack's Advantage.
@@ -82,8 +92,9 @@ What they exercise, all through `WoundBound.Rules`:
 Every choice the rules leave to the GM goes through `IGmBrain` (`src/WoundBound.Game/Combat/Brains/`):
 - who takes an owed turn
 - whether to buy an extra turn with an Opportunity
-- each step of an adversary's turn (move, attack, with or without Advantage, or end)
-- whether to make a reaction attack or panic dodge
+- each step of an adversary's turn (move, attack or Grab/Shove/Trip — with or without Advantage —
+  stand up, break free, let go, or end)
+- whether to make a reaction attack, panic dodge, stand firm or arrest a shove
 - where idle adversaries close in at the round's end
 
 The `Encounter` owns the rules. It asks the brain, checks the answer, and carries it out, so a brain
@@ -94,8 +105,12 @@ for one step at a time, so a brain can re-plan after a dodge or a Riposte.
 `SimpleGmBrain` is the placeholder: everything goes for the nearest character. Pass a different
 brain to `Encounter` (or `SampleEncounters.FighterVersusRatkin`) to change how the GM plays.
 
-Not yet: manoeuvres, Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting,
-shields, shoves and frights (so Grounded and Resolute have nothing to resist yet), obstacles, movement
+`TrippingGmBrain` is a second baseline: a creature that isn't a Minion trips a character its pack can
+also reach before swinging.
+
+Not yet: Drag, and Grab/Shove/Trip taken as a reaction against somebody leaving your reach; the Martial
+manoeuvres (Cleave, Topple, Ring, Hook, Disarm, Sunder); Solo Resilience and Unshakable; Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting,
+shields, frights (so Resolute has nothing to resist yet), obstacles, movement
 paths (a move is a hop from square to square). Characters make no reaction attacks yet against an
 adversary leaving their reach. The Quickstart characters' class features — Nimble's free step and
 Exploits, Sacrifice, Interrupt — aren't in, and statblock ranged attacks (the Reedmarsh Skulker's
@@ -120,7 +135,16 @@ already strike, and otherwise whoever is nearest an enemy.
   dotnet run --project tools/WoundBound.Sim -- --fights 1000 --seed 1
   ```
 
-  The party ambush is the default; `--fight solo` plays the Dumb Fighter against the ratkin.
+  The party ambush is the default; `--fight solo` plays the Dumb Fighter against the ratkin, and
+  `--gm tripping` swaps in the tripping GM.
+
+  The simulator measures one thing — winning a straight fight — and not every rule exists for that.
+  Grab, Shove and Trip are there for the moments the story makes them matter: slowing a foe who is
+  running, hauling a friend back from a cliff edge, taking a prisoner. In a plain fight to the last
+  wound, trading the action for a Trip loses to simply hitting, on both sides; that says the ambush
+  has no such moment in it yet, not that the rule is wasted. Fights with objectives other than
+  "drop everyone" (an escape to stop, someone to save, ground that matters) are where they'll earn
+  their place, and where the simulator should measure them.
 
 As the rules grow, each new choice becomes a new switch, and the simulator says whether it wins
 fights.

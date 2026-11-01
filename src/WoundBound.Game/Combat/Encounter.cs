@@ -48,15 +48,31 @@ namespace WoundBound.Game.Combat
         bool Dodged);
 
     /// <summary>
-    /// A hit the defender can still turn into a miss: the roll is known, it lands, and +2 Dodge
-    /// Threshold would put it out of reach (Core Rules §10, "Dodge Threshold"). Against a critical
-    /// hit that is a Riposte, and the attacker is wounded instead.
+    /// Something the defender can still answer for 1 Stamina, now they've seen it coming:
+    /// <list type="bullet">
+    /// <item>a hit that +2 Dodge Threshold would turn into a miss — a Riposte against a critical
+    /// (Core Rules §10, "Dodge Threshold");</item>
+    /// <item>a Grab, Shove, Trip or break-free that +2 Stability Threshold would stop (§10, "Stability Threshold");</item>
+    /// <item>a Shove about to carry them, which they may arrest (§9, "Forced Movement").</item>
+    /// </list>
     /// </summary>
-    public sealed record PendingReaction(Combatant Defender, Combatant Attacker, RollResult Roll, int DodgeThreshold)
+    /// <param name="Roll">The roll being answered; null for an arrest, which answers a push rather than a roll.</param>
+    /// <param name="Threshold">The Threshold the roll met — DT for a dodge, ST for standing firm.</param>
+    /// <param name="Prompt">What's happening and what the spend would do, in a line for the player.</param>
+    /// <param name="ImpactWounds">For an arrest: the Body wounds, before armour, the Shove would put them into something solid for.</param>
+    public sealed record PendingReaction(
+        ReactionKind Kind,
+        Combatant Defender,
+        Combatant Attacker,
+        RollResult? Roll,
+        int Threshold,
+        string Prompt,
+        int ImpactWounds = 0)
     {
-        public int RaisedDodgeThreshold => DodgeThreshold + ThresholdModifierCalculator.ReactionBonus;
+        public int RaisedThreshold => Threshold + ThresholdModifierCalculator.ReactionBonus;
 
-        public bool WouldRiposte => Roll.IsCritical;
+        /// <summary>Only a Dodge Threshold boost can Riposte (Core Rules §9, "Criticals").</summary>
+        public bool WouldRiposte => Kind == ReactionKind.PanicDodge && Roll?.IsCritical == true;
     }
 
     /// <summary>
@@ -168,13 +184,21 @@ namespace WoundBound.Game.Combat
         /// left. A move is priced by the band its own distance falls in (Core Rules §9, "Speed").
         /// </summary>
         public int? MoveCostTo(Combatant combatant, GridPosition square) =>
-            !combatant.IsStandingGround && PriceOfMove(combatant, square) is { } cost && cost <= MovesAvailable(combatant) ? cost : null;
+            CanMoveItself(combatant) && PriceOfMove(combatant, square) is { } cost && cost <= MovesAvailable(combatant) ? cost : null;
 
-        /// <summary>Every square the active character could move to now, with what each would cost. None while they stand their ground.</summary>
+        /// <summary>Every square the active character could move to now, with what each would cost. None while they stand their ground or are Held.</summary>
         public IReadOnlyDictionary<GridPosition, int> ReachableSquares(Combatant combatant) =>
-            combatant.IsStandingGround
-                ? new Dictionary<GridPosition, int>()
-                : SquaresWithin(combatant, MovesAvailable(combatant));
+            CanMoveItself(combatant)
+                ? SquaresWithin(combatant, MovesAvailable(combatant))
+                : new Dictionary<GridPosition, int>();
+
+        /// <summary>
+        /// Whether <paramref name="combatant"/> may change square under its own power: not while
+        /// standing its ground (Core Rules §10), and not while Held (§9, "Held"). Prone is no bar —
+        /// it crawls.
+        /// </summary>
+        public static bool CanMoveItself(Combatant combatant) =>
+            !combatant.IsStandingGround && ConditionCatalog.CanMove(combatant.Conditions);
 
         /// <summary>
         /// Why <paramref name="combatant"/> can't take <paramref name="action"/> — Dodge, Grounded or
@@ -213,6 +237,82 @@ namespace WoundBound.Game.Combat
             return MovesAvailable(combatant) < 1
                 ? "Nothing left to pay with: the first takes the move, a second the action, a third an extra action bought with Stamina."
                 : null;
+        }
+
+        /// <summary>
+        /// Why <paramref name="actor"/> can't Grab, Shove or Trip <paramref name="target"/> right
+        /// now, or null if they can (Core Rules §9, "Grab, Shove, Trip and Drag"): an enemy within
+        /// their own reach — the body's, not a weapon's — and an action to spend. A Grab wants a
+        /// free hand, and nobody holds two creatures at once. A Swarm can't be put hands on at all.
+        /// </summary>
+        public static string? ControlRefusal(Combatant actor, ControlAction action, Combatant target)
+        {
+            if (actor.IsOutOfFight)
+            {
+                return $"{actor.Name} is in no state to.";
+            }
+
+            if (target.Side == actor.Side || target.IsOutOfFight)
+            {
+                return $"{target.Name} isn't an enemy still fighting.";
+            }
+
+            if (actor.ActionsRemaining < 1)
+            {
+                return "No action left to do it with.";
+            }
+
+            if (actor.IsSwarm)
+            {
+                return "A Swarm has no hands to put on anybody.";
+            }
+
+            if (target.IsSwarm)
+            {
+                return "A Swarm can be neither grabbed, shoved nor tripped: there's no body in it to take hold of.";
+            }
+
+            var distance = actor.Position.DistanceTo(target.Position);
+            if (distance > actor.OwnReach)
+            {
+                return $"Out of reach — hands reach {actor.OwnReach} square(s), whatever is in them, and {target.Name} is {distance} away.";
+            }
+
+            return action switch
+            {
+                ControlAction.Grab when actor.Holding is { } held => $"Already holding {held.Name} — one creature at a time.",
+                ControlAction.Grab when target.HeldBy is { } holder => $"{holder.Name} already has hold of {target.Name}.",
+                ControlAction.Grab when !actor.HasFreeHand => "No free hand — both are full. Grabbing needs a hand holding no weapon, shield or light.",
+                ControlAction.Trip when target.IsProne => $"{target.Name} is already on the ground.",
+                _ => null,
+            };
+        }
+
+        /// <summary>Why <paramref name="combatant"/> can't stand up from Prone now, or null if they can. Standing costs a move (Core Rules §9, "Prone").</summary>
+        public static string? StandUpRefusal(Combatant combatant)
+        {
+            if (!combatant.IsProne)
+            {
+                return $"{combatant.Name} isn't on the ground.";
+            }
+
+            if (combatant.IsStandingGround)
+            {
+                return "Standing your ground — no move of any kind until your next turn.";
+            }
+
+            return MovesAvailable(combatant) < 1 ? "Standing costs a move, and there's nothing left this turn to pay for it with." : null;
+        }
+
+        /// <summary>Why <paramref name="combatant"/> can't try to break free of a hold now, or null if they can. It takes the action (Core Rules §9, "Held").</summary>
+        public static string? BreakFreeRefusal(Combatant combatant)
+        {
+            if (combatant.HeldBy is null)
+            {
+                return $"Nobody has hold of {combatant.Name}.";
+            }
+
+            return combatant.ActionsRemaining < 1 ? "Breaking free takes an action, and there's none left." : null;
         }
 
         public bool CanAttack(Combatant attacker, Combatant target) =>
@@ -382,6 +482,7 @@ namespace WoundBound.Game.Combat
             var takenUp = swapper.InHandWeapon?.Name ?? "empty hands";
 
             Write($"{swapper.Name} swaps loadouts — {putAway} away, {takenUp} in hand — for {paidWith}.");
+            CheckHolds();
             return true;
         }
 
@@ -424,6 +525,57 @@ namespace WoundBound.Game.Combat
             Write($"{bracer.Name} {CombatActionCatalog.ActionLogLine(action, extra: false).TrimEnd('.')} — {now}, for {paidWith}.");
         }
 
+        /// <summary>
+        /// Grabs, shoves or trips <paramref name="target"/> with the action: an unarmed attack roll
+        /// against their Stability Threshold (Core Rules §9, "Grab, Shove, Trip and Drag").
+        /// </summary>
+        public bool TryControl(ControlAction action, Combatant target)
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } actor || ControlRefusal(actor, action, target) is not null)
+            {
+                return false;
+            }
+
+            ResolveControl(actor, action, target, opportunityBonus: false, () => CheckForEnd());
+            return true;
+        }
+
+        /// <summary>Stands up from Prone, for a move. Like a swap it isn't movement: nobody's reach is left (Core Rules §9, "Prone").</summary>
+        public bool TryStandUp()
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } stander || StandUpRefusal(stander) is not null)
+            {
+                return false;
+            }
+
+            StandUp(stander);
+            return true;
+        }
+
+        /// <summary>Spends the action trying to break the hold: the Grab's roll, against the holder's Stability Threshold (Core Rules §9, "Held").</summary>
+        public bool TryBreakFree()
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } breaker || BreakFreeRefusal(breaker) is not null)
+            {
+                return false;
+            }
+
+            ResolveBreakFree(breaker, () => CheckForEnd());
+            return true;
+        }
+
+        /// <summary>Lets go of whoever the active character is holding. Costs nothing (Core Rules §9, "Held").</summary>
+        public bool TryLetGo()
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { Holding: not null } holder)
+            {
+                return false;
+            }
+
+            Release(holder, "lets go");
+            return true;
+        }
+
         /// <summary>Spends 1 Stamina for an extra action this turn (Core Rules §6), handing the GM a banked Opportunity.</summary>
         public bool TryBuyExtraAction()
         {
@@ -458,19 +610,19 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
-        /// Answers <see cref="Pending"/>: <paramref name="dodge"/> spends 1 Stamina for +2 Dodge
-        /// Threshold against the roll (a tactical spend, handing the GM an Immediate Opportunity);
-        /// otherwise the blow lands as rolled. Returns false if there was nothing to answer, or the
-        /// dodge can no longer be paid for.
+        /// Answers <see cref="Pending"/>: <paramref name="spend"/> pays 1 Stamina for what it offers
+        /// — a panic dodge, standing firm, or arresting a Shove — a tactical spend that hands the GM
+        /// an Immediate Opportunity; otherwise it happens as rolled. Returns false if there was
+        /// nothing to answer, or the spend can no longer be paid for.
         /// </summary>
-        public bool RespondToReaction(bool dodge)
+        public bool RespondToReaction(bool spend)
         {
             if (Phase != EncounterPhase.AwaitingReaction || Pending is not { } pending || resumeAfterReaction is not { } resume)
             {
                 return false;
             }
 
-            if (dodge)
+            if (spend)
             {
                 if (TacticalSpendRefusal(pending.Defender) is not null)
                 {
@@ -484,7 +636,7 @@ namespace WoundBound.Game.Combat
             Pending = null;
             resumeAfterReaction = null;
             Phase = phaseBeforeReaction;
-            resume(dodge);
+            resume(spend);
             return true;
         }
 
@@ -689,7 +841,19 @@ namespace WoundBound.Game.Combat
                     throw new InvalidOperationException($"The GM brain closed in with {adversary.Name}, which took a turn this round or has already moved.");
                 }
 
-                if (adversary.IsStandingGround || PriceOfMove(adversary, closeIn.Square) is not { } cost || cost > 1)
+                if (closeIn.StandUp)
+                {
+                    if (!adversary.IsProne)
+                    {
+                        throw new InvalidOperationException($"The GM brain stood {adversary.Name} up at the round's end, but it isn't Prone.");
+                    }
+
+                    adversary.SetCondition(CharacterCondition.Prone, false);
+                    Write($"{adversary.Name} didn't act this round, and gets to its feet.");
+                    continue;
+                }
+
+                if (!CanMoveItself(adversary) || PriceOfMove(adversary, closeIn.Square) is not { } cost || cost > 1)
                 {
                     throw new InvalidOperationException($"The GM brain closed {adversary.Name} in to {closeIn.Square}, which isn't a single free move away.");
                 }
@@ -700,6 +864,7 @@ namespace WoundBound.Game.Combat
                 adversary.Position = closeIn.Square;
                 var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(closeIn.Square));
                 Write($"{adversary.Name} didn't act this round, and closes in {from.DistanceTo(closeIn.Square)} square(s) ({band}).");
+                CheckHolds();
             }
         }
 
@@ -789,6 +954,50 @@ namespace WoundBound.Game.Combat
                     ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done));
                     return;
 
+                case GmStep.Control control:
+                    if (ControlRefusal(actor, control.Action, control.Target) is { } refused)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} {control.Action} {control.Target.Name}: {refused}");
+                    }
+
+                    if (control.WithAdvantage && !turn.BonusAvailable)
+                    {
+                        throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s bonus, which this turn can't take.");
+                    }
+
+                    turn.HasAttacked = true;
+                    turn.BonusAvailable &= !control.WithAdvantage;
+                    ResolveControl(actor, control.Action, control.Target, control.WithAdvantage, () => TakeStep(turn, done));
+                    return;
+
+                case GmStep.StandUp:
+                    if (StandUpRefusal(actor) is { } cannotStand)
+                    {
+                        throw new InvalidOperationException($"The GM brain stood {actor.Name} up: {cannotStand}");
+                    }
+
+                    StandUp(actor);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.BreakFree:
+                    if (BreakFreeRefusal(actor) is { } cannotBreak)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} break free: {cannotBreak}");
+                    }
+
+                    turn.HasAttacked = true;
+                    ResolveBreakFree(actor, () => TakeStep(turn, done));
+                    return;
+
+                case GmStep.LetGo when actor.Holding is not null:
+                    Release(actor, "lets go");
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.LetGo:
+                    throw new InvalidOperationException($"The GM brain had {actor.Name} let go, but it's holding nobody.");
+
                 case GmStep.StandGround brace:
                     if (StandGroundRefusal(actor, brace.Action) is { } why)
                     {
@@ -856,6 +1065,7 @@ namespace WoundBound.Game.Combat
 
             var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(square));
             Write($"{mover.Name} moves {from.DistanceTo(square)} square(s) ({band}) for {paidWith}.");
+            CheckHolds();
         }
 
         /// <summary>
@@ -896,8 +1106,9 @@ namespace WoundBound.Game.Combat
             }
 
             // Standing your ground costs the blow: Disadvantage on every attack roll while it lasts,
-            // reaction attacks included (Core Rules §10). An Advantage cancels it.
-            var disadvantage = attacker.IsStandingGround;
+            // reaction attacks included (Core Rules §10) — as does being Off-guard (§9,
+            // "Conditions"). An Advantage cancels it.
+            var disadvantage = AttacksAtDisadvantage(attacker);
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(opportunityBonus, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
                 .ToList();
@@ -908,56 +1119,389 @@ namespace WoundBound.Game.Combat
                 attacker.ActionsRemaining--;
             }
 
-            if (!DodgeWouldTurn(roll, plan.DodgeThreshold) || TacticalSpendRefusal(target) is not null)
+            if (!BoostWouldTurn(roll, plan.DodgeThreshold))
             {
                 then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged: false));
                 return;
             }
 
-            if (target.Side == Side.Adversaries)
-            {
-                // The GM brain decides whether its creature spends the Stamina. An adversary's spend
-                // hands nobody an Opportunity.
-                if (!gm.PanicDodges(view, new PendingReaction(target, attacker, roll, plan.DodgeThreshold)))
-                {
-                    then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged: false));
-                    return;
-                }
+            var riposte = roll.IsCritical ? " — a critical, so a dodge would Riposte it" : string.Empty;
+            OfferReaction(
+                new PendingReaction(ReactionKind.PanicDodge, target, attacker, roll, plan.DodgeThreshold,
+                    $"{attacker.Name}'s {attacker.Attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
+                    "A panic dodge (1 Stamina, +2) would make it miss."),
+                dodged => then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged)));
+        }
 
-                PayTacticalSpend(target, CombatActionCatalog.ReactionStaminaCost);
-                Write($"{target.Name} panic dodges (1 Stamina).");
-                then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged: true));
+        /// <summary>Standing their ground or Off-guard: either puts Disadvantage on an attacker's roll (Core Rules §9, §10).</summary>
+        private static bool AttacksAtDisadvantage(Combatant attacker) => attacker.IsStandingGround || attacker.IsOffGuard;
+
+        /// <summary>
+        /// Whether +2 to the Threshold, decided after seeing the roll, would turn this success into
+        /// a failure. Nothing answers a double twelve — "there is no Threshold to reach" (Core Rules §10).
+        /// </summary>
+        private static bool BoostWouldTurn(RollResult roll, int threshold) =>
+            roll.Success == true
+            && !roll.IsAbsoluteSuccess
+            && roll.Total < threshold + ThresholdModifierCalculator.ReactionBonus;
+
+        /// <summary>
+        /// Offers <paramref name="offer"/>'s defender their 1-Stamina answer, if they can pay for it,
+        /// and carries on with whether they took it — already paid for when they did. The GM brain
+        /// answers for its own creatures, whose spends hand nobody an Opportunity; a character's
+        /// answer is waited for, through <see cref="Pending"/>.
+        /// </summary>
+        private void OfferReaction(PendingReaction offer, Action<bool> then)
+        {
+            var defender = offer.Defender;
+            if (TacticalSpendRefusal(defender) is not null)
+            {
+                then(false);
                 return;
             }
 
-            Pending = new PendingReaction(target, attacker, roll, plan.DodgeThreshold);
+            if (defender.Side == Side.Adversaries)
+            {
+                var takes = offer.Kind switch
+                {
+                    ReactionKind.PanicDodge => gm.PanicDodges(view, offer),
+                    ReactionKind.StandFirm => gm.StandsFirm(view, offer),
+                    _ => gm.ArrestsShove(view, offer),
+                };
+
+                if (takes)
+                {
+                    PayTacticalSpend(defender, CombatActionCatalog.ReactionStaminaCost);
+                    Write(offer.Kind switch
+                    {
+                        ReactionKind.PanicDodge => $"{defender.Name} panic dodges (1 Stamina).",
+                        ReactionKind.StandFirm => $"{defender.Name} stands firm (1 Stamina, +2 ST).",
+                        _ => $"{defender.Name} arrests the shove (1 Stamina).",
+                    });
+                }
+
+                then(takes);
+                return;
+            }
+
+            Pending = offer;
             phaseBeforeReaction = Phase;
             Phase = EncounterPhase.AwaitingReaction;
-            resumeAfterReaction = dodged => then(FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, dodged));
-
-            var riposte = roll.IsCritical ? " — a critical, so a dodge would Riposte it" : string.Empty;
-            Write($"{attacker.Name}'s {attacker.Attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
-                  $"A panic dodge (1 Stamina, +2) would make it miss.");
+            resumeAfterReaction = then;
+            Write(offer.Prompt);
         }
 
         /// <summary>
-        /// Whether +2 Dodge Threshold, decided after seeing the roll, would turn this hit into a miss.
-        /// Nothing answers a double twelve — "there is no Threshold to reach" (Core Rules §10).
+        /// A Grab, Shove or Trip: an unarmed attack roll — 2d12 + Tier + the unarmed stat, or a foe's
+        /// Attack bonus — against the target's Stability Threshold, with whatever Advantage or
+        /// Disadvantage an attack would have. It deals no damage. The target may stand firm after
+        /// seeing the roll (Core Rules §9, "Grab, Shove, Trip and Drag"; §10, "Stability Threshold").
         /// </summary>
-        private static bool DodgeWouldTurn(RollResult roll, int dodgeThreshold) =>
-            roll.Success == true
-            && !roll.IsAbsoluteSuccess
-            && roll.Total < dodgeThreshold + ThresholdModifierCalculator.ReactionBonus;
+        private void ResolveControl(Combatant actor, ControlAction action, Combatant target, bool opportunityBonus, Action then)
+        {
+            if (opportunityBonus)
+            {
+                Write($"The GM spends {SpendOpportunity()} Opportunity on {actor.Name}'s bonus: Advantage.");
+            }
+
+            var threshold = target.StabilityThreshold;
+            var roll = RollAgainst(actor.UnarmedAttackModifier, threshold, opportunityBonus, AttacksAtDisadvantage(actor));
+            actor.ActionsRemaining--;
+
+            var verb = Verb(action);
+            if (!BoostWouldTurn(roll, threshold))
+            {
+                FinishControl(actor, action, target, roll, threshold, stoodFirm: false, then);
+                return;
+            }
+
+            OfferReaction(
+                new PendingReaction(ReactionKind.StandFirm, target, actor, roll, threshold,
+                    $"{actor.Name} tries to {verb} {target.Name}: {roll.Total} against ST {threshold}. " +
+                    "Standing firm (1 Stamina, +2 ST) would stop it."),
+                stood => FinishControl(actor, action, target, roll, threshold, stood, then));
+        }
+
+        private void FinishControl(Combatant actor, ControlAction action, Combatant target, RollResult rolled, int threshold, bool stoodFirm, Action then)
+        {
+            var roll = stoodFirm ? Reread(rolled, threshold + ThresholdModifierCalculator.ReactionBonus) : rolled;
+            var line = $"{actor.Name} tries to {Verb(action)} {target.Name}: {DescribeRoll(roll)} vs ST {roll.Threshold}" +
+                       (stoodFirm ? $" (+{ThresholdModifierCalculator.ReactionBonus} standing firm)" : string.Empty);
+
+            if (roll.Success != true)
+            {
+                // A critical failure puts the one who lunged on the ground, in place of the wound a
+                // failed attack costs (Core Rules §9, "Criticals"). Only a Dodge boost can Riposte,
+                // so a critical that standing firm turned aside is merely a failure.
+                var overbalanced = roll.IsCritical && rolled.Success != true;
+                Write(line + (overbalanced ? $" — critical failure! {actor.Name} overbalances and goes down, Prone." : " — fails."));
+                if (overbalanced)
+                {
+                    actor.SetCondition(CharacterCondition.Prone, true);
+                }
+
+                then();
+                return;
+            }
+
+            // "A critical success adds another effect instead": a Shove also trips, a Trip also
+            // shoves, a Grab leaves the target Off-guard for as long as the hold lasts.
+            var critical = roll.IsCritical;
+            switch (action)
+            {
+                case ControlAction.Grab:
+                    Write(line + (critical ? " — critical! Held, and Off-guard while the hold lasts." : $" — {target.Name} is Held."));
+                    TakeHold(actor, target, offGuard: critical);
+                    then();
+                    return;
+
+                case ControlAction.Trip:
+                    Write(line + (critical ? $" — critical! {target.Name} goes down, and is shoved too." : $" — {target.Name} goes down, Prone."));
+                    target.SetCondition(CharacterCondition.Prone, true);
+                    if (critical)
+                    {
+                        Shove(actor, target, then);
+                        return;
+                    }
+
+                    then();
+                    return;
+
+                default:
+                    Write(line + (critical ? " — critical! A shove that also trips." : " — a shove."));
+                    Shove(actor, target, () =>
+                    {
+                        if (critical && !target.IsOutOfFight)
+                        {
+                            target.SetCondition(CharacterCondition.Prone, true);
+                            Write($"{target.Name} ends the push on the ground, Prone.");
+                        }
+
+                        then();
+                    });
+                    return;
+            }
+        }
+
+        /// <summary>
+        /// Forced Movement from a Shove (Core Rules §9): up to the shover's own reach, in a straight
+        /// line away from them. It stops at anything solid — a creature, or the board's edge — and the
+        /// distance left uncrossed is Body wounds, armour absorbing as usual. The target may arrest
+        /// it for 1 Stamina, and leaving an enemy's reach on the way draws reactions.
+        /// </summary>
+        private void Shove(Combatant shover, Combatant target, Action then)
+        {
+            var step = (X: Math.Sign(target.Position.X - shover.Position.X), Y: Math.Sign(target.Position.Y - shover.Position.Y));
+            var distance = shover.OwnReach;
+            var destination = target.Position;
+            var crossed = 0;
+            string? stoppedBy = null;
+
+            while (crossed < distance)
+            {
+                var next = new GridPosition(destination.X + step.X, destination.Y + step.Y);
+                if (!IsOnBoard(next))
+                {
+                    stoppedBy = "the edge of the field";
+                    break;
+                }
+
+                if (At(next) is { } inTheWay)
+                {
+                    stoppedBy = inTheWay.Name;
+                    break;
+                }
+
+                destination = next;
+                crossed++;
+            }
+
+            var impact = distance - crossed;
+            var into = stoppedBy is null ? string.Empty : $" into {stoppedBy} — {impact} Body before armour";
+
+            OfferReaction(
+                new PendingReaction(ReactionKind.Arrest, target, shover, Roll: null, Threshold: 0,
+                    $"{shover.Name} shoves {target.Name} {crossed} square(s){into}. Arresting it (1 Stamina) keeps them where they stand.",
+                    ImpactWounds: impact),
+                arrested =>
+                {
+                    if (arrested)
+                    {
+                        Write($"{target.Name} digs in and goes nowhere.");
+                        then();
+                        return;
+                    }
+
+                    var from = target.Position;
+
+                    // Shoved out of an enemy's reach is leaving it (Core Rules §9, "Forced Movement") —
+                    // the shover's own included. Only the GM's creatures make reactions yet.
+                    var leftBehind = new Queue<Combatant>(target.Side == Side.Party
+                        ? Fighting(Side.Adversaries).Where(a => a.CanReach(from) && !a.CanReach(destination))
+                        : Enumerable.Empty<Combatant>());
+
+                    StrikeAtLeaver(target, leftBehind, () =>
+                    {
+                        if (!target.IsOutOfFight)
+                        {
+                            target.Position = destination;
+                            if (crossed > 0)
+                            {
+                                Write($"{target.Name} is pushed {crossed} square(s).");
+                            }
+
+                            if (impact > 0)
+                            {
+                                var absorbed = Math.Min(impact, InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false));
+                                TakeBodyWounds(target, impact - absorbed);
+                                Write($"{target.Name} is driven into {stoppedBy}: {impact} Body" +
+                                      (absorbed > 0 ? $", armour absorbs {absorbed}" : string.Empty) +
+                                      (target.IsOutOfFight ? $", and is out of the fight." : $" — {target.Body}/{target.BodyMax} Body."));
+                            }
+                        }
+
+                        CheckHolds();
+                        then();
+                    });
+                });
+        }
+
+        /// <summary>
+        /// The Held creature's action: "the same roll a Grab uses" against the holder's Stability
+        /// Threshold, which the holder may raise by standing firm (Core Rules §9, "Held").
+        /// </summary>
+        private void ResolveBreakFree(Combatant breaker, Action then)
+        {
+            var holder = breaker.HeldBy!;
+            var threshold = holder.StabilityThreshold;
+            var roll = RollAgainst(breaker.UnarmedAttackModifier, threshold, advantage: false, AttacksAtDisadvantage(breaker));
+            breaker.ActionsRemaining--;
+
+            void Finish(bool stoodFirm)
+            {
+                var final = stoodFirm ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                var line = $"{breaker.Name} strains against {holder.Name}'s hold: {DescribeRoll(final)} vs ST {final.Threshold}" +
+                           (stoodFirm ? $" (+{ThresholdModifierCalculator.ReactionBonus} standing firm)" : string.Empty);
+                if (final.Success == true)
+                {
+                    Write(line + " — breaks free!");
+                    Release(holder, "loses their grip");
+                }
+                else
+                {
+                    Write(line + " — held fast.");
+                }
+
+                then();
+            }
+
+            if (!BoostWouldTurn(roll, threshold))
+            {
+                Finish(false);
+                return;
+            }
+
+            OfferReaction(
+                new PendingReaction(ReactionKind.StandFirm, holder, breaker, roll, threshold,
+                    $"{breaker.Name} tries to break {holder.Name}'s hold: {roll.Total} against ST {threshold}. " +
+                    "Standing firm (1 Stamina, +2 ST) would keep hold."),
+                Finish);
+        }
+
+        /// <summary>Stands <paramref name="stander"/> up for a move — paid like a swap, and like a swap not movement.</summary>
+        private void StandUp(Combatant stander)
+        {
+            var paidWith = PayMoves(stander, 1);
+            stander.SetCondition(CharacterCondition.Prone, false);
+            Write($"{stander.Name} gets to their feet, for {paidWith}.");
+        }
+
+        private void TakeHold(Combatant holder, Combatant target, bool offGuard)
+        {
+            holder.Holding = target;
+            target.HeldBy = holder;
+            target.SetCondition(CharacterCondition.Held, true);
+            if (offGuard)
+            {
+                target.SetCondition(CharacterCondition.OffGuard, true);
+            }
+        }
+
+        /// <summary>Ends <paramref name="holder"/>'s hold, and with it the Held — and a critical Grab's Off-guard.</summary>
+        private void Release(Combatant holder, string how)
+        {
+            if (holder.Holding is not { } held)
+            {
+                return;
+            }
+
+            holder.Holding = null;
+            held.HeldBy = null;
+            held.SetCondition(CharacterCondition.Held, false);
+            held.SetCondition(CharacterCondition.OffGuard, false);
+            Write($"{holder.Name} {how} — {held.Name} is no longer Held.");
+        }
+
+        /// <summary>
+        /// Ends every hold the rules say is over (Core Rules §9, "Held"): the holder out of the fight,
+        /// either of them out of the holder's own reach, or the holding hand taken up with something.
+        /// Called after anything that could change one of those.
+        /// </summary>
+        private void CheckHolds()
+        {
+            foreach (var holder in combatants.Where(c => c.Holding is not null).ToList())
+            {
+                var held = holder.Holding!;
+                var why = holder.IsOutOfFight ? "is in no state to hold on"
+                    : held.IsOutOfFight ? "lets the body drop"
+                    : holder.Position.DistanceTo(held.Position) > holder.OwnReach ? "can no longer reach to hold on"
+                    : !holder.HasFreeHand ? "has no hand free to hold with"
+                    : null;
+
+                if (why is not null)
+                {
+                    Release(holder, why);
+                }
+            }
+        }
+
+        /// <summary>2d12 + <paramref name="modifier"/> against <paramref name="threshold"/>, a third die rolled for Advantage or Disadvantage.</summary>
+        private RollResult RollAgainst(int modifier, int threshold, bool advantage, bool disadvantage)
+        {
+            var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
+                .Select(_ => dice.Roll(RollCalculator.HighestFace))
+                .ToList();
+            return RollCalculator.Resolve(rolled, modifier, threshold, advantage, disadvantage);
+        }
+
+        /// <summary>The same dice, read against a raised Threshold.</summary>
+        private static RollResult Reread(RollResult roll, int threshold) =>
+            RollCalculator.Resolve(roll.AllRolledDice, roll.Modifier, threshold, roll.AppliedAdvantage, roll.AppliedDisadvantage);
+
+        private static string Verb(ControlAction action) => action switch
+        {
+            ControlAction.Grab => "grab",
+            ControlAction.Shove => "shove",
+            _ => "trip",
+        };
+
+        /// <summary>"(5+3)+4 = 12", with any dropped third die.</summary>
+        private static string DescribeRoll(RollResult roll)
+        {
+            var sign = roll.Modifier >= 0 ? "+" : "−";
+            var dropped = RollCalculator.DroppedDice(roll);
+            var extra = roll.AppliedAdvantage ? $" (Advantage, dropped {string.Join(", ", dropped)})"
+                : roll.AppliedDisadvantage ? $" (Disadvantage, dropped {string.Join(", ", dropped)})"
+                : string.Empty;
+            return $"({string.Join("+", roll.CountedDice)}){sign}{Math.Abs(roll.Modifier)} = {roll.Total}{extra}";
+        }
 
         private AttackOutcome FinishAttack(
             Combatant attacker, Combatant target, RollResult rolled, AttackPlan plan, bool usedOpportunity, bool asReaction, bool dodged)
         {
             // Re-read the same dice against the raised Threshold. A dodged critical comes back a
             // critical failure, which is exactly what a Riposte is (Core Rules §10).
-            var roll = dodged
-                ? RollCalculator.Resolve(rolled.AllRolledDice, rolled.Modifier, plan.DodgeThreshold + ThresholdModifierCalculator.ReactionBonus,
-                    rolled.AppliedAdvantage, rolled.AppliedDisadvantage)
-                : rolled;
+            var roll = dodged ? Reread(rolled, plan.DodgeThreshold + ThresholdModifierCalculator.ReactionBonus) : rolled;
 
             int rolledDamage = 0, absorbed = 0, dealt = 0;
             var attackerWounded = false;
@@ -1082,6 +1626,9 @@ namespace WoundBound.Game.Combat
                 return true;
             }
 
+            // Whoever just went down lets go, or is let go of.
+            CheckHolds();
+
             if (!Fighting(Side.Party).Any())
             {
                 Phase = EncounterPhase.Defeat;
@@ -1132,7 +1679,7 @@ namespace WoundBound.Game.Combat
             var dice = string.Join("+", roll.CountedDice);
             var dropped = RollCalculator.DroppedDice(roll);
             var advantage = roll.AppliedAdvantage ? $" (Advantage, dropped {string.Join(", ", dropped)})"
-                : roll.AppliedDisadvantage ? $" (Disadvantage for standing their ground, dropped {string.Join(", ", dropped)})"
+                : roll.AppliedDisadvantage ? $" (Disadvantage for {DisadvantageReason(outcome.Attacker)}, dropped {string.Join(", ", dropped)})"
                 : outcome.UsedOpportunity ? " (Advantage and Disadvantage cancel)"
                 : string.Empty;
             var sign = roll.Modifier >= 0 ? "+" : "−";
@@ -1167,6 +1714,13 @@ namespace WoundBound.Game.Combat
 
             return line;
         }
+
+        private static string DisadvantageReason(Combatant attacker) => (attacker.IsStandingGround, attacker.IsOffGuard) switch
+        {
+            (true, true) => "standing their ground and being Off-guard",
+            (true, false) => "standing their ground",
+            _ => "being Off-guard",
+        };
 
         private void Write(string line)
         {

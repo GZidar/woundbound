@@ -111,8 +111,8 @@ public class StandingYourGroundTests
         encounter.RunAdversaryTurn();
 
         var pending = encounter.Pending!;
-        Assert.Equal(16, pending.DodgeThreshold);
-        Assert.Equal(18, pending.RaisedDodgeThreshold);
+        Assert.Equal(16, pending.Threshold);
+        Assert.Equal(18, pending.RaisedThreshold);
     }
 
     [Fact]

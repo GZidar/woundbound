@@ -30,6 +30,15 @@ namespace WoundBound.Game.Combat.Brains
         /// asked when the dodge would turn the hit and the character could pay for it.
         /// </summary>
         bool PanicDodges(BattleView view, PendingReaction reaction);
+
+        /// <summary>
+        /// Whether to spend 1 Stamina for +2 Stability Threshold against a Grab, Shove, Trip or
+        /// break-free that would otherwise work. Only asked when it would stop it.
+        /// </summary>
+        bool StandsFirm(BattleView view, PendingReaction reaction);
+
+        /// <summary>Whether to spend 1 Stamina arresting a Shove, and stay put.</summary>
+        bool ArrestsShove(BattleView view, PendingReaction reaction);
     }
 
     /// <summary>One thing a party member does on their turn — one click.</summary>
@@ -48,6 +57,18 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Spend 1 Stamina on an extra action.</summary>
         public sealed record BuyExtraAction : PartyStep;
+
+        /// <summary>Grab, Shove or Trip an enemy within the character's own reach.</summary>
+        public sealed record Control(ControlAction Action, Combatant Target) : PartyStep;
+
+        /// <summary>Stand up from Prone, for a move.</summary>
+        public sealed record StandUp : PartyStep;
+
+        /// <summary>Spend the action trying to break a hold.</summary>
+        public sealed record BreakFree : PartyStep;
+
+        /// <summary>Let go of whoever they're holding.</summary>
+        public sealed record LetGo : PartyStep;
 
         /// <summary>Take Dodge, Grounded or Resolute.</summary>
         public sealed record StandGround(CombatAction Action) : PartyStep;

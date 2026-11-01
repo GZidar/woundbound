@@ -54,6 +54,33 @@ namespace WoundBound.Game.Combat
 
         public int? ResolveThreshold => BaseResolveThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Resolve);
 
+        /// <summary>
+        /// The conditions this creature is under (Core Rules §9, "Conditions"), as the Rules
+        /// library keeps them — a set, in the order they went on. Change them through
+        /// <see cref="SetCondition"/>, which keeps Off-guard's −2 DT in step.
+        /// </summary>
+        public IReadOnlyList<CharacterCondition> Conditions => conditions;
+
+        private List<CharacterCondition> conditions = new();
+
+        public bool IsProne => conditions.Contains(CharacterCondition.Prone);
+
+        /// <summary>Off-guard (Core Rules §9): −2 Dodge Threshold, and Disadvantage on attack rolls. Prone makes a creature so.</summary>
+        public bool IsOffGuard => ConditionCatalog.IsOffGuard(conditions);
+
+        /// <summary>Whoever has hold of this creature, if anybody (Core Rules §9, "Held").</summary>
+        public Combatant? HeldBy { get; internal set; }
+
+        /// <summary>The creature this one has hold of, if any — one at a time.</summary>
+        public Combatant? Holding { get; internal set; }
+
+        /// <summary>Puts <paramref name="condition"/> on or takes it off, and re-reads Off-guard's −2 DT from the result.</summary>
+        internal void SetCondition(CharacterCondition condition, bool on)
+        {
+            conditions = ConditionCatalog.Set(conditions, condition, on);
+            ThresholdModifiers = ConditionCatalog.WithOffGuard(ThresholdModifiers, conditions);
+        }
+
         /// <summary>Which bracing actions — Dodge, Grounded, Resolute — this creature has standing, until the start of its next turn.</summary>
         public IEnumerable<CombatAction> StandingGround => ThresholdModifiers
             .Where(m => m.StackKey == ThresholdModifierCalculator.BracingActionKey)
@@ -93,7 +120,44 @@ namespace WoundBound.Game.Combat
 
         public int Reach => Attack.Reach;
 
-        public Speed Speed { get; init; } = Speed.Normal;
+        /// <summary>The creature's own Speed — Normal for every player character, the statblock's for a foe.</summary>
+        public Speed InnateSpeed { get; init; } = Speed.Normal;
+
+        /// <summary>What a move is priced at right now: Crawling while Prone (Core Rules §9, "Prone and crawling").</summary>
+        public Speed Speed => ConditionCatalog.Speed(conditions, InnateSpeed);
+
+        /// <summary>
+        /// A Swarm: no body in it to take hold of, and no ground it holds to be moved off, so it
+        /// can be neither grabbed, shoved nor tripped — and grabs nobody in return (GM Reference §3).
+        /// </summary>
+        public bool IsSwarm { get; init; }
+
+        /// <summary>
+        /// The body's reach, not a weapon's — what a Grab, Shove or Trip reaches, and how far a
+        /// Shove pushes (Core Rules §9, "Grab, Shove, Trip and Drag"). 1 for a character; a foe's
+        /// statblock Reach, which is its own.
+        /// </summary>
+        public int OwnReach => Build is not null ? WeaponCalculator.DefaultOwnReach : StatblockAttack?.Reach ?? WeaponCalculator.DefaultOwnReach;
+
+        /// <summary>
+        /// What a Grab, Shove, Trip or break-free adds to its 2d12: an unarmed attack's Tier + stat
+        /// for a character, and a foe's Attack bonus, "since that number already is its 2d12 + Tier
+        /// + stat" (GM Reference §2).
+        /// </summary>
+        public int UnarmedAttackModifier => Build is { } build
+            ? CharacterCalculator.WeaponAttackBonus(build, WeaponCalculator.Unarmed())
+                ?? throw new InvalidOperationException($"{Name} needs a Class Principle before they can grab anybody.")
+            : StatblockAttack?.AttackModifier ?? 0;
+
+        /// <summary>
+        /// A hand holding no weapon, shield or light (Core Rules §9, "Grab"). A character counts
+        /// what's in hand; a foe is taken to have one unless it's a Swarm.
+        /// </summary>
+        public bool HasFreeHand => Build is { } build
+            ? InventoryCalculator.InHandWeapons(build).Sum(w => InventoryCalculator.FillsBothHands(w) ? 2 : 1)
+              + InventoryCalculator.InHandShields(build).Count
+              + InventoryCalculator.LitLightsHeld(build) < 2
+            : !IsSwarm;
 
         /// <summary>
         /// GM Reference §3, "Minion Rule": any Body hit that gets past its armour removes it from

@@ -136,7 +136,7 @@ public class PartyTests
         // A dice roll aimed at a character might be waiting on a panic dodge; take the hit.
         while (encounter.Phase == EncounterPhase.AwaitingReaction)
         {
-            encounter.RespondToReaction(dodge: false);
+            encounter.RespondToReaction(spend: false);
             while (encounter.Phase == EncounterPhase.AdversaryTurn)
             {
                 encounter.RunAdversaryTurn();

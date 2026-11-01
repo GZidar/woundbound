@@ -88,6 +88,10 @@ public class BotTests
         public PartyStep NextStep(BattleView view, Combatant character) => new PartyStep.Attack(view.Adversaries.First());
 
         public bool PanicDodges(BattleView view, PendingReaction reaction) => true;
+
+        public bool StandsFirm(BattleView view, PendingReaction reaction) => true;
+
+        public bool ArrestsShove(BattleView view, PendingReaction reaction) => true;
     }
 
     [Fact]

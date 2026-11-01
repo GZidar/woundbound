@@ -40,6 +40,19 @@ namespace WoundBound.Game.Combat.Brains
                 return GmStep.End;
             }
 
+            // On its feet before anything else: a Prone creature is Off-guard and crawls.
+            if (actor.IsProne && BattleView.StandUpRefusal(actor) is null)
+            {
+                return new GmStep.StandUp();
+            }
+
+            // Held, with nobody to hit: spend the action getting loose.
+            if (actor.HeldBy is not null && !turn.HasAttacked && !view.EnemiesOf(actor).Any(e => view.CanAttack(actor, e))
+                && BattleView.BreakFreeRefusal(actor) is null)
+            {
+                return new GmStep.BreakFree();
+            }
+
             if (!turn.HasAttacked && view.CanAttack(actor, target))
             {
                 // An extra turn is usually worth more than Advantage, so the bonus only gets an
@@ -72,12 +85,22 @@ namespace WoundBound.Game.Combat.Brains
 
         public virtual bool PanicDodges(BattleView view, PendingReaction reaction) => true;
 
+        public virtual bool StandsFirm(BattleView view, PendingReaction reaction) => true;
+
+        /// <summary>Only when the shove would hurt: a square of ground isn't worth the Stamina otherwise.</summary>
+        public virtual bool ArrestsShove(BattleView view, PendingReaction reaction) => reaction.ImpactWounds > 0;
+
         /// <summary>Nearest first, each a single move toward the nearest character; any already in reach stay put.</summary>
         public virtual GmCloseIn? NextCloseIn(BattleView view, IReadOnlyList<Combatant> stillIdle)
         {
+            if (stillIdle.FirstOrDefault(a => a.IsProne) is { } fallen)
+            {
+                return new GmCloseIn(fallen, fallen.Position, StandUp: true);
+            }
+
             foreach (var adversary in stillIdle.OrderBy(a => NearestTarget(view, a) is { } t ? t.Position.DistanceTo(a.Position) : int.MaxValue))
             {
-                if (adversary.IsStandingGround || NearestTarget(view, adversary) is not { } target || adversary.CanReach(target.Position))
+                if (!Encounter.CanMoveItself(adversary) || NearestTarget(view, adversary) is not { } target || adversary.CanReach(target.Position))
                 {
                     continue;
                 }

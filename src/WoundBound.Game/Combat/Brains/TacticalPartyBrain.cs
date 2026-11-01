@@ -25,14 +25,20 @@ namespace WoundBound.Game.Combat.Brains
     /// <param name="BuyExtraAttacks">Spend Stamina on an extra action to attack again — banking the GM an Opportunity.</param>
     /// <param name="StaminaReserve">Never spend below this. At 0, a character who starts a turn falls unconscious.</param>
     /// <param name="BraceBelowBody">Take the Dodge action when Body has fallen to this fraction of its maximum or below, and an enemy can reach. 0 never braces.</param>
-    /// <param name="PanicDodges">When to panic dodge.</param>
+    /// <param name="PanicDodges">When to panic dodge — and, by the same policy, when to stand firm against a Grab, Shove or Trip.</param>
+    /// <param name="TripForAllies">
+    /// Trip an enemy in reach that isn't a Minion, when an ally still to act this round could
+    /// strike it too — handing them its −2 DT — before swinging. Only where the trip is no harder
+    /// than a blow would be, and never at a Minion, which any hit drops anyway.
+    /// </param>
     public sealed record PartyTactics(
         string Name,
         bool ShootWhenOutOfReach = false,
         bool BuyExtraAttacks = false,
         int StaminaReserve = 1,
         double BraceBelowBody = 0,
-        PanicDodgePolicy PanicDodges = PanicDodgePolicy.Always)
+        PanicDodgePolicy PanicDodges = PanicDodgePolicy.Always,
+        bool TripForAllies = false)
     {
         /// <summary>The ways of playing the simulator compares and the battle screen's bot can be set to.</summary>
         public static IReadOnlyList<PartyTactics> Presets { get; } =
@@ -45,6 +51,8 @@ namespace WoundBound.Game.Combat.Brains
             new("Bow first", ShootWhenOutOfReach: true),
             new("Bow first, extra attacks", ShootWhenOutOfReach: true, BuyExtraAttacks: true),
             new("Bow first, brace when hurt", ShootWhenOutOfReach: true, BraceBelowBody: 0.5),
+            new("Charge, trip for allies", TripForAllies: true),
+            new("Charge, trip for allies, extra attacks", TripForAllies: true, BuyExtraAttacks: true),
         ];
     }
 
@@ -66,15 +74,32 @@ namespace WoundBound.Game.Combat.Brains
                 return PartyStep.End;
             }
 
+            // Up off the floor first: Prone is Off-guard, and crawling is dear.
+            if (character.IsProne && BattleView.StandUpRefusal(character) is null)
+            {
+                return new PartyStep.StandUp();
+            }
+
             // Bracing has to come first: a character who has moved can't, and one who has can't move.
             if (ShouldBrace(view, character))
             {
                 return new PartyStep.StandGround(CombatAction.Dodge);
             }
 
+            if (TripTarget(view, character) is { } toTrip)
+            {
+                return new PartyStep.Control(ControlAction.Trip, toTrip);
+            }
+
             if (BestTarget(view, character) is { } target)
             {
                 return new PartyStep.Attack(target);
+            }
+
+            // Held with nobody to hit: get loose.
+            if (character.HeldBy is not null && character.ActionsRemaining > 0)
+            {
+                return new PartyStep.BreakFree();
             }
 
             if (character.ActionsRemaining == 0)
@@ -108,6 +133,34 @@ namespace WoundBound.Game.Combat.Brains
             PanicDodgePolicy.OnlyRipostes => reaction.WouldRiposte && CanSpare(reaction.Defender),
             _ => false,
         };
+
+        public virtual bool StandsFirm(BattleView view, PendingReaction reaction) =>
+            Tactics.PanicDodges == PanicDodgePolicy.Always && CanSpare(reaction.Defender);
+
+        /// <summary>Only when the shove would drive them into something.</summary>
+        public virtual bool ArrestsShove(BattleView view, PendingReaction reaction) =>
+            reaction.ImpactWounds > 0 && CanSpare(reaction.Defender);
+
+        /// <summary>
+        /// With <see cref="PartyTactics.TripForAllies"/>: a non-Minion in reach, still on its feet,
+        /// that an ally yet to act this round could strike — from where they stand or a move away.
+        /// </summary>
+        private Combatant? TripTarget(BattleView view, Combatant character)
+        {
+            if (!Tactics.TripForAllies || character.ActionsRemaining == 0)
+            {
+                return null;
+            }
+
+            var allies = view.PartyStillToAct.Where(a => a != character && !a.IsOutOfFight).ToList();
+            return view.EnemiesOf(character)
+                .Where(e => !e.IsMinion && BattleView.ControlRefusal(character, ControlAction.Trip, e) is null)
+                .Where(e => e.StabilityThreshold - character.UnarmedAttackModifier
+                            <= view.PlanAttack(character, e).DodgeThreshold - character.Attack.AttackModifier)
+                .Where(e => allies.Any(a => view.PlanAttack(a, e).CanAttack || view.StrikeSquare(a, e) is not null))
+                .OrderByDescending(e => e.Body)
+                .FirstOrDefault();
+        }
 
         private bool ShouldBrace(BattleView view, Combatant character) =>
             Tactics.BraceBelowBody > 0
