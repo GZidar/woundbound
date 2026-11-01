@@ -183,6 +183,7 @@ namespace WoundBoundGame
         private OptionButton thresholdPicker = null!;
         private OptionButton tapPicker = null!;
         private OptionButton effectPicker = null!;
+        private OptionButton shapePicker = null!;
         private readonly Dictionary<NimbleExploit, Button> exploitButtons = new();
         private readonly Dictionary<WeaponManoeuvre, Button> manoeuvreButtons = new();
 
@@ -256,8 +257,27 @@ namespace WoundBoundGame
                 };
             }
 
-            if (spell.Shape == SpellShape.Volume)
+            // An area spell's Shape is named as it's cast: a Line or a Cone starts beside the caster and
+            // is aimed the way of the square clicked.
+            if (spell.Target == SpellTarget.Many && spell.Range != SpellRange.Touch && shapePicker.Selected is 1 or 2)
             {
+                var aim = (System.Math.Sign(square.X - caster.Position.X), System.Math.Sign(square.Y - caster.Position.Y));
+                if (aim == (0, 0))
+                {
+                    return null;
+                }
+
+                return cast with
+                {
+                    Shape = shapePicker.Selected == 1 ? SpellShape.Line : SpellShape.Cone,
+                    Origin = new GridPosition(caster.Position.X + aim.Item1, caster.Position.Y + aim.Item2),
+                    Aim = aim,
+                };
+            }
+
+            if (spell.Target == SpellTarget.Many && spell.Range != SpellRange.Touch)
+            {
+                cast = cast with { Shape = SpellShape.Volume };
                 var across = WoundBound.Game.Combat.SpellArea.Across(spell.Size) - 1;
                 return cast with
                 {
@@ -1146,7 +1166,9 @@ namespace WoundBoundGame
                         ToggleMode = true,
                         TooltipText = $"{spell.SpellType} · {spell.Target} · {(spell.Range == SpellRange.Touch ? "Touch" : spell.Shape?.ToString() ?? "Ray")} · " +
                                       $"{SpellCalculator.SourceLabel(spell.Source)}\n{spell.Notes}\nThen click " +
-                                      (spell.Shape == SpellShape.Volume ? "a square: the block spreads away from you from there." : "who it's for."),
+                                      (spell.Target == SpellTarget.Many && spell.Range != SpellRange.Touch
+                                          ? "a square: a block spreads away from you from there, or a Line or Cone is aimed that way (pick the Shape below)."
+                                          : "who it's for."),
                     };
                     button.Pressed += () =>
                     {
@@ -1181,6 +1203,7 @@ namespace WoundBoundGame
             thresholdPicker.Visible = armedSpell is { SpellType: SpellType.Buff or SpellType.Bane };
             tapPicker.Visible = armedSpell is { Source: MagicSource.ElementalMagic };
             effectPicker.Visible = armedSpell is { SpellType: SpellType.Control };
+            shapePicker.Visible = armedSpell is { Target: SpellTarget.Many } many && many.Range != SpellRange.Touch;
         }
 
         /// <summary>
@@ -1563,7 +1586,12 @@ namespace WoundBoundGame
             effectPicker.AddItem("Confusion: attacks whoever is in reach");
             effectPicker.AddItem("Compulsion: drops its weapon and kneels");
 
-            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker, tapPicker, effectPicker })
+            shapePicker = new OptionButton { TooltipText = "The Shape an area spell goes out in, named as you cast it: a block, a straight Line, or a Cone widening as it goes. A Line or a Cone starts beside you and is aimed the way of the square you click." };
+            shapePicker.AddItem("Shape: Volume (a block)");
+            shapePicker.AddItem("Shape: Line");
+            shapePicker.AddItem("Shape: Cone");
+
+            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker, tapPicker, effectPicker, shapePicker })
             {
                 castOptions.AddChild(option);
             }

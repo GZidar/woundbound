@@ -99,6 +99,19 @@ namespace WoundBound.Game.Combat
 
         /// <summary>How far a Shift carries them, up to what its Tier allows. Null goes as far as it can.</summary>
         public int? Squares { get; init; }
+
+        /// <summary>
+        /// The Shape it's cast in, where the caster names one: "Shape is free, and chosen in the moment"
+        /// (Core Rules §11, "Spell Shape"). A spell over many may go as a Volume, a Line or a Cone; null
+        /// casts it in the Shape it was written with.
+        /// </summary>
+        public SpellShape? Shape { get; init; }
+
+        /// <summary>Where a Line or a Cone starts — its point of origin, priced by its distance like any other.</summary>
+        public GridPosition? Origin { get; init; }
+
+        /// <summary>Which of the eight ways a Line or a Cone is aimed, one square's step.</summary>
+        public (int X, int Y)? Aim { get; init; }
     }
 
     /// <summary>
@@ -156,6 +169,90 @@ namespace WoundBound.Game.Combat
                     yield return new GridPosition(corner.X + dx, corner.Y + dy);
                 }
             }
+        }
+
+        /// <summary>How many squares a Size buys a Line: 4, 9 or 16.</summary>
+        public static int Length(SpellSize size) => size switch
+        {
+            SpellSize.Small => 4,
+            SpellSize.Medium => 9,
+            _ => 16,
+        };
+
+        /// <summary>The Shape <paramref name="cast"/> goes out in: the one named, else the one written, else a Ray.</summary>
+        public static SpellShape ShapeOf(SpellCast cast) =>
+            cast.Spell.Range == SpellRange.Touch ? SpellShape.None : cast.Shape ?? cast.Spell.Shape ?? SpellShape.Ray;
+
+        /// <summary>
+        /// Why <paramref name="spell"/> can't go out as <paramref name="shape"/>, or null if it can: a spell
+        /// over many takes any of the three area Shapes — they cover the same squares' worth, strung
+        /// differently — while one aimed at one creature is a Ray, and one at Touch has none.
+        /// </summary>
+        public static string? ShapeRefusal(SpellDefinition spell, SpellShape shape)
+        {
+            if (spell.Range == SpellRange.Touch || spell.Shape == SpellShape.None)
+            {
+                return shape == SpellShape.None ? null : "A Touch spell has no Shape: it's laid on a body.";
+            }
+
+            var area = shape is SpellShape.Volume or SpellShape.Line or SpellShape.Cone;
+            return spell.Target == SpellTarget.Many
+                ? area ? null : $"{spell.Name} is cast over many: a Volume, a Line or a Cone."
+                : shape == SpellShape.Ray ? null : $"{spell.Name} is cast at one: a Ray.";
+        }
+
+        /// <summary>
+        /// A Line: a straight run one square wide from the origin, as long as the Size allows, along a
+        /// row, a column or a diagonal — corner to corner on the diagonal. It is aimed, not filled, so a
+        /// wall stops it there.
+        /// </summary>
+        public static List<GridPosition> Line(GridPosition origin, (int X, int Y) aim, SpellSize size, Func<GridPosition, bool> isWall)
+        {
+            var squares = new List<GridPosition>();
+            var at = origin;
+            for (var i = 0; i < Length(size) && !isWall(at); i++)
+            {
+                squares.Add(at);
+                at = new GridPosition(at.X + aim.X, at.Y + aim.Y);
+            }
+
+            return squares;
+        }
+
+        /// <summary>
+        /// A Cone: one square wide at the origin and widening as it goes — rows of 1 and 3 at Small, 1, 3
+        /// and 5 at Medium, 1, 3, 5 and 7 at Large. Along a diagonal it's the staircase triangle with its
+        /// point at the origin: rows of 2 and 1, 4 to 1, or 5 to 1 — 3, 10 or 15 squares. Aimed, so
+        /// whatever a wall hides from the origin it doesn't reach.
+        /// </summary>
+        public static List<GridPosition> Cone(GridPosition origin, (int X, int Y) aim, SpellSize size, Func<GridPosition, bool> isWall)
+        {
+            var squares = new List<GridPosition>();
+            if (aim.X != 0 && aim.Y != 0)
+            {
+                var n = size switch { SpellSize.Small => 2, SpellSize.Medium => 4, _ => 5 };
+                for (var i = 0; i < n; i++)
+                {
+                    for (var j = 0; i + j < n; j++)
+                    {
+                        squares.Add(new GridPosition(origin.X + aim.X * i, origin.Y + aim.Y * j));
+                    }
+                }
+            }
+            else
+            {
+                var rows = size switch { SpellSize.Small => 2, SpellSize.Medium => 3, _ => 4 };
+                var across = (X: aim.Y, Y: aim.X);
+                for (var k = 0; k < rows; k++)
+                {
+                    for (var w = -k; w <= k; w++)
+                    {
+                        squares.Add(new GridPosition(origin.X + aim.X * k + across.X * w, origin.Y + aim.Y * k + across.Y * w));
+                    }
+                }
+            }
+
+            return squares.Where(sq => !isWall(sq) && (sq == origin || Sight.Clear(origin, sq, isWall))).ToList();
         }
 
         /// <summary>

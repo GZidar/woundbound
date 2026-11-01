@@ -161,10 +161,16 @@ namespace WoundBound.Game.Combat
 
             // Where it lands (Core Rules §11, "Spell Shape", "Placing a Volume").
             var touch = spell.Range == SpellRange.Touch || spell.Shape == SpellShape.None;
+            var shape = SpellArea.ShapeOf(cast);
+            if (SpellArea.ShapeRefusal(spell, shape) is { } wrongShape)
+            {
+                return CastPlan.Refused(wrongShape);
+            }
+
             GridPosition origin;
             List<GridPosition> squares;
             List<Combatant> caught;
-            if (touch || spell.Shape is null or SpellShape.Ray)
+            if (touch || shape == SpellShape.Ray)
             {
                 if (cast.Target is not { } target)
                 {
@@ -185,7 +191,28 @@ namespace WoundBound.Game.Combat
                 squares = touch ? [] : [origin];
                 caught = [target];
             }
-            else if (spell.Shape == SpellShape.Volume)
+            else if (shape is SpellShape.Line or SpellShape.Cone)
+            {
+                if (cast.Origin is not { } start || cast.Aim is not { } aim || (aim.X == 0 && aim.Y == 0) || Math.Abs(aim.X) > 1 || Math.Abs(aim.Y) > 1)
+                {
+                    return CastPlan.Refused($"A {shape} needs a point of origin and one of the eight ways to aim it.");
+                }
+
+                if (Setting.IsWall(start))
+                {
+                    return CastPlan.Refused("The point of origin is inside a wall.");
+                }
+
+                origin = start;
+                squares = shape == SpellShape.Line
+                    ? SpellArea.Line(start, aim, spell.Size, Setting.IsWall)
+                    : SpellArea.Cone(start, aim, spell.Size, Setting.IsWall);
+                var covered = squares.ToHashSet();
+
+                // Aimed away from the hand that casts it: the caster isn't caught in their own Line or Cone.
+                caught = combatants.Where(c => c != caster && c.OccupiesSquare && covered.Contains(c.Position)).ToList();
+            }
+            else if (shape == SpellShape.Volume)
             {
                 if (cast.Corner is not { } corner)
                 {
@@ -205,7 +232,7 @@ namespace WoundBound.Game.Combat
             }
             else
             {
-                return CastPlan.Refused($"{spell.Shape} spells aren't in the game yet.");
+                return CastPlan.Refused($"{shape} spells aren't in the game yet.");
             }
 
             var distance = from.DistanceTo(origin);
@@ -480,7 +507,7 @@ namespace WoundBound.Game.Combat
             }
 
             var where = plan.Range == SpellRange.Touch ? $"with a hand on {plan.Targets[0].Name}"
-                : plan.Area.Count > 1 ? $"over {plan.Area.Count} squares at {plan.Range}"
+                : plan.Area.Count > 1 ? $"as a {SpellArea.ShapeOf(cast).ToString().ToLowerInvariant()} over {plan.Area.Count} squares at {plan.Range}"
                 : $"at {plan.Targets[0].Name}, {plan.Range}";
             Write($"{caster.Name} casts {spell.Name} {where} — {(paid.Count == 0 ? "free" : string.Join(", ", paid))}" +
                   (cast.Sustain ? ", declared Sustained." : "."));

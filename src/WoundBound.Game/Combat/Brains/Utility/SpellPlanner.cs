@@ -34,8 +34,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 IEnumerable<(SpellCast Cast, Func<CastPlan, double> Worth)> candidates = spell.SpellType switch
                 {
-                    SpellType.Harm when spell.Shape == SpellShape.Volume => VolumeCorners(spell, enemies)
-                        .Select(corner => (new SpellCast(spell) { Corner = corner }, (Func<CastPlan, double>)(plan => HarmWorth(actor, spell, plan)))),
+                    SpellType.Harm when spell.Target == SpellTarget.Many => AreaCasts(spell, at, enemies)
+                        .Select(cast => (cast, (Func<CastPlan, double>)(plan => HarmWorth(actor, spell, plan)))),
                     SpellType.Harm => enemies
                         .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => HarmWorth(actor, spell, plan)))),
                     SpellType.Heal => View.PartyOnBoard.Concat(View.Adversaries)
@@ -69,7 +69,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         private static string Describe(CastPlan plan) =>
-            plan.Area.Count > 1 ? $"over {string.Join(", ", plan.Targets.Select(t => t.Name))}" : $"at {plan.Targets[0].Name}";
+            plan.Area.Count > 1 ? $"over {string.Join(", ", plan.Targets.Select(t => t.Name))}" : plan.Targets.Count > 0 ? $"at {plan.Targets[0].Name}" : "at nobody";
 
         /// <summary>A Heal mends whichever track has its target down: a stunned mind before a scratch.</summary>
         private static SpellCast Mend(SpellDefinition spell, Combatant patient) => new(spell)
@@ -77,6 +77,34 @@ namespace WoundBound.Game.Combat.Brains.Utility
             Target = patient,
             Restores = patient.IsStunned ? WoundType.Mind : patient.IsNumbed ? WoundType.Soul : WoundType.Body,
         };
+
+        /// <summary>The eight ways a Line or a Cone can be aimed.</summary>
+        private static readonly (int X, int Y)[] Aims = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)];
+
+        /// <summary>
+        /// Every way worth weighing to put an area spell down — the Shape is the caster's choice at the
+        /// moment of casting (Core Rules §11): each block with an enemy under it, and each Line and Cone
+        /// aimed any of the eight ways, starting beside the caster or on an enemy.
+        /// </summary>
+        private static IEnumerable<SpellCast> AreaCasts(SpellDefinition spell, GridPosition at, IReadOnlyList<Combatant> enemies)
+        {
+            foreach (var corner in VolumeCorners(spell, enemies))
+            {
+                yield return new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner };
+            }
+
+            foreach (var aim in Aims)
+            {
+                var starts = enemies.Where(e => e.Position.DistanceTo(at) <= 12).Select(e => e.Position)
+                    .Append(new GridPosition(at.X + aim.X, at.Y + aim.Y))
+                    .Distinct();
+                foreach (var start in starts)
+                {
+                    yield return new SpellCast(spell) { Shape = SpellShape.Line, Origin = start, Aim = aim };
+                    yield return new SpellCast(spell) { Shape = SpellShape.Cone, Origin = start, Aim = aim };
+                }
+            }
+        }
 
         /// <summary>Each block that puts at least one enemy under it.</summary>
         private static IEnumerable<GridPosition> VolumeCorners(SpellDefinition spell, IEnumerable<Combatant> enemies) =>
@@ -378,7 +406,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public double BestHarmFrom(Combatant actor, GridPosition square)
         {
             double best = 0;
-            foreach (var spell in actor.Spells.Where(s => s.SpellType == SpellType.Harm && s.Shape != SpellShape.Volume))
+            foreach (var spell in actor.Spells.Where(s => s.SpellType == SpellType.Harm && s.Target == SpellTarget.One))
             {
                 foreach (var enemy in View.EnemiesOf(actor).Where(e => e.Position.DistanceTo(square) <= 8))
                 {
