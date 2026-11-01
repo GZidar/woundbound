@@ -482,10 +482,12 @@ namespace WoundBoundGame
             encounter = fightPicker.Selected switch
             {
                 1 => SampleEncounters.SignpostWithCasters(data, new RandomDiceRoller(), PickedGm()),
-                2 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm(), fourPlayers: true),
-                3 => SampleEncounters.FerryShrineAmbush(data, new RandomDiceRoller(), PickedGm()),
-                4 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller(), PickedGm()),
-                5 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller(), PickedGm()),
+                2 => SampleEncounters.CampfireAmbush(data, new RandomDiceRoller(), PickedGm()),
+                3 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm(), fourPlayers: true),
+                4 => SampleEncounters.FerryShrineAmbush(data, new RandomDiceRoller(), PickedGm()),
+                5 => SampleEncounters.FerryShrineWithCasters(data, new RandomDiceRoller(), PickedGm()),
+                6 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller(), PickedGm()),
+                7 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm()),
             };
             shown = null;
@@ -1198,8 +1200,10 @@ namespace WoundBoundGame
             fightPicker = new OptionButton();
             fightPicker.AddItem("Signpost ambush (Quickstart)");
             fightPicker.AddItem("Signpost ambush, the Quickstart five (with casters)");
+            fightPicker.AddItem("The camp at night: the five round their campfire");
             fightPicker.AddItem("Signpost ambush, four players");
             fightPicker.AddItem("Ambush at the Ferry Shrine ford (Inner Sea)");
+            fightPicker.AddItem("The Ferry Shrine ford, the Quickstart five");
             fightPicker.AddItem("Roadside ambush (party of three)");
             fightPicker.AddItem("The Dumb Fighter v three ratkin");
             fightPicker.ItemSelected += _ => StartEncounter();

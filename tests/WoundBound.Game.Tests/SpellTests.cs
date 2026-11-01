@@ -440,6 +440,33 @@ public class SpellTests
         Assert.Equal(FuelSource.Torch, cast.Spell.Tap);
     }
 
+    [Fact]
+    public void AtTheCamp_TheFireLightsTheParty_AndElthricTappingItPutsTheCampInTheDark()
+    {
+        var encounter = SampleEncounters.CampfireAmbush(Data, new ScriptedDice(1, 2, 1, 2));
+        var elthric = Named(encounter, "Elthric Dane");
+        var salla = Named(encounter, "Salla Rinehart");
+        var wolf = Named(encounter, "Wolf from the north");
+        Assert.NotEqual(Visibility.None, encounter.VisibilityOf(salla));
+        encounter.TryBeginTurn(elthric);
+
+        // A Conflagration over the wolf at Middle range: 2 Fuel, the whole of it from the fire.
+        var cast = new SpellCast(Spell(elthric, "Conflagration"))
+        {
+            Corner = wolf.Position,
+            Tap = FuelSource.Campfire,
+            TapAt = SampleEncounters.CampfireSquare,
+        };
+        var plan = encounter.PlanCast(elthric, cast);
+        Assert.Null(plan.Refusal);
+        Assert.Equal((SpellRange.Middle, 2, 2), (plan.Range, plan.Cost, plan.Fuel!.FromSource));
+
+        Assert.True(encounter.TryCast(cast));
+
+        Assert.Empty(encounter.Fires);
+        Assert.Equal(Visibility.None, encounter.VisibilityOf(salla));
+    }
+
     /// <summary>Everybody but <paramref name="last"/> ends their turn, and the adversaries take theirs, until it's <paramref name="last"/>'s pick next round.</summary>
     private static void PlayOutRoundExcept(Encounter encounter, Combatant last)
     {

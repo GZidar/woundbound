@@ -441,6 +441,51 @@ namespace WoundBound.Game.Combat
                 setting: LongreachCrossing, environment: data.Environment);
         }
 
+        /// <summary>
+        /// A camp on the road at night — staged for the game, not taken from a book. Unlit, with the
+        /// party's campfire the only light: a built fire, which holds its grade out to Long, so the
+        /// camp can be seen from the dark and the dark can't be seen from the camp. The torches and
+        /// the lantern are packed away. The fire is also 2 Fuel for a Fire caster in reach of it —
+        /// spent whole, and the camp's light with it (Core Rules §14).
+        /// </summary>
+        public static Setting CampAtNight { get; } = new()
+        {
+            Name = "The camp at night",
+            Visibility = Visibility.None,
+            Cause = VisibilityCause.Unlit,
+            Fires = new HashSet<GridPosition> { CampfireSquare },
+            Ground = Setting.Patches(Terrain.Broken, (16, 0, 19, 4), (16, 13, 19, 17)),
+        };
+
+        /// <summary>Where the campfire burns.</summary>
+        public static GridPosition CampfireSquare => new(10, 9);
+
+        /// <summary>
+        /// The Quickstart's five around their campfire, set on in the night by a Tollroad Bandit and
+        /// his two Timber Wolves, with two Bandit Ambushers on the rough ground to either side — about
+        /// a Standard fight's budget for five (GM Reference §5). Elthric sits by the fire.
+        /// </summary>
+        public static Encounter CampfireAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var wolf = data.Adversary("Timber Wolf");
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(9, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(11, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(10, 10)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(9, 10)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(11, 8)),
+                CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(20, 9)),
+                CombatantFactory.FromAdversary(wolf, "Wolf from the north", new GridPosition(17, 6)),
+                CombatantFactory.FromAdversary(wolf, "Wolf from the south", new GridPosition(17, 12)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the rocks", new GridPosition(17, 3)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the gully", new GridPosition(17, 15)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: CampAtNight, environment: data.Environment);
+        }
+
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
         public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {
