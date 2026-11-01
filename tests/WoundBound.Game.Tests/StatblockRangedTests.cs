@@ -9,7 +9,7 @@ public class StatblockRangedTests
 
     private static (Encounter Encounter, Combatant Fighter, Combatant Ambusher) Facing(int distance)
     {
-        var encounter = SampleEncounters.SignpostAmbush(Data, new ScriptedDice());
+        var encounter = SampleEncounters.SignpostAmbush(Data, new ScriptedDice(), setting: Setting.Daylight);
         var fighter = encounter.Combatants.Single(c => c.Name == "The Dumb Fighter");
         var ambusher = encounter.Combatants.Single(c => c.Name == "Ambusher on the ridge");
         ambusher.Position = new GridPosition(fighter.Position.X + distance, fighter.Position.Y);

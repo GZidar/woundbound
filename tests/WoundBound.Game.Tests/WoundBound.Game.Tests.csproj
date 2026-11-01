@@ -26,6 +26,7 @@
     <!-- The same catalogues the game loads, straight from the submodule, so a rules change that
          alters a statblock shows up here before it shows up on screen. -->
     <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\range-bands.json" Link="TestData\range-bands.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\environment.json" Link="TestData\environment.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-adversaries.json" Link="TestData\starting-adversaries.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-weapons.json" Link="TestData\starting-weapons.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

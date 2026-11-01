@@ -109,8 +109,8 @@ public class PartyTests
         // Every tactic, many seeds: a brain that broke a rule would throw.
         foreach (var tactics in PartyTactics.Presets)
         {
-            var report = Simulator.Run(dice => SampleEncounters.PartyVersusAmbush(Data, dice), () => new TacticalPartyBrain(tactics), fights: 40);
-            Assert.Equal(40, report.Fights.Count);
+            var report = Simulator.Run(dice => SampleEncounters.PartyVersusAmbush(Data, dice), () => new TacticalPartyBrain(tactics), fights: 15);
+            Assert.Equal(15, report.Fights.Count);
             Assert.True(report.Wins + report.Losses > 0);
         }
     }

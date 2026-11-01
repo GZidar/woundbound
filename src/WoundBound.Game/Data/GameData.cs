@@ -14,6 +14,7 @@ namespace WoundBound.Game.Data
         public const string RangeBandsFile = "range-bands.json";
         public const string StartingAdversariesFile = "starting-adversaries.json";
         public const string StartingWeaponsFile = "starting-weapons.json";
+        public const string EnvironmentFile = "environment.json";
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -27,12 +28,16 @@ namespace WoundBound.Game.Data
 
         public required IReadOnlyList<StartingWeaponInfo> Weapons { get; init; }
 
+        /// <summary>The three environmental levers' grades (Core Rules §9, "Environment").</summary>
+        public required EnvironmentTables Environment { get; init; }
+
         /// <param name="readFile">Returns the text of one of the catalogue files named above.</param>
         public static GameData Load(Func<string, string> readFile) => new()
         {
             RangeBands = Parse<RangeBandTables>(readFile, RangeBandsFile),
             Adversaries = Parse<List<StartingAdversaryInfo>>(readFile, StartingAdversariesFile),
             Weapons = Parse<List<StartingWeaponInfo>>(readFile, StartingWeaponsFile),
+            Environment = Parse<EnvironmentTables>(readFile, EnvironmentFile),
         };
 
         public StartingAdversaryInfo Adversary(string name) =>

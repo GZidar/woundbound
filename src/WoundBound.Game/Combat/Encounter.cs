@@ -131,9 +131,18 @@ namespace WoundBound.Game.Combat
 
         /// <param name="gm">Who plays the GM's side. Defaults to <see cref="SimpleGmBrain"/>.</param>
         /// <param name="objectives">What the fight is about besides dropping everybody; none by default.</param>
+        /// <param name="setting">Where it happens — Visibility, Exposure and the ground; daylight on firm ground by default.</param>
+        /// <param name="environment">The levers' grades, needed for any setting but daylight.</param>
         public Encounter(int width, int height, IEnumerable<Combatant> combatants, RangeBandTables bands, IDiceRoller dice, IGmBrain? gm = null,
-            IEnumerable<Objective>? objectives = null)
+            IEnumerable<Objective>? objectives = null, Setting? setting = null, EnvironmentTables? environment = null)
         {
+            Setting = setting ?? Setting.Daylight;
+            this.environment = environment;
+            if (this.environment is null && Setting != Setting.Daylight)
+            {
+                throw new ArgumentException("A setting other than daylight needs the environment tables to read it by.", nameof(environment));
+            }
+
             Width = width;
             Height = height;
             this.combatants = combatants.ToList();
@@ -141,6 +150,7 @@ namespace WoundBound.Game.Combat
             this.dice = dice;
             this.gm = gm ?? new SimpleGmBrain();
             Objectives = objectives?.ToList() ?? new List<Objective>();
+            ApplySettingToCombatants();
             view = new BattleView(this);
 
             StartRound();
@@ -150,6 +160,226 @@ namespace WoundBound.Game.Combat
         internal BattleView View => view;
 
         public int Width { get; }
+
+        private readonly EnvironmentTables? environment;
+
+        /// <summary>Lights dropped and still burning where they fell, each counting as one carried light.</summary>
+        private readonly List<GridPosition> lightsOnTheGround = new();
+
+        /// <summary>Where the fight happens (Core Rules §9, "Environment").</summary>
+        public Setting Setting { get; }
+
+        public IReadOnlyList<GridPosition> LightsOnTheGround => lightsOnTheGround;
+
+        /// <summary>
+        /// Hands every combatant the scene: the ground's pull on Stability wherever they stand, the
+        /// weather's on Resolve — and the Stamina Exposure levies at the start of the challenge,
+        /// capped at 0, granting nobody an Opportunity (Core Rules §9, "Exposure").
+        /// </summary>
+        private void ApplySettingToCombatants()
+        {
+            if (environment is not { } tables)
+            {
+                return;
+            }
+
+            var levy = EnvironmentCalculator.ExposureStaminaModifier(tables, Setting.Exposure);
+            foreach (var combatant in combatants)
+            {
+                combatant.GroundStability = square => EnvironmentCalculator.StabilityThresholdModifier(tables, Setting.GroundAt(square));
+                combatant.SceneResolve = EnvironmentCalculator.ResolveThresholdModifier(tables, Setting.Exposure);
+                combatant.Stamina = EnvironmentCalculator.StartOfChallengeStamina(tables, combatant.Stamina, Setting.Exposure);
+            }
+
+            if (levy < 0)
+            {
+                Write($"The {Setting.Exposure.ToString().ToLowerInvariant()} weather takes {-levy} Stamina from everyone before the first blow.");
+            }
+        }
+
+        /// <summary>
+        /// The Visibility <paramref name="target"/> is seen at standing on <paramref name="at"/> (Core
+        /// Rules §9, "Visibility"). In an Unlit scene it's read "from the light to whichever creature
+        /// is being looked at": every light within a band of them — their own, others' carried, any
+        /// dropped, any built fire — lifts them to that band's grade, and the best of those counts.
+        /// Obscured, light lifts nothing, except that whoever carries one is seen a grade better.
+        /// </summary>
+        public Visibility VisibilityOf(Combatant target, GridPosition? at = null)
+        {
+            var square = at ?? target.Position;
+            if (environment is not { } tables || Setting.Visibility == Visibility.Good)
+            {
+                return Visibility.Good;
+            }
+
+            // Brains ask this thousands of times a decision; the answer only changes when a light moves.
+            var stamp = LightStamp();
+            if (stamp != visibilityStamp)
+            {
+                visibilityCache.Clear();
+                visibilityStamp = stamp;
+            }
+
+            if (visibilityCache.TryGetValue((target, square), out var known))
+            {
+                return known;
+            }
+
+            var seen = WorkOutVisibility(tables, target, square);
+            visibilityCache[(target, square)] = seen;
+            return seen;
+        }
+
+        private readonly Dictionary<(Combatant, GridPosition), Visibility> visibilityCache = new();
+        private int visibilityStamp;
+
+        private int LightStamp()
+        {
+            var hash = new HashCode();
+            foreach (var carrier in combatants.Where(c => c.CarriedLights > 0 && c.OccupiesSquare))
+            {
+                hash.Add(carrier);
+                hash.Add(carrier.Position);
+                hash.Add(carrier.CarriedLights);
+            }
+
+            hash.Add(lightsOnTheGround.Count);
+            return hash.ToHashCode();
+        }
+
+        /// <summary>
+        /// How well a square itself can be seen — what somebody carrying no light would be seen at,
+        /// standing there. For drawing the dark, not for any roll.
+        /// </summary>
+        public Visibility VisibilityAtSquare(GridPosition square) =>
+            environment is not { } tables || Setting.Visibility == Visibility.Good ? Visibility.Good
+            : !Setting.IsUnlit ? Setting.Visibility
+            : WorkOutVisibility(tables, null, square);
+
+        private Visibility WorkOutVisibility(EnvironmentTables tables, Combatant? target, GridPosition square)
+        {
+
+            if (!Setting.IsUnlit)
+            {
+                return EnvironmentCalculator.VisibilityOfTarget(tables, Setting.Visibility, Setting.Cause, target?.CarriedLights ?? 0);
+            }
+
+            var sources = combatants
+                .Where(c => c != target && c.CarriedLights > 0 && c.OccupiesSquare)
+                .SelectMany(c => Enumerable.Repeat(c.Position, c.CarriedLights))
+                .Concat(Enumerable.Repeat(square, target?.CarriedLights ?? 0))
+                .Concat(lightsOnTheGround)
+                .ToList();
+
+            // Each light lights the square by its own group — the lights carried together with it,
+            // within a square of one another — at the band it is from the square. Two torches across
+            // the field are two single lights, not a pair. A built fire holds its grade further.
+            var best = Setting.Visibility;
+            foreach (var source in sources)
+            {
+                if (RangeBandCalculator.BandForSquares(bands, source.DistanceTo(square)) is not { } band)
+                {
+                    continue;
+                }
+
+                var together = sources.Count(other => other.DistanceTo(source) <= 1);
+                var grade = EnvironmentCalculator.VisibilityFromLight(tables, together, builtFire: false, band);
+                best = grade < best ? grade : best;
+            }
+
+            foreach (var fire in Setting.Fires)
+            {
+                if (RangeBandCalculator.BandForSquares(bands, fire.DistanceTo(square)) is { } band)
+                {
+                    var grade = EnvironmentCalculator.VisibilityFromLight(tables, 0, builtFire: true, band);
+                    best = grade < best ? grade : best;
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>What the Visibility <paramref name="target"/> is seen at adds to their Dodge Threshold: +2 at Poor, +4 at None.</summary>
+        public int VisibilityDodgeModifier(Combatant target, GridPosition? at = null) =>
+            environment is { } tables ? EnvironmentCalculator.DodgeThresholdModifier(tables, VisibilityOf(target, at)) : 0;
+
+        /// <summary>Whether <paramref name="target"/>, on <paramref name="at"/>, can be targeted at all from <paramref name="distance"/> squares — nothing beyond Close at None.</summary>
+        private bool CanBeTargeted(Combatant target, GridPosition at, int distance) =>
+            environment is not { } tables
+            || RangeBandCalculator.BandForSquares(bands, distance) is not { } band
+            || EnvironmentCalculator.AllowsTargeting(tables, VisibilityOf(target, at), band);
+
+        /// <summary>
+        /// A critical failure on Broken ground puts the roller on it, Prone — "the whole of the
+        /// slipping rule" (Core Rules §9, "Terrain").
+        /// </summary>
+        private void Slip(Combatant roller, RollResult roll)
+        {
+            if (environment is { } tables && roll.IsCritical && roll.Success != true && !roller.IsProne && !roller.IsOutOfFight
+                && EnvironmentCalculator.KnocksProneOnCriticalFailure(tables, Setting.GroundAt(roller.Position)))
+            {
+                roller.SetCondition(CharacterCondition.Prone, true);
+                Write($"{roller.Name} loses their footing on the broken ground, and goes down Prone.");
+            }
+        }
+
+        /// <summary>Why the active character can't drop the light they hold, or null if they can. Dropping costs nothing.</summary>
+        public static string? DropLightRefusal(Combatant combatant) =>
+            combatant.Build is not { } build || !build.InventoryItems.Any(InventoryCalculator.IsLitLight)
+                ? $"{combatant.Name} isn't holding a lit light."
+                : null;
+
+        /// <summary>Why the active character can't light a torch or lantern from their pack now, or null if they can: a light to light, a free hand, and the action.</summary>
+        public static string? LightRefusal(Combatant combatant)
+        {
+            if (combatant.Build is not { } build || !build.InventoryItems.Any(i => !i.IsLit && !i.IsStored && i.Quantity > 0 && InventoryCalculator.LooksLikeALightSource(i)))
+            {
+                return $"{combatant.Name} has nothing to light.";
+            }
+
+            if (!combatant.HasFreeHand)
+            {
+                return "No free hand to hold a light in.";
+            }
+
+            return combatant.ActionsRemaining < 1 ? "Lighting one takes an action." : null;
+        }
+
+        /// <summary>Lets go of the light in hand: it costs nothing, and it goes on burning where it falls.</summary>
+        public bool TryDropLight()
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { Build: { } build } dropper || DropLightRefusal(dropper) is not null)
+            {
+                return false;
+            }
+
+            var light = build.InventoryItems.First(InventoryCalculator.IsLitLight);
+            light.IsLit = false;
+            light.Quantity--;
+            if (light.Quantity <= 0)
+            {
+                light.IsStored = true;
+            }
+
+            lightsOnTheGround.Add(dropper.Position);
+            Write($"{dropper.Name} drops their {light.Name.Split(' ')[0].TrimEnd('e', 's').ToLowerInvariant()} — it burns on where it fell.");
+            return true;
+        }
+
+        /// <summary>Lights a torch or lantern from the pack, into a free hand, with the action.</summary>
+        public bool TryLight()
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { Build: { } build } lighter || LightRefusal(lighter) is not null)
+            {
+                return false;
+            }
+
+            var light = build.InventoryItems.First(i => !i.IsLit && !i.IsStored && i.Quantity > 0 && InventoryCalculator.LooksLikeALightSource(i));
+            light.IsLit = true;
+            lighter.ActionsRemaining--;
+            Write($"{lighter.Name} lights a {light.Name.Split(' ')[0].TrimEnd('e', 's').ToLowerInvariant()}.");
+            return true;
+        }
 
         /// <summary>The fight's goals besides dropping everybody (Core Rules §9, "Scenes and Challenges").</summary>
         public IReadOnlyList<Objective> Objectives { get; }
@@ -216,6 +446,11 @@ namespace WoundBound.Game.Combat
         /// <summary>Whoever takes up <paramref name="square"/>: anybody still fighting, a character lying dying or stable there, or a foe who gave up.</summary>
         public Combatant? At(GridPosition square) => combatants.FirstOrDefault(c => c.Position == square && c.OccupiesSquare);
 
+        /// <summary>
+        /// Whether <paramref name="square"/> is on the mapped ground — the grid the fight is drawn
+        /// on. The edges are open: the world goes on past them, and anybody may walk off the map and
+        /// still be in the fight, until no character has them within Long.
+        /// </summary>
         public bool IsOnBoard(GridPosition square) =>
             square.X >= 0 && square.Y >= 0 && square.X < Width && square.Y < Height;
 
@@ -545,9 +780,19 @@ namespace WoundBound.Game.Combat
                     return Refused($"The {attack.Name} is Unwieldy — it can't strike somebody standing this close.");
                 }
 
-                return distance <= attack.Reach
-                    ? new AttackPlan(null, target.DodgeThreshold, 0, attack.DamageDieSides, $"Melee, within Reach {attack.Reach}.", attack)
-                    : Refused($"Out of reach — the {attack.Name} reaches {attack.Reach} square(s) and they're {distance} away.");
+                if (distance > attack.Reach)
+                {
+                    return Refused($"Out of reach — the {attack.Name} reaches {attack.Reach} square(s) and they're {distance} away.");
+                }
+
+                if (!CanBeTargeted(target, targetAt ?? target.Position, distance))
+                {
+                    return Refused("Too dark to see them past arm's length.");
+                }
+
+                var dark = VisibilityDodgeModifier(target, targetAt);
+                return new AttackPlan(null, target.DodgeThreshold + dark, 0, attack.DamageDieSides,
+                    $"Melee, within Reach {attack.Reach}" + (dark > 0 ? $"; +{dark} DT for the dark." : "."), attack);
             }
 
             var range = RangeBandCalculator.BandForSquares(bands, distance) switch
@@ -559,12 +804,18 @@ namespace WoundBound.Game.Combat
                 _ => TargetRange.BeyondLong,
             };
             var shot = WeaponCalculator.ShotAt(attack.Weapon!, attack.DamageModifier, range);
+            if (shot.CanAttack && !CanBeTargeted(target, targetAt ?? target.Position, distance))
+            {
+                return Refused("Too dark to see them — nothing can be targeted beyond Close at Visibility None.");
+            }
+
+            var gloom = VisibilityDodgeModifier(target, targetAt);
 
             return shot.CanAttack
                 ? new AttackPlan(
                     Refusal: null,
-                    DodgeThreshold: target.DodgeThreshold + shot.DodgeThresholdModifier,
-                    RangeDodgeModifier: shot.DodgeThresholdModifier,
+                    DodgeThreshold: target.DodgeThreshold + shot.DodgeThresholdModifier + gloom,
+                    RangeDodgeModifier: shot.DodgeThresholdModifier + gloom,
                     // A statblock's own die holds at Close and Short; past that the weapon's falls off.
                     DamageDieSides: shot.DamageDie is { } die
                         ? attacker.Build is null && shot.DodgeThresholdModifier == 0 ? attack.DamageDieSides : DiceNotation.ParseSides(die)
@@ -1545,10 +1796,10 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void ResolveReactiveControl(Combatant actor, ControlAction action, Combatant target, GridPosition catchAt, Action<bool> then)
         {
-            var dt = target.DodgeThreshold;
+            var dt = target.DodgeThreshold + VisibilityDodgeModifier(target);
             var st = target.StabilityThreshold;
             var (helped, harried) = TakeAid(actor);
-            var roll = RollAgainst(actor.UnarmedAttackModifier, Math.Max(dt, st), helped, AttacksAtDisadvantage(actor) || harried);
+            var roll = RollAgainst(actor.UnarmedAttackModifier, Math.Max(dt, st), helped, AttacksAtDisadvantage(actor) || harried, actor);
             var verb = Verb(action);
 
             void Finish(bool dodged, bool stoodFirm)
@@ -1668,6 +1919,7 @@ namespace WoundBound.Game.Combat
                 .ToList();
             var attack = plan.Profile ?? attacker.Attack;
             var roll = RollCalculator.Resolve(rolled, attack.AttackModifier, plan.DodgeThreshold, advantage, disadvantage);
+            Slip(attacker, roll);
 
             if (!asReaction)
             {
@@ -1857,7 +2109,7 @@ namespace WoundBound.Game.Combat
 
             var (helped, harried) = TakeAid(holder);
             var threshold = held.StabilityThreshold;
-            var roll = RollAgainst(holder.UnarmedAttackModifier, threshold, helped, AttacksAtDisadvantage(holder) || harried);
+            var roll = RollAgainst(holder.UnarmedAttackModifier, threshold, helped, AttacksAtDisadvantage(holder) || harried, holder);
 
             void Finish(bool stoodFirm)
             {
@@ -1901,7 +2153,7 @@ namespace WoundBound.Game.Combat
                     Write($"{holder.Name} moves {from.DistanceTo(arrivedAt)} square(s), hauling {held.Name}, for {paidWith}.");
 
                     var landing = SquaresAround(arrivedAt, holder.OwnReach)
-                        .Where(sq => IsOnBoard(sq) && (sq == heldFrom || At(sq) is null))
+                        .Where(sq => sq == heldFrom || At(sq) is null)
                         .OrderBy(sq => sq.DistanceTo(heldFrom))
                         .ThenBy(sq => (sq.X - heldFrom.X) * (sq.X - heldFrom.X) + (sq.Y - heldFrom.Y) * (sq.Y - heldFrom.Y))
                         .Select(sq => (GridPosition?)sq)
@@ -2017,7 +2269,7 @@ namespace WoundBound.Game.Combat
 
             var threshold = target.StabilityThreshold;
             var (helped, harried) = TakeAid(actor);
-            var roll = RollAgainst(actor.UnarmedAttackModifier, threshold, opportunityBonus || helped, AttacksAtDisadvantage(actor) || harried);
+            var roll = RollAgainst(actor.UnarmedAttackModifier, threshold, opportunityBonus || helped, AttacksAtDisadvantage(actor) || harried, actor);
             actor.ActionsRemaining--;
 
             var verb = Verb(action);
@@ -2119,12 +2371,6 @@ namespace WoundBound.Game.Combat
             while (crossed < distance)
             {
                 var next = new GridPosition(destination.X + step.X, destination.Y + step.Y);
-                if (!IsOnBoard(next))
-                {
-                    stoppedBy = "the edge of the field";
-                    break;
-                }
-
                 if (At(next) is { } inTheWay)
                 {
                     stoppedBy = inTheWay.Name;
@@ -2190,7 +2436,7 @@ namespace WoundBound.Game.Combat
             var holder = breaker.HeldBy!;
             var threshold = holder.StabilityThreshold;
             var (helped, harried) = TakeAid(breaker);
-            var roll = RollAgainst(breaker.UnarmedAttackModifier, threshold, helped, AttacksAtDisadvantage(breaker) || harried);
+            var roll = RollAgainst(breaker.UnarmedAttackModifier, threshold, helped, AttacksAtDisadvantage(breaker) || harried, breaker);
             breaker.ActionsRemaining--;
 
             void Finish(bool stoodFirm)
@@ -2282,12 +2528,18 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>2d12 + <paramref name="modifier"/> against <paramref name="threshold"/>, a third die rolled for Advantage or Disadvantage.</summary>
-        private RollResult RollAgainst(int modifier, int threshold, bool advantage, bool disadvantage)
+        private RollResult RollAgainst(int modifier, int threshold, bool advantage, bool disadvantage, Combatant? roller = null)
         {
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
                 .ToList();
-            return RollCalculator.Resolve(rolled, modifier, threshold, advantage, disadvantage);
+            var roll = RollCalculator.Resolve(rolled, modifier, threshold, advantage, disadvantage);
+            if (roller is not null)
+            {
+                Slip(roller, roll);
+            }
+
+            return roll;
         }
 
         /// <summary>The same dice, read against a raised Threshold.</summary>
@@ -2497,10 +2749,12 @@ namespace WoundBound.Game.Combat
         /// <summary>Every free square <paramref name="mover"/> could reach for at most <paramref name="moves"/> moves, with the price of each.</summary>
         internal Dictionary<GridPosition, int> SquaresWithin(Combatant mover, int moves)
         {
+            // The ground goes on past the map's edges, so look as far as the moves could carry them.
             var squares = new Dictionary<GridPosition, int>();
-            for (var y = 0; y < Height; y++)
+            var stride = SquaresFor(mover.Speed, moves);
+            for (var y = mover.Position.Y - stride; y <= mover.Position.Y + stride; y++)
             {
-                for (var x = 0; x < Width; x++)
+                for (var x = mover.Position.X - stride; x <= mover.Position.X + stride; x++)
                 {
                     var square = new GridPosition(x, y);
                     if (PriceOfMove(mover, square) is { } cost && cost <= moves)
@@ -2514,10 +2768,27 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>What a move to <paramref name="square"/> is priced at, whatever is left to pay with; null where nobody could stop there.</summary>
-        private int? PriceOfMove(Combatant mover, GridPosition square) =>
-            !IsOnBoard(square) || square == mover.Position || At(square) is not null
-                ? null
-                : RangeBandCalculator.MoveCost(bands, mover.Position.DistanceTo(square), mover.Speed);
+        /// <summary>
+        /// What a move to <paramref name="square"/> is priced at, whatever is left to pay with; null
+        /// where nobody could stop there. Broken ground anywhere the move begins, ends or passes
+        /// through adds a move (Core Rules §9, "Terrain").
+        /// </summary>
+        private int? PriceOfMove(Combatant mover, GridPosition square)
+        {
+            if (square == mover.Position || At(square) is not null
+                || RangeBandCalculator.MoveCost(bands, mover.Position.DistanceTo(square), mover.Speed) is not { } cost)
+            {
+                return null;
+            }
+
+            if (environment is { } tables && Setting.Ground.Count > 0)
+            {
+                var worst = PathBetween(mover.Position, square).Max(sq => EnvironmentCalculator.ExtraMoveCost(tables, Setting.GroundAt(sq)));
+                cost += worst;
+            }
+
+            return cost;
+        }
 
         private static string Describe(AttackOutcome outcome)
         {

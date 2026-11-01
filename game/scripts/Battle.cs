@@ -95,6 +95,13 @@ namespace WoundBoundGame
         private readonly Dictionary<CombatAction, Button> aidButtons = new();
         private Button raiseShieldButton = null!;
         private Button dragButton = null!;
+        private Button dropLightButton = null!;
+        private Button lightButton = null!;
+
+        private static readonly Color BrokenGround = new(0.45f, 0.32f, 0.18f, 0.35f);
+        private static readonly Color SureGround = new(0.55f, 0.55f, 0.6f, 0.15f);
+        private static readonly Color Gloom = new(0f, 0f, 0.03f, 0.35f);
+        private static readonly Color Darkness = new(0f, 0f, 0.03f, 0.62f);
 
         private void Disarm()
         {
@@ -212,13 +219,38 @@ namespace WoundBoundGame
                     var rect = SquareRect(square);
                     DrawRect(rect, (x + y) % 2 == 0 ? LightSquare : DarkSquare);
 
+                    // Rough ground and sure footing, then the dark over everything.
+                    switch (encounter.Setting.GroundAt(square))
+                    {
+                        case Terrain.Broken:
+                            DrawRect(rect, BrokenGround);
+                            DrawString(ThemeDB.FallbackFont, rect.Position + new Vector2(2, CellSize * 0.35f), "∴", HorizontalAlignment.Left, CellSize, Mathf.Max(8, CellSize / 3),
+                                new Color(0.75f, 0.6f, 0.4f, 0.6f));
+                            break;
+                        case Terrain.Sure:
+                            DrawRect(rect, SureGround);
+                            break;
+                    }
+
                     if (reachable.TryGetValue(square, out var cost))
                     {
                         DrawRect(rect, cost == 1 ? OneMove : TwoMoves);
                     }
 
+                    var seen = encounter.VisibilityAtSquare(square);
+                    if (seen != Visibility.Good)
+                    {
+                        DrawRect(rect, seen == Visibility.None ? Darkness : Gloom);
+                    }
+
                     DrawRect(rect, GridLine, filled: false, width: 1);
                 }
+            }
+
+            // Lights burning where they were dropped, and built fires.
+            foreach (var light in encounter.LightsOnTheGround.Concat(encounter.Setting.Fires))
+            {
+                DrawCircle(SquareRect(light).GetCenter(), CellSize * 0.12f, new Color(1f, 0.7f, 0.25f));
             }
 
             if (hovered is { } hover)
@@ -235,9 +267,13 @@ namespace WoundBoundGame
         private void DrawToken(Combatant combatant, Combatant? active)
         {
             var font = ThemeDB.FallbackFont;
-            var rect = SquareRect(combatant.Position);
+
+            // Past the map's open edge: drawn pinned to the edge, small and faded, with how far out.
+            var shownAt = new GridPosition(Mathf.Clamp(combatant.Position.X, 0, encounter.Width - 1), Mathf.Clamp(combatant.Position.Y, 0, encounter.Height - 1));
+            var offMap = shownAt != combatant.Position;
+            var rect = SquareRect(shownAt);
             var centre = rect.GetCenter();
-            var radius = CellSize * 0.36f;
+            var radius = CellSize * (offMap ? 0.22f : 0.36f);
 
             // Gone from the field altogether.
             if (combatant.HasFled)
@@ -277,6 +313,19 @@ namespace WoundBoundGame
             DrawString(font, new Vector2(rect.Position.X, centre.Y + 6), Initials(combatant.Name), HorizontalAlignment.Center,
                 CellSize, Mathf.Max(9, CellSize / 4), Colors.White);
 
+            if (offMap)
+            {
+                var arrow = (combatant.Position.X - shownAt.X, combatant.Position.Y - shownAt.Y) switch
+                {
+                    ( > 0, _) => "→",
+                    ( < 0, _) => "←",
+                    (_, > 0) => "↓",
+                    _ => "↑",
+                };
+                DrawString(font, new Vector2(rect.Position.X, rect.End.Y - 2), $"{arrow}{combatant.Position.DistanceTo(shownAt)}", HorizontalAlignment.Center,
+                    CellSize, Mathf.Max(8, CellSize / 4), new Color(1f, 1f, 1f, 0.8f));
+            }
+
             // What's been done to it, across the top of the square.
             var marks = string.Join(" ", new[]
             {
@@ -289,6 +338,7 @@ namespace WoundBoundGame
                 combatant.ShieldBonus > 0 ? "shield" : null,
                 combatant.IsHelped ? "helped" : null,
                 combatant.IsHarried ? "harried" : null,
+                combatant.CarriedLights > 0 ? "light" : null,
             }.Where(m => m is not null));
             if (marks.Length > 0)
             {
@@ -442,7 +492,8 @@ namespace WoundBoundGame
                 EncounterPhase.AwaitingReaction => "React?",
                 EncounterPhase.Victory => "Victory!",
                 _ => "Defeat."
-            } + $"\nGM Opportunities: {encounter.BankedOpportunities}/{Encounter.MaxBankedOpportunities} banked" +
+            } + $"\n{encounter.Setting.Describe()}" +
+              $"\nGM Opportunities: {encounter.BankedOpportunities}/{Encounter.MaxBankedOpportunities} banked" +
               (encounter.ImmediateOpportunities > 0 ? $", {encounter.ImmediateOpportunities} immediate" : string.Empty) +
               string.Concat(encounter.Objectives.Select(o => $"\nObjective: {o.Name} — " + o.StatusIn(encounter) switch
               {
@@ -480,7 +531,12 @@ namespace WoundBoundGame
                 (character.HeldBy is { } holder ? $"\nHeld by {holder.Name}: no moving until you break free." : string.Empty) +
                 (character.Holding is { } held ? $"\nHolding {held.Name}, with a hand." : string.Empty) +
                 $"\nHands-on: 2d12+{character.UnarmedAttackModifier} vs ST, reach {character.OwnReach}" +
-                (character.HasFreeHand ? ", a hand free to grab with." : ", no hand free to grab with.");
+                (character.HasFreeHand ? ", a hand free to grab with." : ", no hand free to grab with.") +
+                (encounter.Setting.Visibility != Visibility.Good
+                    ? $"\nSeen at {encounter.VisibilityOf(character)}" + (character.CarriedLights > 0 ? ", lit by the light you carry." : ".")
+                    : string.Empty) +
+                (encounter.Setting.GroundAt(character.Position) is var ground && ground != Terrain.Firm
+                    ? $"\nStanding on {ground} ground." : string.Empty);
 
             static string Threshold(string name, int? now, int? baseValue) =>
                 now is null ? $"{name} —" : now == baseValue ? $"{name} {now}" : $"{name} {now} ({baseValue}{now - baseValue:+0;−0})";
@@ -529,6 +585,12 @@ namespace WoundBoundGame
                 "Or keep the action, and raise it for 1 Stamina once you see a blow would land.";
             dragButton.Disabled = acting?.Holding is null;
             dragButton.ButtonPressed = armedDrag;
+            var dropWhy = acting is null ? "Not your turn." : Encounter.DropLightRefusal(acting);
+            dropLightButton.Disabled = dropWhy is not null;
+            dropLightButton.TooltipText = dropWhy ?? "Let go of your light — free. It burns on where it falls, and you step out of it.";
+            var lightWhy = acting is null ? "Not your turn." : Encounter.LightRefusal(acting);
+            lightButton.Disabled = lightWhy is not null;
+            lightButton.TooltipText = lightWhy ?? "Light a torch or lantern from your pack, into a free hand, with your action.";
 
             foreach (var (action, button) in controlButtons)
             {
@@ -813,6 +875,22 @@ namespace WoundBoundGame
                 Refresh();
             };
             buttons.AddChild(dragButton);
+
+            dropLightButton = new Button { Text = "Drop light" };
+            dropLightButton.Pressed += () =>
+            {
+                encounter.TryDropLight();
+                Refresh();
+            };
+            buttons.AddChild(dropLightButton);
+
+            lightButton = new Button { Text = "Light a torch" };
+            lightButton.Pressed += () =>
+            {
+                encounter.TryLight();
+                Refresh();
+            };
+            buttons.AddChild(lightButton);
 
             standUpButton = new Button { Text = "Stand up", TooltipText = "Get up from Prone, for a move. Not movement: it leaves nobody's reach." };
             standUpButton.Pressed += () =>

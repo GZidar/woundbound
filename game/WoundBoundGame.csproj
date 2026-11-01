@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\range-bands.json" />
+    <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\environment.json" />
     <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-adversaries.json" />
     <RulesData Include="..\external\WoundBound\src\WoundBound.Web\wwwroot\data\starting-weapons.json" />
   </ItemGroup>

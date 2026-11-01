@@ -18,7 +18,7 @@ public class CombatActionTests
     /// <summary>The signpost with the bandits kept well back, so nobody but whoever a test places can strike.</summary>
     private static Encounter QuietSignpost(bool fourPlayers, params int[] dice)
     {
-        var encounter = SampleEncounters.SignpostAmbush(Data, new ScriptedDice(dice), fourPlayers: fourPlayers);
+        var encounter = SampleEncounters.SignpostAmbush(Data, new ScriptedDice(dice), fourPlayers: fourPlayers, setting: Setting.Daylight);
         foreach (var (name, x, y) in new[] { ("Lantern-bearer", 12, 4), ("Ambusher on the ridge", 12, 1), ("Ambusher in the trees", 12, 7), ("Bandit round the corner", 12, 10) })
         {
             if (encounter.Combatants.FirstOrDefault(c => c.Name == name) is { } bandit)

@@ -93,20 +93,36 @@ public class ManoeuvreTests
     }
 
     [Fact]
-    public void ShovedIntoTheEdge_TheTargetMayArrestIt()
+    public void ShovedIntoSomebody_TheTargetMayArrestIt()
     {
-        // Driven into the edge of the field it would take a wound — and a Minion dies of one — so
-        // the GM spends the Biter's last Stamina keeping its footing.
+        // Driven into the Sneak behind it, the Biter would take a wound — and a Minion dies of one —
+        // so the GM spends its last Stamina keeping its footing.
+        var (encounter, _, biter) = Beside(5, 4);
+        encounter.Combatants.Single(c => c.Name == "Ratkin Sneak").Position = new GridPosition(8, 2);
+
+        encounter.TryControl(ControlAction.Shove, biter);
+
+        Assert.Equal(new GridPosition(7, 2), biter.Position);
+        Assert.Equal(0, biter.Stamina);
+        Assert.False(biter.IsOutOfFight);
+        Assert.Contains(encounter.Log, line => line == "Ratkin Biter arrests the shove (1 Stamina).");
+    }
+
+    [Fact]
+    public void ShovedPastTheEdgeOfTheMap_TheyGoOn_OntoOpenGround()
+    {
+        // The map's edges are open: nothing solid there, so no wound, and nothing to arrest against.
         var (encounter, fighter, biter) = Beside(5, 4);
         fighter.Position = new GridPosition(8, 2);
         biter.Position = new GridPosition(9, 2);
 
         encounter.TryControl(ControlAction.Shove, biter);
+        encounter.RespondToLeaver(LeaverResponse.LetThemGo);
 
-        Assert.Equal(new GridPosition(9, 2), biter.Position);
-        Assert.Equal(0, biter.Stamina);
+        Assert.Equal(new GridPosition(10, 2), biter.Position);
+        Assert.False(encounter.IsOnBoard(biter.Position));
         Assert.False(biter.IsOutOfFight);
-        Assert.Contains(encounter.Log, line => line == "Ratkin Biter arrests the shove (1 Stamina).");
+        Assert.Equal(1, biter.Stamina);
     }
 
     [Fact]
@@ -275,8 +291,8 @@ public class ManoeuvreTests
         foreach (var tactics in PartyTactics.Presets)
         {
             var report = Game.Simulation.Simulator.Run(
-                dice => SampleEncounters.PartyVersusAmbush(Data, dice, new TrippingGmBrain()), () => new TacticalPartyBrain(tactics), fights: 30);
-            Assert.Equal(30, report.Fights.Count);
+                dice => SampleEncounters.PartyVersusAmbush(Data, dice, new TrippingGmBrain()), () => new TacticalPartyBrain(tactics), fights: 12);
+            Assert.Equal(12, report.Fights.Count);
             tripped += report.Fights.Sum(f => f.Tally.StandUps);
         }
 

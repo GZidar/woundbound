@@ -24,7 +24,8 @@ namespace WoundBound.Game.Combat
         /// book's worked numbers — in light armour, longsword in hand and a short bow slung at the
         /// ready for whatever he can't walk up to.
         /// </summary>
-        public static CharacterBuild DumbFighter(GameData data) => new()
+        /// <param name="torch">Carrying a lit torch in his free hand — the bundle of three every pack has.</param>
+        public static CharacterBuild DumbFighter(GameData data, bool torch = false) => new()
         {
             CharacterName = "The Dumb Fighter",
             ClassPrinciple = ClassPrinciple.Martial,
@@ -45,6 +46,7 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.AtTheReady(data.Weapon("Short Bow")),
             },
             Armour = { new ArmourDefinition { Name = "Leather jerkin", Weight = ArmourWeight.Light, IsEquipped = true } },
+            InventoryItems = { new InventoryItemDefinition { Name = "Torches (bundle of 3)", Quantity = 3, IsLit = torch } },
         };
 
         /// <summary>
@@ -201,20 +203,27 @@ namespace WoundBound.Game.Combat
         /// lantern-bearer under the signpost, an ambusher on the ridge and another in the trees.
         /// "This combat is not intended to be deadly and these adversaries will run away" — and
         /// the lantern-bearer is the one the party wants to keep: a captured bandit can be made to
-        /// talk (GM Reference §2). The night, the lights and the opening volley aren't in yet.
+        /// talk (GM Reference §2). It's night, and Unlit: the lantern-bearer's lantern lights him,
+        /// the Dumb Fighter carries the party's one torch, and everybody else stands in the dark.
+        /// The ridge and the trees are broken ground. The opening volley isn't in yet.
         /// </summary>
         /// <param name="fourPlayers">
         /// The book's table of four: Joren Blacke joins the party, and the fourth bandit — a second
         /// Roadside Bandit, around the corner — joins the ambush ("If you have four players, then
         /// have two of each").
         /// </param>
-        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool fourPlayers = false)
+        /// <param name="setting">Where to stage it: the book's night by default; <see cref="Setting.Daylight"/> stages it with no
+        /// lights needed, and the Dumb Fighter's torch stays in his pack.</param>
+        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool fourPlayers = false, Setting? setting = null)
         {
+            setting ??= SignpostNight;
+            var dark = setting.IsUnlit;
             var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4));
+            lanternBearer.StatblockLights = dark ? 1 : 0;
 
             var combatants = new List<Combatant>
             {
-                CombatantFactory.FromCharacter(DumbFighter(data), new GridPosition(1, 4)),
+                CombatantFactory.FromCharacter(DumbFighter(data, torch: dark), new GridPosition(1, 4)),
                 CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(1, 3)),
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(1, 5)),
                 lanternBearer,
@@ -229,8 +238,23 @@ namespace WoundBound.Game.Combat
             }
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                objectives: [new Objective.DontLetEscape("Take the lantern-bearer — he can be made to talk", lanternBearer)]);
+                objectives: [new Objective.DontLetEscape("Take the lantern-bearer — he can be made to talk", lanternBearer)],
+                setting: setting, environment: data.Environment);
         }
+
+        /// <summary>
+        /// The signpost at night (Blood and Vintage, "Roadside Ambush"): "Visibility Unlit — night
+        /// has fallen, so what can be seen depends on who is carrying a light (the lantern-bearer
+        /// included). The rain soaks everyone, but it isn't heavy enough to count as Obscured — yet.
+        /// Terrain Firm" — the road. The ridge on the right and the trees on the left are rough going.
+        /// </summary>
+        public static Setting SignpostNight { get; } = new()
+        {
+            Name = "The signpost at night",
+            Visibility = Visibility.None,
+            Cause = VisibilityCause.Unlit,
+            Ground = Setting.Patches(Terrain.Broken, (6, 0, 9, 1), (6, 7, 9, 8)),
+        };
 
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
         public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)

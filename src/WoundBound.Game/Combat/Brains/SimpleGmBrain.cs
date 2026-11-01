@@ -112,14 +112,20 @@ namespace WoundBound.Game.Combat.Brains
         /// everyone's Long, if it can get there — the cheaper where it's no further; null if none is
         /// further than where it stands.
         /// </summary>
-        protected static GridPosition? AwayFromParty(BattleView view, Combatant actor, int moves) =>
-            view.SquaresWithin(actor, moves)
-                .Where(o => view.DistanceToNearestCharacter(o.Key) > view.DistanceToNearestCharacter(actor.Position))
-                .OrderByDescending(o => !view.IsWithinLongOfParty(o.Key))
-                .ThenByDescending(o => view.DistanceToNearestCharacter(o.Key))
+        protected static GridPosition? AwayFromParty(BattleView view, Combatant actor, int moves)
+        {
+            // The map's edges are open, so straight away from the nearest of them is always a way out.
+            double Score(GridPosition square) =>
+                (view.IsWithinLongOfParty(square) ? 0 : 100) + view.DistanceToNearestCharacter(square);
+
+            var here = Score(actor.Position);
+            return view.SquaresWithin(actor, moves)
+                .Where(o => Score(o.Key) > here)
+                .OrderByDescending(o => Score(o.Key))
                 .ThenBy(o => o.Value)
                 .Select(o => (GridPosition?)o.Key)
                 .FirstOrDefault();
+        }
 
         /// <summary>A Minion dropped by any blow that lands has every reason to turn whatever it can — unless it's running.</summary>
         public virtual bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => !adversary.IsBroken;

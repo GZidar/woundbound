@@ -54,6 +54,15 @@ namespace WoundBound.Game.Combat.Brains
         public AttackPlan PlanAttackWith(Combatant attacker, AttackProfile attack, GridPosition from, Combatant target, GridPosition? targetAt = null) =>
             encounter.PlanAttackWith(attacker, attack, from, target, targetAt);
 
+        /// <summary>Where the fight happens.</summary>
+        public Setting Setting => encounter.Setting;
+
+        /// <summary>The Visibility <paramref name="target"/> is seen at, standing where they are or on <paramref name="at"/>.</summary>
+        public Visibility VisibilityOf(Combatant target, GridPosition? at = null) => encounter.VisibilityOf(target, at);
+
+        /// <summary>What the dark adds to <paramref name="target"/>'s Dodge Threshold, standing where they are or on <paramref name="at"/>.</summary>
+        public int VisibilityDodgeModifier(Combatant target, GridPosition? at = null) => encounter.VisibilityDodgeModifier(target, at);
+
         /// <summary>The most squares <paramref name="speed"/> covers for <paramref name="moves"/> moves.</summary>
         public int SquaresFor(Speed speed, int moves) => encounter.SquaresFor(speed, moves);
 

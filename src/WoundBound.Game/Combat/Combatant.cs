@@ -128,9 +128,26 @@ namespace WoundBound.Game.Combat
         /// <summary>What an attack is rolled against right now: the base, plus every modifier held (Core Rules §10).</summary>
         public int DodgeThreshold => BaseDodgeThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Dodge) + ShieldBonus;
 
-        public int StabilityThreshold => BaseStabilityThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Stability);
+        /// <summary>Stability as it stands right now: the ground underfoot moves it too — Sure +2, Broken −2 (Core Rules §9, "Terrain").</summary>
+        public int StabilityThreshold => BaseStabilityThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Stability)
+            + (GroundStability?.Invoke(Position) ?? 0);
 
-        public int? ResolveThreshold => BaseResolveThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Resolve);
+        /// <summary>What the ground on a square does to Stability, as the encounter's setting says. Null outside an encounter.</summary>
+        internal Func<GridPosition, int>? GroundStability { get; set; }
+
+        /// <summary>What the scene's Exposure does to Resolve — the same for everybody in it (Core Rules §9, "Exposure").</summary>
+        internal int SceneResolve { get; set; }
+
+        /// <summary>
+        /// The lit lights this creature is holding — a character's from their pack, each taking a
+        /// hand; a foe's as the encounter set it, like the lantern-bearer's lantern.
+        /// </summary>
+        public int CarriedLights => Build is { } build ? InventoryCalculator.LitLightsHeld(build) : StatblockLights;
+
+        /// <summary>Lights a generic foe carries, set by whoever stages the encounter.</summary>
+        public int StatblockLights { get; internal set; }
+
+        public int? ResolveThreshold => BaseResolveThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Resolve) + SceneResolve;
 
         /// <summary>
         /// The conditions this creature is under (Core Rules §9, "Conditions"), as the Rules

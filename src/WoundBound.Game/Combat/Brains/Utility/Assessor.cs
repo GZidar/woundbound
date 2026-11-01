@@ -228,7 +228,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     }
                     else if (square.DistanceTo(enemy.Position) <= attack.Reach + stride)
                     {
-                        (dodge, die) = (creature.DodgeThreshold, attack.DamageDieSides);
+                        (dodge, die) = (creature.DodgeThreshold + view.VisibilityDodgeModifier(creature, square), attack.DamageDieSides);
                     }
 
                     if (dodge is { } dt)

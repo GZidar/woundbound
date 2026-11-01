@@ -43,8 +43,10 @@ Pick one on the battle screen:
 - **Signpost ambush:** the Quickstart Adventure's own (Blood and Vintage, "Roadside Ambush"), for a
   table of three — the lantern-bearer under the signpost, an ambusher on the ridge and another in the
   trees, all Skirmishers with Cowardice. The objective: take the lantern-bearer, since a captured
-  bandit can be made to talk. The ambushers shoot their crossbows and draw knives up close; the night,
-  the lights and the opening volley aren't in yet.
+  bandit can be made to talk. The ambushers shoot their crossbows and draw knives up close. It's night,
+  as the book has it: Unlit, the lantern-bearer lit by his lantern, the Dumb Fighter carrying the
+  party's one torch, everybody else in the dark, and the ridge and the trees rough going. The opening
+  volley isn't in yet.
 - **Signpost ambush, four players:** the book's table of four — Joren Blacke (Martial Templar,
   battle axe and buckler, chainmail) joins the party, and a second Roadside Bandit waits round the
   corner ("two of each").
@@ -92,8 +94,11 @@ What they exercise, all through `WoundBound.Rules`:
   it sees one of its side go down; Not a Fanatic, at a second. A broken creature runs, putting ground
   between itself and the party. The fight stays in effect until every adversary has left the board —
   and an adversary has left the board once no character has it within Long (16 squares). Down, gone,
-  or — broken and held fast with nobody left beside it — given up. The party fights are on a 28×18
-  field so there's room to get that far; the battle screen scales the squares to fit.
+  or — broken and held fast with nobody left beside it — given up. The map's edges are open: the grid
+  is a window on ground that goes on past it, so anybody may walk off it and stay in the fight, and a
+  runner backed against an edge simply carries on. Nothing solid stands at an edge to be shoved into.
+  The battle screen draws anyone off the map pinned to the edge, small, with an arrow and how far out;
+  it scales the squares to fit the 28×18 party fields.
 - Reactions to a foe leaving a character's reach — moving, closing in at the round's end, or shoved:
   strike as they go, or Grab, Shove or Trip them, rolled against Dodge and
   Stability both and stopping them where they're caught (Core Rules §9, "Against a creature on the
@@ -102,6 +107,19 @@ What they exercise, all through `WoundBound.Rules`:
 - Objectives: what a fight is about besides dropping everybody — so far, someone who mustn't get
   away (`Objective.DontLetEscape`, `Objective.NoneEscape`). Shown on screen, logged at the end, and
   counted by the simulator.
+- The setting (Core Rules §9, "Environment"), one per encounter (`Setting`), from the Rules library's
+  `EnvironmentCalculator` and `environment.json`:
+  - **Visibility** adds to the Dodge Threshold of whoever is being looked at — +2 at Poor, +4 at None —
+    and nothing beyond Close can be targeted at None. Unlit, it's read from the lights around the
+    target: their own, others' carried, any dropped and still burning, any built fire, each at its own
+    band, by the lights carried together with it. So the torchbearer is the target, and those beside
+    them; anyone out past Short of every light can't be shot. Obscured, light lifts nothing, but whoever
+    carries one is seen a grade better.
+  - **Exposure** lowers everyone's Resolve and takes Stamina at the start of the challenge, capped at 0.
+  - **Terrain** is written on the map square by square: Sure +2 Stability, Broken −2, a move dearer to
+    begin, end or pass through, and a critical failure on it knocks the roller Prone.
+  - **Lights:** a lit torch or lantern takes a hand. Dropping it is free and it burns on where it fell;
+    lighting one from the pack takes the action.
 - Help and Harry: an adjacent ally has Advantage on their next roll, or an adjacent foe Disadvantage;
   each lapses at the giver's next turn if unused.
 - Heal, Meditate and Pray: +1 to the track, on yourself or an ally beside you, once per fresh wound
@@ -181,6 +199,9 @@ terrain to run into, round or behind.
 
 `TrippingGmBrain` is a second baseline: a creature that isn't a Minion trips a character its pack can
 also reach before swinging.
+
+Not yet for the setting: walls, obstacles and cover; line of sight; hazards (drops, fire, water);
+built fires on the sample maps; the brains choosing to drop or light a light.
 
 Not yet: the Martial manoeuvres (Cleave, Topple, Ring, Hook, Disarm, Sunder); Solo Resilience and
 Unshakable; Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting, frights (so

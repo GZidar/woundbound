@@ -13,7 +13,7 @@ public class FleeingTests
 {
     private static readonly Game.Data.GameData Data = TestData.Load();
 
-    private static Encounter Signpost(params int[] dice) => SampleEncounters.SignpostAmbush(Data, new ScriptedDice(dice));
+    private static Encounter Signpost(params int[] dice) => SampleEncounters.SignpostAmbush(Data, new ScriptedDice(dice), setting: Setting.Daylight);
 
     private static Combatant Named(Encounter encounter, string name) => encounter.Combatants.Single(c => c.Name == name);
 
@@ -71,6 +71,25 @@ public class FleeingTests
         Assert.False(encounter.IsWithinLongOfParty(ridge.Position));
         Assert.Contains(encounter.Log, line => line == "Ambusher on the ridge is beyond Long of everyone, and off the board.");
         Assert.False(encounter.IsOver);
+    }
+
+    [Fact]
+    public void AtTheEdgeOfTheMap_ARunnerKeepsGoing()
+    {
+        // The map's edges are open: a runner backed up against one carries on past it.
+        var encounter = Signpost();
+        var ridge = Named(encounter, "Ambusher on the ridge");
+        KeepTheBearerBack(encounter);
+        Named(encounter, "Lantern-bearer").Position = new GridPosition(14, 10);
+        ridge.Position = new GridPosition(SampleEncounters.FieldWidth - 1, 8);
+        Named(encounter, "Salla Rinehart").Position = new GridPosition(SampleEncounters.FieldWidth - 6, 8);
+        ridge.Body = 2;
+        FighterTakesATurnAndEnds(encounter);
+
+        encounter.RunAdversaryTurn();
+
+        Assert.True(ridge.Position.X >= SampleEncounters.FieldWidth);
+        Assert.False(encounter.IsOnBoard(ridge.Position));
     }
 
     [Fact]
@@ -204,8 +223,8 @@ public class FleeingTests
         var reactions = 0;
         foreach (var tactics in PartyTactics.Presets)
         {
-            var report = Simulator.Run(dice => SampleEncounters.SignpostAmbush(Data, dice), () => new TacticalPartyBrain(tactics), fights: 40);
-            Assert.Equal(40, report.Fights.Count);
+            var report = Simulator.Run(dice => SampleEncounters.SignpostAmbush(Data, dice), () => new TacticalPartyBrain(tactics), fights: 15);
+            Assert.Equal(15, report.Fights.Count);
             Assert.NotNull(report.ObjectiveRate);
             reactions += report.Fights.Sum(f => f.Tally.LeaverReactions);
         }

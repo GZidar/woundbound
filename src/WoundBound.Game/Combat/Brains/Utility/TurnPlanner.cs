@@ -291,6 +291,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private double Position(Combatant actor, GridPosition square)
         {
             var nearest = View.EnemiesOf(actor).Select(e => e.Position.DistanceTo(square)).DefaultIfEmpty(int.MaxValue).Min();
+
+            // Everybody left on the board is running and nobody needs catching: give them the
+            // room to go — the fight ends once they're beyond Long.
+            if (actor.Side == Side.Party && View.EnemiesOf(actor).All(e => e.IsBroken && !View.MustNotEscape(e)))
+            {
+                return 0.1 * Math.Min(nearest, 20);
+            }
+
             return actor.Role switch
             {
                 AdversaryRole.Skirmisher when actor.HasRangedAttack => nearest <= 1 ? -0.6 : nearest <= 4 ? 0.4 : nearest <= 8 ? 0.1 : -0.1,
@@ -307,7 +315,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var stride = View.SquaresFor(actor.Speed, 1);
             double best = 0;
-            foreach (var enemy in View.EnemiesOf(actor))
+            foreach (var enemy in Pursued(actor))
             {
                 var distance = square.DistanceTo(enemy.Position);
                 foreach (var attack in actor.Attacks)
@@ -324,9 +332,17 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
-            var nearest = View.EnemiesOf(actor).Select(e => e.Position.DistanceTo(square)).DefaultIfEmpty(0).Min();
+            var nearest = Pursued(actor).Select(e => e.Position.DistanceTo(square)).DefaultIfEmpty(0).Min();
             return best - 0.05 * nearest;
         }
+
+        /// <summary>
+        /// The enemies worth closing on: all of them, but for a creature that has broken and is
+        /// running, which is only worth the chase if the fight's objectives say it mustn't get away —
+        /// let the rest go, and the fight ends when they're beyond Long.
+        /// </summary>
+        private IEnumerable<Combatant> Pursued(Combatant actor) =>
+            View.EnemiesOf(actor).Where(e => !e.IsBroken || View.MustNotEscape(e));
     }
 
     /// <summary>How a brain picks from what it has scored: the best, or — further down the skill dial — loosely among the best.</summary>
