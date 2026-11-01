@@ -65,6 +65,43 @@ namespace WoundBound.Game.Combat
             }
         }
 
+        /// <summary>
+        /// What tapping the source <paramref name="cast"/> names would do to who can be seen: the
+        /// grades of Visibility lost — Good to Poor is one, Poor to None another — summed over the
+        /// caster's enemies and over their own side. Worked out by putting the light out, looking,
+        /// and lighting it again; nothing is spent.
+        /// </summary>
+        internal (int Theirs, int Ours) GradesLostIfTapped(Combatant caster, SpellCast cast)
+        {
+            if (environment is null || Setting.Visibility == Visibility.Good || cast.Tap == FuelSource.None)
+            {
+                return (0, 0);
+            }
+
+            var standing = combatants.Where(c => c.OccupiesSquare && !c.IsOutOfFight).ToList();
+            var before = standing.ToDictionary(c => c, c => (int)VisibilityOf(c));
+            Action relight;
+            switch (cast.Tap)
+            {
+                case FuelSource.Torch when cast.TapAt is { } at && lightsOnTheGround.Remove(at):
+                    relight = () => lightsOnTheGround.Add(at);
+                    break;
+                case FuelSource.Campfire when cast.TapAt is { } fire && spentFires.Add(fire):
+                    relight = () => spentFires.Remove(fire);
+                    break;
+                case FuelSource.Torch or FuelSource.Lantern when HeldLight(caster, cast.Tap) is { } held:
+                    held.IsLit = false;
+                    relight = () => held.IsLit = true;
+                    break;
+                default:
+                    return (0, 0);
+            }
+
+            var lost = standing.Select(c => (c, Lost: (int)VisibilityOf(c) - before[c])).ToList();
+            relight();
+            return (lost.Where(x => x.c.Side != caster.Side).Sum(x => x.Lost), lost.Where(x => x.c.Side == caster.Side).Sum(x => x.Lost));
+        }
+
         /// <summary>The lit torch, or lantern, in <paramref name="caster"/>'s hand.</summary>
         private static InventoryItemDefinition? HeldLight(Combatant caster, FuelSource kind) =>
             caster.Build?.InventoryItems.FirstOrDefault(i => InventoryCalculator.IsLitLight(i)

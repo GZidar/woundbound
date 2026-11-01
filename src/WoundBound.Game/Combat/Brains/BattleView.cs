@@ -179,6 +179,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>The lights the party has: carried, dropped, and built fires.</summary>
         public int PartyLights => Characters.Sum(c => c.CarriedLights) + encounter.LightsOnTheGround.Count + encounter.Fires.Count();
 
+        /// <summary>Grades of Visibility the caster's enemies, and their own side, would lose if <paramref name="cast"/>'s source were tapped.</summary>
+        public (int Theirs, int Ours) GradesLostIfTapped(Combatant caster, SpellCast cast) => encounter.GradesLostIfTapped(caster, cast);
+
         /// <summary>Whether a Control spell is holding <paramref name="combatant"/>.</summary>
         public bool IsControlled(Combatant combatant) => encounter.IsControlled(combatant);
 

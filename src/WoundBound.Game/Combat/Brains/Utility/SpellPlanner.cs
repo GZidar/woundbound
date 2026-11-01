@@ -118,6 +118,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
 
                 var price = Price(actor, plan, way);
+                if (plan.Fuel is { SourceSpent: > 0 })
+                {
+                    // Putting a light out is paid in who can be seen: foes slipping into the dark cost
+                    // us our aim; our own side slipping into it costs theirs.
+                    var (theirs, ours) = View.GradesLostIfTapped(actor, way);
+                    price += Math.Max(0, 0.6 * theirs - 0.35 * ours);
+                }
+
                 if (best is null || price < best.Value.Item3)
                 {
                     best = (way, plan, price);
@@ -154,9 +162,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 price += 0.3 * fuel.FromCarried;
                 if (fuel.SourceSpent > 0)
                 {
-                    // The source is spent whole, and a burning one was a light: in the dark, putting
-                    // it out costs everybody it lit — the party's last light most of all.
-                    price += 0.4 + (View.Setting.IsUnlit ? (View.PartyLights <= 1 ? 3.0 : 1.2) : 0);
+                    // The source is spent whole, and gone; what its light was worth is reckoned by
+                    // the caller, who can look at who it lit.
+                    price += 0.4;
                 }
             }
 
@@ -290,11 +298,38 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
             var solo = target.Role == AdversaryRole.Solo;
             var lands = Odds.Of(plan.CastBonus, resolve + answer, disadvantage: solo).Success;
+
+            // Rechecked at the end of this very turn, and of the next: a turn of the target's is only
+            // lost if the spell is still on it then, and it lapses after two rounds at T1.
             var holds = Odds.Of(plan.CastBonus, resolve, disadvantage: solo).Success;
-            var turns = 1 + holds;
-            var engaged = View.EnemiesOf(target).Any(a => a.Position.DistanceTo(target.Position) <= target.Reach);
-            var denied = effect == ControlEffect.Compulsion ? 1.0 : engaged ? 0.8 : 0.4;
-            return lands * turns * denied * assess.Threat(target) * assess.PerWound(actor);
+            var turns = holds * (target.HasActedThisRound ? 1 : 1 + holds);
+
+            // A turn lost is the harm it would have done — spread over the party it would have done it to.
+            var victims = View.EnemiesOf(target).ToList();
+            var perWound = victims.Count == 0 ? 0 : victims.Average(v => assess.PerWound(v));
+            var turnWorth = assess.Threat(target) * perWound;
+
+            if (effect == ControlEffect.Compulsion)
+            {
+                return lands * turns * turnWorth;
+            }
+
+            // Fear: driven out to Long it is gone from the Challenge for good — as good as down. Nearer,
+            // it costs a creature in our front line most of its turn, and a shooter some of its aim.
+            var band = plan.Origin.DistanceTo(actor.Position) switch
+            {
+                > 8 => 3,
+                > 4 => 2,
+                _ => 1,
+            };
+            var gone = band switch
+            {
+                3 => holds,
+                2 => holds * holds,
+                _ => 0,
+            };
+            var engaged = victims.Any(a => a.Position.DistanceTo(target.Position) <= target.Reach);
+            return lands * (gone * 0.9 * assess.Value(target) + (1 - gone) * turns * (engaged ? 0.8 : 0.4) * turnWorth);
         }
 
         /// <summary>
