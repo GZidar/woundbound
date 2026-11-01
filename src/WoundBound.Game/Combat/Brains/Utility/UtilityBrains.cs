@@ -86,6 +86,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.StandGround => new GmStep.StandGround(choice.Action!.Value),
                 OptionKind.StandUp => new GmStep.StandUp(),
                 OptionKind.BreakFree => new GmStep.BreakFree(),
+                OptionKind.RegainFooting => new GmStep.RegainFooting(),
                 _ => GmStep.End,
             };
         }
@@ -213,6 +214,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.StandGround => new PartyStep.StandGround(choice.Action!.Value),
                 OptionKind.StandUp => new PartyStep.StandUp(),
                 OptionKind.BreakFree => new PartyStep.BreakFree(),
+                OptionKind.RegainFooting => new PartyStep.RegainFooting(),
                 _ => PartyStep.End,
             };
         }

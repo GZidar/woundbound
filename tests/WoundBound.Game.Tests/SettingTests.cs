@@ -123,10 +123,11 @@ public class SettingTests
         var encounter = RatkinIn(rubble);
         var fighter = encounter.Combatants.Single(c => c.Side == Side.Party);
 
-        // Two squares east, through the rubble: a Short move, and one more for the ground.
+        // Onto the rubble: a Short move, and one more for the ground. Past it, the dry way round is
+        // no longer, so that's the way taken, at the plain price.
         Assert.Equal(2, encounter.MoveCostTo(fighter, new GridPosition(3, 4)));
-        Assert.Equal(2, encounter.MoveCostTo(fighter, new GridPosition(5, 4)));
-        Assert.Equal(1, encounter.MoveCostTo(fighter, new GridPosition(2, 5)));
+        Assert.Equal(1, encounter.MoveCostTo(fighter, new GridPosition(5, 4)));
+        Assert.DoesNotContain(new GridPosition(3, 4), encounter.PlanMove(fighter, new GridPosition(5, 4))!.Path);
 
         var standing = fighter.StabilityThreshold;
         fighter.Position = new GridPosition(3, 4);

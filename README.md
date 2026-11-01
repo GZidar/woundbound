@@ -50,6 +50,11 @@ Pick one on the battle screen:
 - **Signpost ambush, four players:** the book's table of four — Joren Blacke (Martial Templar,
   battle axe and buckler, chainmail) joins the party, and a second Roadside Bandit waits round the
   corner ("two of each").
+- **Ambush at the Ferry Shrine ford:** the Lands of the Inner Sea's Longreach Crossing (§10) — a
+  river through the field, forded on loose stone with deep water above and below, the Undertow in the
+  ford, the shrine's arch and the ferryman's hut on the east bank. The party is caught mid-crossing by
+  two Reedmarsh Skulkers and a Bandit Ambusher (the Loom's "Skirmisher or two" made up to a Standard
+  fight for three). The hard one: archers on the bank, the party at −2 Stability in moving water.
 - **Roadside ambush:** a party of three — the Dumb Fighter of Core Rules §12, and Salla Rinehart
   (Nimble Duelist, rapier) and Drovan Thale (Nimble Ranger, short bow, knife at the ready) from the
   Quickstart Adventure — against a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin: a Threat
@@ -90,6 +95,9 @@ What they exercise, all through `WoundBound.Rules`:
   up something two-handed, or drops). Criticals add the other effect, a critical failure puts the one
   who lunged on the ground, and a Swarm can't be put hands on. The target may stand firm after seeing
   the roll: 1 Stamina for +2 ST, a tactical spend. Grounded finally has something to resist.
+- How a fight ends: Victory when every foe is down, given up or gone; **the party withdrew** when a
+  character's own move left foes still willing to fight beyond Long — the fight is over, but nobody
+  was beaten. A foe carried off by a hazard, or running, has left the board.
 - Foes that break and run (GM Reference §8): Cowardice breaks a creature below half its Body or when
   it sees one of its side go down; Not a Fanatic, at a second. A broken creature runs, putting ground
   between itself and the party. The fight stays in effect until every adversary has left the board —
@@ -118,6 +126,21 @@ What they exercise, all through `WoundBound.Rules`:
   - **Exposure** lowers everyone's Resolve and takes Stamina at the start of the challenge, capped at 0.
   - **Terrain** is written on the map square by square: Sure +2 Stability, Broken −2, a move dearer to
     begin, end or pass through, and a critical failure on it knocks the roller Prone.
+  - **Walls and the map:** distance is counted along the shortest route the ground allows — around
+    walls, never through them, a diagonal counting one (Core Rules §9, "Counting the squares"). An
+    enemy's square is never open, nor an ally's with an enemy in reach of it; other allies can be
+    passed through but not stopped on. Where a dry way round is no dearer than wading, it's the way
+    taken. Leaving an enemy's reach anywhere along the route draws its reaction, struck where the mover
+    is as it leaves. Walls block shots and light, and stop a shove — the rest is Body wounds.
+  - **Water:** any water is Broken ground. Deep water must also be swum: Athletics against the
+    setting's Difficulty (18 by default) for each move through it, and a failure spends the move
+    without getting anywhere.
+  - **Hazards** are written into a place the way GM Reference §13 builds them: Avoid checks (the
+    creature rolls whichever skill it's best at) and an effect on a failure, met whenever a creature
+    enters the ground. The Undertow sweeps a Short distance downstream — Forced Movement, arrestable —
+    and the swept must spend an action regaining their footing before acting normally again. Noticing
+    a hazard first isn't modelled. Skill checks come from the Rules library (a character's skill groups;
+    a foe's Skills row by Role).
   - **Lights:** a lit torch or lantern takes a hand. Dropping it is free and it burns on where it fell;
     lighting one from the pack takes the action.
 - Help and Harry: an adjacent ally has Advantage on their next roll, or an adjacent foe Disadvantage;
@@ -200,8 +223,9 @@ terrain to run into, round or behind.
 `TrippingGmBrain` is a second baseline: a creature that isn't a Minion trips a character its pack can
 also reach before swinging.
 
-Not yet for the setting: walls, obstacles and cover; line of sight; hazards (drops, fire, water);
-built fires on the sample maps; the brains choosing to drop or light a light.
+Not yet for the setting: cover (the rules have none beyond shields), heights and drops, fire as a
+hazard, Detect checks for hazards, Tiny creatures sharing squares, built fires on the sample maps, the
+brains choosing to drop or light a light.
 
 Not yet: the Martial manoeuvres (Cleave, Topple, Ring, Hook, Disarm, Sunder); Solo Resilience and
 Unshakable; Pack Tactics, thrown weapons, drawing from the pack, two-weapon fighting, frights (so
@@ -234,7 +258,7 @@ already strike, and otherwise whoever is nearest an enemy.
   `presets` or `utility`. The utility brains think before every step, so they run slower.
 
   The signpost ambush is the default, and the table leads with how often every objective was met;
-  `--fight signpost4` the four-player signpost, `--fight party` the roadside ambush, `--fight solo` the Dumb Fighter against the ratkin, and
+  `--fight signpost4` the four-player signpost, `--fight ford` the Ferry Shrine ambush, `--fight party` the roadside ambush, `--fight solo` the Dumb Fighter against the ratkin, and
   `--gm tripping` swaps in the tripping GM. Party tactics now include reacting to foes leaving reach
   (strike at everyone, or only stop runners) and hunting runners down.
 

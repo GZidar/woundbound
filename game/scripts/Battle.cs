@@ -99,6 +99,11 @@ namespace WoundBoundGame
         private Button lightButton = null!;
 
         private static readonly Color BrokenGround = new(0.45f, 0.32f, 0.18f, 0.35f);
+        private static readonly Color ShallowWater = new(0.25f, 0.45f, 0.65f, 0.55f);
+        private static readonly Color DeepWater = new(0.10f, 0.22f, 0.45f, 0.85f);
+        private static readonly Color Wall = new(0.42f, 0.40f, 0.38f);
+        private static readonly Color HazardEdge = new(0.95f, 0.75f, 0.2f, 0.55f);
+        private Button regainFootingButton = null!;
         private static readonly Color SureGround = new(0.55f, 0.55f, 0.6f, 0.15f);
         private static readonly Color Gloom = new(0f, 0f, 0.03f, 0.35f);
         private static readonly Color Darkness = new(0f, 0f, 0.03f, 0.62f);
@@ -219,7 +224,17 @@ namespace WoundBoundGame
                     var rect = SquareRect(square);
                     DrawRect(rect, (x + y) % 2 == 0 ? LightSquare : DarkSquare);
 
-                    // Rough ground and sure footing, then the dark over everything.
+                    // Water and walls first, then rough ground and sure footing, then the dark over everything.
+                    if (encounter.Setting.Water.TryGetValue(square, out var depth))
+                    {
+                        DrawRect(rect, depth == WaterDepth.Deep ? DeepWater : ShallowWater);
+                    }
+
+                    if (encounter.Setting.IsWall(square))
+                    {
+                        DrawRect(rect, Wall);
+                    }
+                    else if (!encounter.Setting.Water.ContainsKey(square))
                     switch (encounter.Setting.GroundAt(square))
                     {
                         case Terrain.Broken:
@@ -235,6 +250,11 @@ namespace WoundBoundGame
                     if (reachable.TryGetValue(square, out var cost))
                     {
                         DrawRect(rect, cost == 1 ? OneMove : TwoMoves);
+                    }
+
+                    if (encounter.Setting.HazardAt(square) is not null)
+                    {
+                        DrawRect(rect.Grow(-3), HazardEdge, filled: false, width: 2);
                     }
 
                     var seen = encounter.VisibilityAtSquare(square);
@@ -339,6 +359,7 @@ namespace WoundBoundGame
                 combatant.IsHelped ? "helped" : null,
                 combatant.IsHarried ? "harried" : null,
                 combatant.CarriedLights > 0 ? "light" : null,
+                combatant.NeedsFooting ? "off footing" : null,
             }.Where(m => m is not null));
             if (marks.Length > 0)
             {
@@ -359,8 +380,9 @@ namespace WoundBoundGame
             encounter = fightPicker.Selected switch
             {
                 1 => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm(), fourPlayers: true),
-                2 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller(), PickedGm()),
-                3 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller(), PickedGm()),
+                2 => SampleEncounters.FerryShrineAmbush(data, new RandomDiceRoller(), PickedGm()),
+                3 => SampleEncounters.PartyVersusAmbush(data, new RandomDiceRoller(), PickedGm()),
+                4 => SampleEncounters.FighterVersusRatkin(data, new RandomDiceRoller(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, new RandomDiceRoller(), PickedGm()),
             };
             shown = null;
@@ -491,6 +513,7 @@ namespace WoundBoundGame
                 EncounterPhase.AdversaryTurn => "The GM is acting…",
                 EncounterPhase.AwaitingReaction => "React?",
                 EncounterPhase.Victory => "Victory!",
+                EncounterPhase.Withdrew => "The party got away.",
                 _ => "Defeat."
             } + $"\n{encounter.Setting.Describe()}" +
               $"\nGM Opportunities: {encounter.BankedOpportunities}/{Encounter.MaxBankedOpportunities} banked" +
@@ -536,7 +559,9 @@ namespace WoundBoundGame
                     ? $"\nSeen at {encounter.VisibilityOf(character)}" + (character.CarriedLights > 0 ? ", lit by the light you carry." : ".")
                     : string.Empty) +
                 (encounter.Setting.GroundAt(character.Position) is var ground && ground != Terrain.Firm
-                    ? $"\nStanding on {ground} ground." : string.Empty);
+                    ? $"\nStanding on {ground} ground" + (encounter.Setting.Water.TryGetValue(character.Position, out var wet) ? $" — {wet.ToString().ToLowerInvariant()} water." : ".")
+                    : string.Empty) +
+                (character.NeedsFooting ? "\nOff your footing: your action goes on regaining it." : string.Empty);
 
             static string Threshold(string name, int? now, int? baseValue) =>
                 now is null ? $"{name} —" : now == baseValue ? $"{name} {now}" : $"{name} {now} ({baseValue}{now - baseValue:+0;−0})";
@@ -585,6 +610,9 @@ namespace WoundBoundGame
                 "Or keep the action, and raise it for 1 Stamina once you see a blow would land.";
             dragButton.Disabled = acting?.Holding is null;
             dragButton.ButtonPressed = armedDrag;
+            var footingWhy = acting is null ? "Not your turn." : Encounter.RegainFootingRefusal(acting);
+            regainFootingButton.Disabled = footingWhy is not null;
+            regainFootingButton.TooltipText = footingWhy ?? "Spend your action getting your footing back — nothing else takes an action until you do.";
             var dropWhy = acting is null ? "Not your turn." : Encounter.DropLightRefusal(acting);
             dropLightButton.Disabled = dropWhy is not null;
             dropLightButton.TooltipText = dropWhy ?? "Let go of your light — free. It burns on where it falls, and you step out of it.";
@@ -876,6 +904,14 @@ namespace WoundBoundGame
             };
             buttons.AddChild(dragButton);
 
+            regainFootingButton = new Button { Text = "Regain footing" };
+            regainFootingButton.Pressed += () =>
+            {
+                encounter.TryRegainFooting();
+                Refresh();
+            };
+            buttons.AddChild(regainFootingButton);
+
             dropLightButton = new Button { Text = "Drop light" };
             dropLightButton.Pressed += () =>
             {
@@ -936,6 +972,7 @@ namespace WoundBoundGame
             fightPicker = new OptionButton();
             fightPicker.AddItem("Signpost ambush (Quickstart)");
             fightPicker.AddItem("Signpost ambush, four players");
+            fightPicker.AddItem("Ambush at the Ferry Shrine ford (Inner Sea)");
             fightPicker.AddItem("Roadside ambush (party of three)");
             fightPicker.AddItem("The Dumb Fighter v three ratkin");
             fightPicker.ItemSelected += _ => StartEncounter();

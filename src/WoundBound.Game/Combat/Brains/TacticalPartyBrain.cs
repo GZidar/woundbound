@@ -104,6 +104,11 @@ namespace WoundBound.Game.Combat.Brains
                 return PartyStep.End;
             }
 
+            if (character.NeedsFooting && BattleView.RegainFootingRefusal(character) is null)
+            {
+                return new PartyStep.RegainFooting();
+            }
+
             // Up off the floor first: Prone is Off-guard, and crawling is dear.
             if (character.IsProne && BattleView.StandUpRefusal(character) is null)
             {

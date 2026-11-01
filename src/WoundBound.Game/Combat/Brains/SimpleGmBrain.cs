@@ -47,6 +47,12 @@ namespace WoundBound.Game.Combat.Brains
                 return Run(view, turn);
             }
 
+            // Off its footing, the action goes on getting it back.
+            if (actor.NeedsFooting && BattleView.RegainFootingRefusal(actor) is null)
+            {
+                return new GmStep.RegainFooting();
+            }
+
             // On its feet before anything else: a Prone creature is Off-guard and crawls.
             if (actor.IsProne && BattleView.StandUpRefusal(actor) is null)
             {

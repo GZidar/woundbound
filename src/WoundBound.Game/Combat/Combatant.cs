@@ -318,11 +318,31 @@ namespace WoundBound.Game.Combat
         /// <summary>The statblock's Role, for a foe; null for a character.</summary>
         public Rules.Enums.AdversaryRole? Role { get; init; }
 
+        /// <summary>
+        /// A skill group's bonus for this creature — Tier + ability + Affinity for a character, the
+        /// statblock's Skills row for a foe (Core Rules §8; GM Reference §3).
+        /// </summary>
+        internal Func<Ability, int>? SkillBonusFor { get; init; }
+
+        /// <summary>The bonus this creature rolls <paramref name="skill"/> at.</summary>
+        public int SkillBonus(string skill) =>
+            SkillCatalog.AllSkills.FirstOrDefault(s => s.Name == skill) is { } info && SkillBonusFor is { } bonus ? bonus(info.Ability) : 0;
+
+        /// <summary>
+        /// Pulled off their footing by a hazard — the Undertow's "must spend an action regaining
+        /// their footing before acting normally again" — and so able to do nothing else with an
+        /// action until they have.
+        /// </summary>
+        public bool NeedsFooting { get; internal set; }
+
         /// <summary>When this creature stops being willing to fight; null for one that never will.</summary>
         public Morale? Morale { get; init; }
 
         /// <summary>Has reached its breaking point, and is looking for a way out rather than a fight (GM Reference §8).</summary>
         public bool IsBroken { get; internal set; }
+
+        /// <summary>Was left beyond Long by the party getting clear of it, not by its own going.</summary>
+        public bool WasOutdistanced { get; internal set; }
 
         /// <summary>Has left the field, and takes no further part in the Challenge.</summary>
         public bool HasFled { get; internal set; }

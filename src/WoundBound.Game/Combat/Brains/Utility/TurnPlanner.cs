@@ -14,6 +14,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         StandUp,
         BreakFree,
         BuyExtraAction,
+        RegainFooting,
         End,
     }
 
@@ -59,6 +60,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var care = skill.Care * Assessor.RiskAppetite(actor);
             var here = actor.Position;
 
+            // Its footing back first: no action does anything else until then.
+            if (actor.NeedsFooting && actions > 0 && (!real || BattleView.RegainFootingRefusal(actor) is null))
+            {
+                options.Add(new Option(OptionKind.RegainFooting, 5, "regain my footing"));
+                return options;
+            }
+
             // On its feet first: Prone is Off-guard, and crawling is dear.
             if (actor.IsProne && hasMove && (!real || BattleView.StandUpRefusal(actor) is null))
             {
@@ -81,9 +89,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var moved = square != here;
                 // What standing here sets up for next turn counts whatever is done this turn, so
                 // acting is never scored below standing still.
-                var standing = Position(actor, square) - care * assess.Exposure(actor, square)
+                var standing = Position(actor, square) - Peril(actor, square) - care * assess.Exposure(actor, square)
                                - (moved ? care * assess.LeavingCost(actor, square) : 0)
-                               + 0.3 * Approach(actor, square);
+                               + 0.5 * Approach(actor, square);
                 var first = moved ? new Option(OptionKind.Move, 0, $"to {square}", Square: square) : null;
 
                 if (actions > 0)
@@ -107,8 +115,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 foreach (var (square, cost) in View.SquaresWithin(actor, dashMoves).Where(o => !squares.ContainsKey(o.Key)))
                 {
-                    var score = Position(actor, square) - care * assess.Exposure(actor, square)
-                                - care * assess.LeavingCost(actor, square) + 0.3 * Approach(actor, square);
+                    var score = Position(actor, square) - Peril(actor, square) - care * assess.Exposure(actor, square)
+                                - care * assess.LeavingCost(actor, square) + 0.5 * Approach(actor, square);
                     options.Add(new Option(OptionKind.Move, score, $"dash to {square} ({cost} moves)", Square: square));
                 }
             }
@@ -285,12 +293,40 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>
+        /// What the ground on the way to <paramref name="square"/> risks: a hazard there, by the
+        /// chance of failing against it; deep water, by the chance of a wasted move.
+        /// </summary>
+        private double Peril(Combatant actor, GridPosition square)
+        {
+            double peril = 0;
+            if (View.Setting.HazardAt(square) is { } hazard && hazard.Avoid.Count > 0)
+            {
+                var best = hazard.Avoid.Max(c => Odds.Of(actor.SkillBonus(c.Skill), c.Difficulty).Success);
+                peril += (1 - best) * 1.5;
+            }
+
+            if (square != actor.Position && View.PlanMove(actor, square) is { SwimsDeepWater: true })
+            {
+                peril += (1 - Odds.Of(actor.SkillBonus("Athletics"), View.Setting.SwimDifficulty).Success) * 1.0;
+            }
+
+            return peril;
+        }
+
+        /// <summary>
         /// Where a creature's Role would rather stand: a Skirmisher with a shot at Short range and
         /// out of reach, a Brute toe to toe with somebody.
         /// </summary>
         private double Position(Combatant actor, GridPosition square)
         {
             var nearest = View.EnemiesOf(actor).Select(e => e.Position.DistanceTo(square)).DefaultIfEmpty(int.MaxValue).Min();
+
+            // Out past Long of every enemy is out of the fight: for a creature that means to win,
+            // that's walking away from it — the party getting clear, or the GM's quarry escaping.
+            if (!actor.IsBroken && nearest > 16 && View.EnemiesOf(actor).Any(e => !e.IsBroken))
+            {
+                return -3;
+            }
 
             // Everybody left on the board is running and nobody needs catching: give them the
             // room to go — the fight ends once they're beyond Long.

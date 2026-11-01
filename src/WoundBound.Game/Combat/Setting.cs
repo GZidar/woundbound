@@ -30,7 +30,31 @@ namespace WoundBound.Game.Combat
         /// <summary>Built or sited fires — the only light that holds a grade out to Long.</summary>
         public IReadOnlySet<GridPosition> Fires { get; init; } = new HashSet<GridPosition>();
 
-        public Terrain GroundAt(GridPosition square) => Ground.TryGetValue(square, out var grade) ? grade : Terrain.Firm;
+        /// <summary>Walls, pillars and anything else solid: nobody stands in them, moves through them, or sees or shoots through them.</summary>
+        public IReadOnlySet<GridPosition> Walls { get; init; } = new HashSet<GridPosition>();
+
+        /// <summary>Water, by how deep it is. Any of it is Broken ground; deep water must be swum.</summary>
+        public IReadOnlyDictionary<GridPosition, WaterDepth> Water { get; init; } = new Dictionary<GridPosition, WaterDepth>();
+
+        /// <summary>What swimming through deep water is rolled against: Athletics, at this Difficulty.</summary>
+        public int SwimDifficulty { get; init; } = 18;
+
+        /// <summary>Hazards written into the place (GM Reference §13).</summary>
+        public IReadOnlyList<Hazard> Hazards { get; init; } = [];
+
+        /// <summary>The ground underfoot: water is Broken, whatever lies under it; anywhere unmarked is Firm.</summary>
+        public Terrain GroundAt(GridPosition square) =>
+            Water.ContainsKey(square) ? Terrain.Broken : Ground.TryGetValue(square, out var grade) ? grade : Terrain.Firm;
+
+        public bool IsWall(GridPosition square) => Walls.Contains(square);
+
+        public bool IsDeepWater(GridPosition square) => Water.TryGetValue(square, out var depth) && depth == WaterDepth.Deep;
+
+        /// <summary>The hazard covering <paramref name="square"/>, if any.</summary>
+        public Hazard? HazardAt(GridPosition square) => Hazards.FirstOrDefault(h => h.Squares.Contains(square));
+
+        /// <summary>The squares of the given rectangles, inclusive.</summary>
+        public static HashSet<GridPosition> Squares(params (int X0, int Y0, int X1, int Y1)[] areas) => Patches(Terrain.Firm, areas).Keys.ToHashSet();
 
         /// <summary>Hard to see for want of light, which light can answer.</summary>
         public bool IsUnlit => Visibility != Visibility.Good && (Cause ?? VisibilityCause.Unlit) == VisibilityCause.Unlit;
@@ -59,6 +83,41 @@ namespace WoundBound.Game.Combat
         public string Describe() =>
             $"{Name}: Visibility {(Visibility == Visibility.Good ? "Good" : $"{Visibility} ({Cause ?? VisibilityCause.Unlit})")}, " +
             $"Exposure {Exposure}" +
-            (Ground.Count > 0 ? $", ground {string.Join(" and ", Ground.Values.Distinct().Select(g => g.ToString()))} in places" : string.Empty);
+            (Ground.Count > 0 ? $", ground {string.Join(" and ", Ground.Values.Distinct().Select(g => g.ToString()))} in places" : string.Empty) +
+            (Water.Count > 0 ? ", water" : string.Empty) +
+            string.Concat(Hazards.Select(h => $", {h.Name}"));
+    }
+
+    /// <summary>How deep water is: Shallow is wading, ankle to knee; Deep is waist-deep and over, and has to be swum.</summary>
+    public enum WaterDepth
+    {
+        Shallow,
+        Deep,
+    }
+
+    /// <summary>One way of beating a hazard: a skill, at a Difficulty (GM Reference §13 — "name the skill and the Difficulty").</summary>
+    public sealed record HazardCheck(string Skill, int Difficulty);
+
+    /// <summary>
+    /// A hazard written into a place, the way GM Reference §13 builds them: something to beat —
+    /// any of its <see cref="Avoid"/> checks, whichever the creature is best at — and a clear effect
+    /// on a failure. Met whenever a creature enters its ground, by its own feet or by force.
+    /// Noticing it first (the Detect check) isn't modelled: everyone knows where it is.
+    /// </summary>
+    public sealed record Hazard(string Name, string Description, IReadOnlySet<GridPosition> Squares, IReadOnlyList<HazardCheck> Avoid, HazardEffect Effect);
+
+    /// <summary>What a hazard does to whoever fails against it.</summary>
+    public abstract record HazardEffect
+    {
+        private HazardEffect()
+        {
+        }
+
+        /// <summary>
+        /// Swept <paramref name="Squares"/> along (<paramref name="Dx"/>, <paramref name="Dy"/>) —
+        /// Forced Movement — and, with <paramref name="LosesFooting"/>, an action spent regaining
+        /// their footing before they can act normally again.
+        /// </summary>
+        public sealed record Swept(int Squares, int Dx, int Dy, bool LosesFooting) : HazardEffect;
     }
 }

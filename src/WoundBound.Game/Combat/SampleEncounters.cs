@@ -256,6 +256,67 @@ namespace WoundBound.Game.Combat
             Ground = Setting.Patches(Terrain.Broken, (6, 0, 9, 1), (6, 7, 9, 8)),
         };
 
+        /// <summary>
+        /// The Ferry Shrine at Longreach Crossing (Lands of the Inner Sea, §10): a river running
+        /// north to south through the field, forded on a line of loose river stone — "Broken in the
+        /// ford itself … and Firm on both banks" — with deep water above and below the ford that has
+        /// to be swum. The Undertow waits in the ford: "Avoid: Normal (18), Athletics … or Endurance.
+        /// Effect: A character who fails is swept a Short distance downstream and must spend an
+        /// action regaining their footing before acting normally again." On the east bank stand the
+        /// shrine's low stone arch and the ferryman's hut, both solid.
+        /// </summary>
+        public static Setting LongreachCrossing { get; } = BuildLongreachCrossing();
+
+        private static Setting BuildLongreachCrossing()
+        {
+            var water = new Dictionary<GridPosition, WaterDepth>();
+            for (var x = 11; x <= 15; x++)
+            {
+                for (var y = -6; y < FieldHeight + 6; y++)
+                {
+                    water[new GridPosition(x, y)] = y is >= 7 and <= 9 ? WaterDepth.Shallow : WaterDepth.Deep;
+                }
+            }
+
+            return new Setting
+            {
+                Name = "Longreach Crossing",
+                Water = water,
+                Walls = Setting.Squares((18, 6, 18, 6), (18, 10, 18, 10), (20, 2, 22, 4)),
+                Hazards =
+                [
+                    new Hazard("the Undertow",
+                        "The ford looks calmer than it is — a slow, cold pull beneath the surface that's claimed more than one cart.",
+                        Setting.Squares((11, 7, 15, 9)),
+                        [new HazardCheck("Athletics", 18), new HazardCheck("Endurance", 18)],
+                        new HazardEffect.Swept(Squares: 4, Dx: 0, Dy: 1, LosesFooting: true)),
+                ],
+            };
+        }
+
+        /// <summary>
+        /// The Loom's Challenge hook at the Ferry Shrine: Skirmishers "use the shrine's blind
+        /// approach to stage an ambush" — here caught with the party mid-ford, where they stand at
+        /// −2 Stability and the Undertow underneath. Two Reedmarsh Skulkers and a Bandit Ambusher,
+        /// a Standard fight for three (GM Reference §5).
+        /// </summary>
+        public static Encounter FerryShrineAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var skulker = data.Adversary("Reedmarsh Skulker");
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(DumbFighter(data), new GridPosition(12, 8)),
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(13, 7)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(11, 9)),
+                CombatantFactory.FromAdversary(skulker, "Skulker by the arch", new GridPosition(19, 5)),
+                CombatantFactory.FromAdversary(skulker, "Skulker in the reeds", new GridPosition(20, 11)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: LongreachCrossing, environment: data.Environment);
+        }
+
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
         public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {

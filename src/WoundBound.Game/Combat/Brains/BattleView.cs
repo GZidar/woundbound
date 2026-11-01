@@ -149,6 +149,12 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>The party, the dying and the stable among them included — everyone a Heal could still reach.</summary>
         public IEnumerable<Combatant> PartyOnBoard => encounter.Combatants.Where(c => c.Side == Side.Party && c.OccupiesSquare);
 
+        /// <summary>Why <paramref name="combatant"/> can't regain the footing a hazard took, or null if they can.</summary>
+        public static string? RegainFootingRefusal(Combatant combatant) => Encounter.RegainFootingRefusal(combatant);
+
+        /// <summary>How a move there would go — its cost, its route, and whether any of it must be swum.</summary>
+        public MovePlan? PlanMove(Combatant mover, GridPosition square) => encounter.PlanMove(mover, square);
+
         /// <summary>Why <paramref name="combatant"/> can't stand up from Prone now, or null if they can.</summary>
         public static string? StandUpRefusal(Combatant combatant) => Encounter.StandUpRefusal(combatant);
 

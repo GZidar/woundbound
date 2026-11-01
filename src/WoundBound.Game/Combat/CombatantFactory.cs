@@ -48,6 +48,9 @@ namespace WoundBound.Game.Combat
                 StaminaMax = stats.Stamina,
                 Stamina = build.Play.CurrentStamina ?? stats.Stamina,
                 TacticalSpendsPerRound = stats.TacticalSpendsPerRound,
+                SkillBonusFor = CharacterCalculator.TryGetSkillGroups(build, out var groups, out _) && groups is not null
+                    ? ability => groups.FirstOrDefault(g => g.Ability == ability)?.Bonus ?? 0
+                    : _ => 0,
             };
         }
 
@@ -74,6 +77,7 @@ namespace WoundBound.Game.Combat
             IsSwarm = info.Role == AdversaryRole.Swarm,
             Role = info.Role,
             Morale = Morale.FromStatblock(info),
+            SkillBonusFor = info.Kind == AdversaryKind.Combat ? SkillsOf(info) : _ => 0,
             IsMinion = info.Role == AdversaryRole.Minion,
             StaminaMax = info.Stamina,
             Stamina = info.Stamina,
@@ -114,6 +118,12 @@ namespace WoundBound.Game.Combat
             return weight is { } w
                 ? new WeaponDefinition { Name = attackName, IsRanged = true, Weight = w, Grip = grip, Edge = WeaponEdge.Cutting, TwoHanded = true }
                 : null;
+        }
+
+        private static Func<Ability, int> SkillsOf(StartingAdversaryInfo info)
+        {
+            var template = info.ToTemplate();
+            return ability => AdversarySkillCalculator.Bonus(template, ability);
         }
 
         /// <summary>A shield in the loadout in hand (Core Rules §15, "Equipped Items").</summary>

@@ -86,6 +86,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Move to a square hauling whoever they hold.</summary>
         public sealed record Drag(GridPosition Square) : PartyStep;
 
+        /// <summary>Spend the action regaining the footing a hazard took.</summary>
+        public sealed record RegainFooting : PartyStep;
+
         /// <summary>Let go of whoever they're holding.</summary>
         public sealed record LetGo : PartyStep;
 

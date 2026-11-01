@@ -28,6 +28,12 @@ namespace WoundBound.Game.Combat
         AwaitingReaction,
 
         Victory,
+
+        /// <summary>
+        /// The fight is over because the party got clear: foes still willing to fight were left
+        /// beyond Long of everybody. It ends the combat — nobody is on the board — but nobody was beaten.
+        /// </summary>
+        Withdrew,
         Defeat
     }
 
@@ -277,7 +283,8 @@ namespace WoundBound.Game.Combat
             var best = Setting.Visibility;
             foreach (var source in sources)
             {
-                if (RangeBandCalculator.BandForSquares(bands, source.DistanceTo(square)) is not { } band)
+                if (RangeBandCalculator.BandForSquares(bands, source.DistanceTo(square)) is not { } band
+                    || (Setting.Walls.Count > 0 && !Sight.Clear(source, square, Setting.IsWall)))
                 {
                     continue;
                 }
@@ -289,7 +296,8 @@ namespace WoundBound.Game.Combat
 
             foreach (var fire in Setting.Fires)
             {
-                if (RangeBandCalculator.BandForSquares(bands, fire.DistanceTo(square)) is { } band)
+                if (RangeBandCalculator.BandForSquares(bands, fire.DistanceTo(square)) is { } band
+                    && (Setting.Walls.Count == 0 || Sight.Clear(fire, square, Setting.IsWall)))
                 {
                     var grade = EnvironmentCalculator.VisibilityFromLight(tables, 0, builtFire: true, band);
                     best = grade < best ? grade : best;
@@ -439,7 +447,7 @@ namespace WoundBound.Game.Combat
 
         public event Action<string>? Logged;
 
-        public bool IsOver => Phase is EncounterPhase.Victory or EncounterPhase.Defeat;
+        public bool IsOver => Phase is EncounterPhase.Victory or EncounterPhase.Defeat or EncounterPhase.Withdrew;
 
         public IEnumerable<Combatant> Fighting(Side side) => combatants.Where(c => c.Side == side && !c.IsOutOfFight);
 
@@ -554,6 +562,11 @@ namespace WoundBound.Game.Combat
                 return "No action left to do it with.";
             }
 
+            if (!asReaction && actor.NeedsFooting)
+            {
+                return FootingFirst;
+            }
+
             if (actor.IsSwarm)
             {
                 return "A Swarm has no hands to put on anybody.";
@@ -612,7 +625,7 @@ namespace WoundBound.Game.Combat
                 return $"{target.Name} has to be adjacent.";
             }
 
-            return actor.ActionsRemaining < 1 ? "No action left to do it with." : null;
+            return actor.ActionsRemaining < 1 ? "No action left to do it with." : actor.NeedsFooting ? FootingFirst : null;
         }
 
         /// <summary>
@@ -650,7 +663,33 @@ namespace WoundBound.Game.Combat
                     : $"{action} has already tended {target.Name}'s {track} — only a fresh wound makes it worth doing again.";
             }
 
-            return actor.ActionsRemaining < 1 ? "No action left to do it with." : null;
+            return actor.ActionsRemaining < 1 ? "No action left to do it with." : actor.NeedsFooting ? FootingFirst : null;
+        }
+
+        private const string FootingFirst = "Off their footing — the action has to go on regaining it first.";
+
+        /// <summary>Why <paramref name="combatant"/> can't spend the action regaining their footing, or null if they can.</summary>
+        public static string? RegainFootingRefusal(Combatant combatant) =>
+            !combatant.NeedsFooting ? $"{combatant.Name} has their footing."
+            : combatant.ActionsRemaining < 1 ? "Regaining footing takes an action." : null;
+
+        /// <summary>Spends the action regaining the footing a hazard took (GM Reference §13).</summary>
+        public bool TryRegainFooting()
+        {
+            if (Phase != EncounterPhase.PartyTurn || Active is not { } c || RegainFootingRefusal(c) is not null)
+            {
+                return false;
+            }
+
+            RegainFooting(c);
+            return true;
+        }
+
+        private void RegainFooting(Combatant c)
+        {
+            c.ActionsRemaining--;
+            c.NeedsFooting = false;
+            Write($"{c.Name} gets their footing back.");
         }
 
         /// <summary>
@@ -694,7 +733,7 @@ namespace WoundBound.Game.Combat
                 }
             }
 
-            return bearer.ActionsRemaining < 1 ? "No action left to raise it with." : null;
+            return bearer.ActionsRemaining < 1 ? "No action left to raise it with." : bearer.NeedsFooting ? FootingFirst : null;
         }
 
         /// <summary>
@@ -736,7 +775,8 @@ namespace WoundBound.Game.Combat
         }
 
         public bool CanAttack(Combatant attacker, Combatant target) =>
-            attacker.Side != target.Side
+            !attacker.NeedsFooting
+            && attacker.Side != target.Side
             && (!target.IsOutOfFight || target.IsDefenceless)
             && attacker.ActionsRemaining > 0
             && PlanAttack(attacker, target).CanAttack;
@@ -772,6 +812,10 @@ namespace WoundBound.Game.Combat
         internal AttackPlan PlanAttackWith(Combatant attacker, AttackProfile attack, GridPosition from, Combatant target, GridPosition? targetAt = null)
         {
             var distance = from.DistanceTo(targetAt ?? target.Position);
+            if (distance > 1 && Setting.Walls.Count > 0 && !Sight.Clear(from, targetAt ?? target.Position, Setting.IsWall))
+            {
+                return new AttackPlan("Something solid is in the way.", 0, 0, null, "Something solid is in the way.", attack);
+            }
 
             if (!attack.IsRanged)
             {
@@ -1393,13 +1437,22 @@ namespace WoundBound.Game.Combat
             }
 
             // Ordinary movement in every other way: leaving a character's reach draws reactions.
-            Relocate(adversary, closeIn.Square, arrivedAt =>
+            var route = PlanMove(adversary, closeIn.Square)!;
+            if (!Swims(adversary, route, "its move"))
             {
-                var crossed = adversary.Position.DistanceTo(arrivedAt);
+                Next();
+                return;
+            }
+
+            var setOff = adversary.Position;
+            Relocate(adversary, route.Path, arrivedAt =>
+            {
+                var crossed = setOff.DistanceTo(arrivedAt);
                 if (!adversary.IsOutOfFight)
                 {
-                    var from = adversary.Position;
+                    var from = setOff;
                     adversary.Position = arrivedAt;
+                    lastMoved = adversary;
                     var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(arrivedAt));
                     Write($"{adversary.Name} didn't act this round, and closes in {crossed} square(s) ({band}).");
                     CheckHolds();
@@ -1564,6 +1617,16 @@ namespace WoundBound.Game.Combat
                     Drag(actor, drag.Square, dragCost, () => TakeStep(turn, done));
                     return;
 
+                case GmStep.RegainFooting:
+                    if (RegainFootingRefusal(actor) is { } cannotRegain)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} regain its footing: {cannotRegain}");
+                    }
+
+                    RegainFooting(actor);
+                    TakeStep(turn, done);
+                    return;
+
                 case GmStep.StandUp:
                     if (StandUpRefusal(actor) is { } cannotStand)
                     {
@@ -1645,40 +1708,149 @@ namespace WoundBound.Game.Combat
         /// <paramref name="to"/>. "Leaving an enemy's reach is a trigger" however it was caused
         /// (Core Rules §9, "Movement").
         /// </summary>
-        private Queue<Combatant> LeavingReachOf(Combatant mover, GridPosition to) =>
+        private Queue<Combatant> LeavingReachOf(Combatant mover, IReadOnlyList<GridPosition> path) =>
             new(Fighting(mover.Side == Side.Party ? Side.Adversaries : Side.Party)
-                .Where(e => e.CanReach(mover.Position) && !e.CanReach(to)));
+                .Select(e => (Enemy: e, At: LeaveIndex(e, path)))
+                .Where(x => x.At is not null)
+                .OrderBy(x => x.At)
+                .Select(x => x.Enemy));
 
         /// <summary>
-        /// Carries <paramref name="mover"/> towards <paramref name="to"/>, offering a reaction to
-        /// each enemy whose reach it leaves. Says where it ends up: <paramref name="to"/>, or the
+        /// Where along <paramref name="path"/> it leaves <paramref name="enemy"/>'s reach — the
+        /// last square still within it before the step out — or null if it never does. A route that
+        /// passes through somebody's reach and out again leaves it, however briefly it was in.
+        /// </summary>
+        private static int? LeaveIndex(Combatant enemy, IReadOnlyList<GridPosition> path)
+        {
+            for (var i = 0; i + 1 < path.Count; i++)
+            {
+                if (enemy.CanReach(path[i]) && !enemy.CanReach(path[i + 1]))
+                {
+                    return i;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Carries <paramref name="mover"/> along <paramref name="path"/>, offering a reaction to
+        /// each enemy whose reach it leaves on the way. Says where it ends up: the path's end, or the
         /// square it was caught in — "the rest of that move is lost" (Core Rules §9). Leaves the
         /// position for the caller to set, along with the log line.
         /// </summary>
-        private void Relocate(Combatant mover, GridPosition to, Action<GridPosition> then) =>
-            ReactToLeaving(mover, PathBetween(mover.Position, to), LeavingReachOf(mover, to), caughtAt => then(caughtAt ?? to));
+        private void Relocate(Combatant mover, IReadOnlyList<GridPosition> path, Action<GridPosition> then) =>
+            ReactToLeaving(mover, path.ToList(), LeavingReachOf(mover, path), caughtAt => then(caughtAt ?? path[^1]));
+
+        /// <summary>
+        /// Swimming deep water on the way (the user's ruling): Athletics against the setting's
+        /// Difficulty, once a move. Short of it, the move is spent and nobody goes anywhere.
+        /// </summary>
+        private bool Swims(Combatant mover, MovePlan plan, string paidWith)
+        {
+            if (!plan.SwimsDeepWater)
+            {
+                return true;
+            }
+
+            var (helped, harried) = TakeAid(mover);
+            var roll = RollAgainst(mover.SkillBonus("Athletics"), Setting.SwimDifficulty, helped, harried, mover);
+            if (roll.Success == true)
+            {
+                Write($"{mover.Name} swims the deep water: Athletics {DescribeRoll(roll)} against {Setting.SwimDifficulty}.");
+                return true;
+            }
+
+            Write($"{mover.Name} struggles in the deep water and gets nowhere: Athletics {DescribeRoll(roll)} against {Setting.SwimDifficulty} — {paidWith} spent.");
+            return false;
+        }
 
         private void Move(Combatant mover, GridPosition square, int cost, Action then)
         {
+            var plan = PlanMove(mover, square)!;
+            var start = mover.Position;
             var paidWith = PayMoves(mover, cost);
             mover.HasMovedThisTurn = true;
+            if (!Swims(mover, plan, paidWith))
+            {
+                then();
+                return;
+            }
 
-            Relocate(mover, square, arrivedAt =>
+            Relocate(mover, plan.Path, arrivedAt =>
             {
                 if (!mover.IsOutOfFight)
                 {
-                    var from = mover.Position;
+                    var from = start;
                     mover.Position = arrivedAt;
+                    lastMoved = mover;
                     var band = RangeBandCalculator.BandForSquares(bands, from.DistanceTo(arrivedAt));
                     Write(arrivedAt == from
                         ? $"{mover.Name} is stopped before it gets anywhere — {paidWith} spent for nothing."
                         : $"{mover.Name} moves {from.DistanceTo(arrivedAt)} square(s) ({band}) for {paidWith}" +
                           (arrivedAt == square ? "." : $", and is stopped at {arrivedAt}."));
                     CheckHolds();
+                    MeetHazards(mover, Crossed(plan.Path, arrivedAt), then);
+                    return;
                 }
 
                 then();
             });
+        }
+
+        /// <summary>The squares of <paramref name="path"/> actually crossed, up to and including where the mover stopped.</summary>
+        private static List<GridPosition> Crossed(IReadOnlyList<GridPosition> path, GridPosition stoppedAt)
+        {
+            var end = path.ToList().IndexOf(stoppedAt);
+            return path.Take(end < 0 ? path.Count : end + 1).ToList();
+        }
+
+        /// <summary>
+        /// A hazard met on the way (GM Reference §13): the creature rolls whichever of its Avoid
+        /// checks it is best at, and a failure is the hazard's effect. Once a move, at the first
+        /// hazard entered.
+        /// </summary>
+        private void MeetHazards(Combatant creature, IReadOnlyList<GridPosition> crossed, Action then)
+        {
+            var entered = crossed.Skip(1).Select(sq => (Square: sq, Hazard: Setting.HazardAt(sq))).FirstOrDefault(x => x.Hazard is not null);
+            if (entered.Hazard is not { } hazard || creature.IsOutOfFight)
+            {
+                then();
+                return;
+            }
+
+            var check = hazard.Avoid.MaxBy(c => creature.SkillBonus(c.Skill) - c.Difficulty)!;
+            var (helped, harried) = TakeAid(creature);
+            var roll = RollAgainst(creature.SkillBonus(check.Skill), check.Difficulty, helped, harried, creature);
+            var line = $"{creature.Name} meets {hazard.Name}: {check.Skill} {DescribeRoll(roll)} against {check.Difficulty}";
+            if (roll.Success == true)
+            {
+                Write(line + " — through it.");
+                then();
+                return;
+            }
+
+            switch (hazard.Effect)
+            {
+                case HazardEffect.Swept swept:
+                    Write(line + $" — swept away.");
+                    ForcedMove(creature, (swept.Dx, swept.Dy), swept.Squares, hazard.Name, cause: null, meetHazards: false, () =>
+                    {
+                        if (swept.LosesFooting && !creature.IsOutOfFight)
+                        {
+                            creature.NeedsFooting = true;
+                            Write($"{creature.Name} must spend an action regaining their footing before acting normally again.");
+                        }
+
+                        then();
+                    });
+                    return;
+
+                default:
+                    Write(line + ".");
+                    then();
+                    return;
+            }
         }
 
         /// <summary>
@@ -1698,6 +1870,13 @@ namespace WoundBound.Game.Combat
                 if (mover.IsOutOfFight || enemy.IsOutOfFight || TacticalSpendRefusal(enemy) is not null)
                 {
                     continue;
+                }
+
+                // The blow lands where the mover is when it leaves: the last square of the route
+                // still within this enemy's reach.
+                if (LeaveIndex(enemy, path) is { } leaving && leaving < path.Count)
+                {
+                    mover.Position = path[leaving];
                 }
 
                 if (enemy.Side == Side.Adversaries)
@@ -1733,7 +1912,8 @@ namespace WoundBound.Game.Combat
                     continue;
                 }
 
-                var catchAt = path.LastOrDefault(square => square.DistanceTo(enemy.Position) <= enemy.OwnReach
+                var leftAt = LeaveIndex(enemy, path) ?? 0;
+                var catchAt = path.Take(leftAt + 1).LastOrDefault(square => square.DistanceTo(enemy.Position) <= enemy.OwnReach
                     && (square == mover.Position || At(square) is null), mover.Position);
                 var reacting = enemy;
 
@@ -2138,8 +2318,10 @@ namespace WoundBound.Game.Combat
                 // The holder's own leaving draws reactions first — from everyone but the creature it
                 // hauls, which comes along — and whoever's reach the held creature is hauled out of,
                 // the holder's allies, may then react to it.
-                var holderReactors = new Queue<Combatant>(LeavingReachOf(holder, square).Where(e => e != held));
-                ReactToLeaving(holder, PathBetween(holder.Position, square), holderReactors, caughtAt =>
+                var route = PlanMove(holder, square)?.Path ?? PathBetween(holder.Position, square);
+                var setOff = holder.Position;
+                var holderReactors = new Queue<Combatant>(LeavingReachOf(holder, route).Where(e => e != held));
+                ReactToLeaving(holder, route.ToList(), holderReactors, caughtAt =>
                 {
                     var arrivedAt = caughtAt ?? square;
                     if (holder.IsOutOfFight)
@@ -2148,19 +2330,19 @@ namespace WoundBound.Game.Combat
                         return;
                     }
 
-                    var from = holder.Position;
+                    var from = setOff;
                     holder.Position = arrivedAt;
+                    lastMoved = holder;
                     Write($"{holder.Name} moves {from.DistanceTo(arrivedAt)} square(s), hauling {held.Name}, for {paidWith}.");
 
                     var landing = SquaresAround(arrivedAt, holder.OwnReach)
-                        .Where(sq => sq == heldFrom || At(sq) is null)
+                        .Where(sq => sq == heldFrom || (At(sq) is null && !Setting.IsWall(sq)))
                         .OrderBy(sq => sq.DistanceTo(heldFrom))
                         .ThenBy(sq => (sq.X - heldFrom.X) * (sq.X - heldFrom.X) + (sq.Y - heldFrom.Y) * (sq.Y - heldFrom.Y))
                         .Select(sq => (GridPosition?)sq)
                         .FirstOrDefault() ?? heldFrom;
 
-                    var reactors = new Queue<Combatant>(Fighting(holder.Side)
-                        .Where(a => a != holder && a.CanReach(heldFrom) && !a.CanReach(landing)));
+                    var reactors = new Queue<Combatant>(LeavingReachOf(held, PathBetween(heldFrom, landing)).Where(a => a != holder));
 
                     ReactToLeaving(held, PathBetween(heldFrom, landing), reactors, caughtAt =>
                     {
@@ -2360,10 +2542,20 @@ namespace WoundBound.Game.Combat
         /// distance left uncrossed is Body wounds, armour absorbing as usual. The target may arrest
         /// it for 1 Stamina, and leaving an enemy's reach on the way draws reactions.
         /// </summary>
-        private void Shove(Combatant shover, Combatant target, Action then)
+        private void Shove(Combatant shover, Combatant target, Action then) =>
+            ForcedMove(target, (Math.Sign(target.Position.X - shover.Position.X), Math.Sign(target.Position.Y - shover.Position.Y)),
+                shover.OwnReach, $"{shover.Name}'s shove", shover, meetHazards: true, then);
+
+        /// <summary>
+        /// Forced Movement (Core Rules §9): <paramref name="distance"/> squares in a straight line
+        /// along <paramref name="step"/>, stopping at anything solid — a creature or a wall — where
+        /// the distance left uncrossed is Body wounds, armour absorbing as usual. The target may
+        /// arrest it for 1 Stamina; being carried out of an enemy's reach draws reactions, and may
+        /// see the target caught on the way; ground carried onto may hold a hazard.
+        /// </summary>
+        /// <param name="cause">Who is doing the moving, if anybody — a hazard isn't anybody.</param>
+        private void ForcedMove(Combatant target, (int X, int Y) step, int distance, string what, Combatant? cause, bool meetHazards, Action then)
         {
-            var step = (X: Math.Sign(target.Position.X - shover.Position.X), Y: Math.Sign(target.Position.Y - shover.Position.Y));
-            var distance = shover.OwnReach;
             var destination = target.Position;
             var crossed = 0;
             string? stoppedBy = null;
@@ -2377,16 +2569,23 @@ namespace WoundBound.Game.Combat
                     break;
                 }
 
+                if (Setting.IsWall(next))
+                {
+                    stoppedBy = "the wall";
+                    break;
+                }
+
                 destination = next;
                 crossed++;
             }
 
             var impact = distance - crossed;
             var into = stoppedBy is null ? string.Empty : $" into {stoppedBy} — {impact} Body before armour";
+            var path = PathBetween(target.Position, destination);
 
             OfferReaction(
-                new PendingReaction(ReactionKind.Arrest, target, shover, Roll: null, Threshold: 0,
-                    $"{shover.Name} shoves {target.Name} {crossed} square(s){into}. Arresting it (1 Stamina) keeps them where they stand.",
+                new PendingReaction(ReactionKind.Arrest, target, cause ?? target, Roll: null, Threshold: 0,
+                    $"{what} carries {target.Name} {crossed} square(s){into}. Arresting it (1 Stamina) keeps them where they stand.",
                     ImpactWounds: impact),
                 arrested =>
                 {
@@ -2400,15 +2599,16 @@ namespace WoundBound.Game.Combat
                     // Shoved out of an enemy's reach is leaving it (Core Rules §9, "Forced Movement") —
                     // the shover's own included — and a foe shoved past somebody can be caught on the
                     // way through, where the push ends.
-                    ReactToLeaving(target, PathBetween(target.Position, destination), LeavingReachOf(target, destination), caughtAt =>
+                    ReactToLeaving(target, path, LeavingReachOf(target, path), caughtAt =>
                     {
                         // Caught on the way through, the push ends where the catch put them.
                         if (caughtAt is null && !target.IsOutOfFight)
                         {
                             target.Position = destination;
+                            lastMoved = target;
                             if (crossed > 0)
                             {
-                                Write($"{target.Name} is pushed {crossed} square(s).");
+                                Write($"{target.Name} is carried {crossed} square(s).");
                             }
 
                             if (impact > 0)
@@ -2422,6 +2622,12 @@ namespace WoundBound.Game.Combat
                         }
 
                         CheckHolds();
+                        if (meetHazards && caughtAt is null)
+                        {
+                            MeetHazards(target, path, then);
+                            return;
+                        }
+
                         then();
                     });
                 });
@@ -2734,11 +2940,15 @@ namespace WoundBound.Game.Combat
 
             if (stillOnField.Count == 0)
             {
-                Phase = EncounterPhase.Victory;
+                // Left behind while still willing to fight is the party getting away, not winning.
+                var leftBehind = combatants.Any(c => c.Side == Side.Adversaries && c.HasFled && !c.IsBroken && c.WasOutdistanced);
+                Phase = leftBehind ? EncounterPhase.Withdrew : EncounterPhase.Victory;
                 Active = null;
-                Write(combatants.Any(c => c.Side == Side.Adversaries && c.HasFled)
-                    ? "No foe is left on the board. Victory!"
-                    : "The last foe falls. Victory!");
+                Write(leftBehind
+                    ? "The party breaks contact — foes still willing to fight are left behind, beyond Long."
+                    : combatants.Any(c => c.Side == Side.Adversaries && c.HasFled)
+                        ? "No foe is left on the board. Victory!"
+                        : "The last foe falls. Victory!");
                 ReportObjectives();
                 return true;
             }
@@ -2747,25 +2957,64 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>Every free square <paramref name="mover"/> could reach for at most <paramref name="moves"/> moves, with the price of each.</summary>
-        internal Dictionary<GridPosition, int> SquaresWithin(Combatant mover, int moves)
+        internal Dictionary<GridPosition, int> SquaresWithin(Combatant mover, int moves) =>
+            MapFor(mover).All.Where(o => o.Value.Cost <= moves).ToDictionary(o => o.Key, o => o.Value.Cost);
+
+        private readonly Dictionary<Combatant, (int Stamp, MovementMap Map)> movementMaps = new();
+
+        /// <summary>
+        /// Every route <paramref name="mover"/> could take from where it stands, worked out once for
+        /// as long as nobody on the board moves.
+        /// </summary>
+        private MovementMap MapFor(Combatant mover)
         {
-            // The ground goes on past the map's edges, so look as far as the moves could carry them.
-            var squares = new Dictionary<GridPosition, int>();
-            var stride = SquaresFor(mover.Speed, moves);
-            for (var y = mover.Position.Y - stride; y <= mover.Position.Y + stride; y++)
+            // As far as the moves it could have would carry it: two for a fresh turn, more with
+            // actions bought.
+            var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover))));
+            var stamp = HashCode.Combine(BoardStamp(mover), reach);
+            if (movementMaps.TryGetValue(mover, out var known) && known.Stamp == stamp)
             {
-                for (var x = mover.Position.X - stride; x <= mover.Position.X + stride; x++)
-                {
-                    var square = new GridPosition(x, y);
-                    if (PriceOfMove(mover, square) is { } cost && cost <= moves)
-                    {
-                        squares[square] = cost;
-                    }
-                }
+                return known.Map;
             }
 
-            return squares;
+            var tables = environment;
+            var enemySide = mover.Side == Side.Party ? Side.Adversaries : Side.Party;
+            var standing = combatants.Where(c => c.OccupiesSquare && c != mover).GroupBy(c => c.Position).ToDictionary(g => g.Key, g => g.First());
+            var threats = Fighting(enemySide).ToList();
+            var map = new MovementMap(
+                mover.Position,
+                radius: reach,
+                isWall: Setting.IsWall,
+                isClosed: square => standing.TryGetValue(square, out var there)
+                    && (there.Side != mover.Side || threats.Any(e => e.CanReach(square))),
+                canStop: square => !standing.ContainsKey(square),
+                isBroken: square => tables is not null && Setting.GroundAt(square) == Terrain.Broken,
+                isDeep: Setting.IsDeepWater,
+                price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed),
+                brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken));
+            movementMaps[mover] = (stamp, map);
+            return map;
         }
+
+        /// <summary>Changes whenever anything that shapes a route does: who stands where, and who threatens what.</summary>
+        private int BoardStamp(Combatant mover)
+        {
+            var hash = new HashCode();
+            hash.Add(mover.Speed);
+            foreach (var c in combatants)
+            {
+                hash.Add(c.Position);
+                hash.Add(c.OccupiesSquare);
+                hash.Add(c.IsOutOfFight);
+                hash.Add(c.Reach);
+            }
+
+            return hash.ToHashCode();
+        }
+
+        /// <summary>How a move to <paramref name="square"/> would go, or null if it can't be made at all.</summary>
+        internal MovePlan? PlanMove(Combatant mover, GridPosition square) =>
+            square == mover.Position ? null : MapFor(mover).To(square);
 
         /// <summary>What a move to <paramref name="square"/> is priced at, whatever is left to pay with; null where nobody could stop there.</summary>
         /// <summary>
@@ -2773,22 +3022,7 @@ namespace WoundBound.Game.Combat
         /// where nobody could stop there. Broken ground anywhere the move begins, ends or passes
         /// through adds a move (Core Rules §9, "Terrain").
         /// </summary>
-        private int? PriceOfMove(Combatant mover, GridPosition square)
-        {
-            if (square == mover.Position || At(square) is not null
-                || RangeBandCalculator.MoveCost(bands, mover.Position.DistanceTo(square), mover.Speed) is not { } cost)
-            {
-                return null;
-            }
-
-            if (environment is { } tables && Setting.Ground.Count > 0)
-            {
-                var worst = PathBetween(mover.Position, square).Max(sq => EnvironmentCalculator.ExtraMoveCost(tables, Setting.GroundAt(sq)));
-                cost += worst;
-            }
-
-            return cost;
-        }
+        private int? PriceOfMove(Combatant mover, GridPosition square) => PlanMove(mover, square)?.Cost;
 
         private static string Describe(AttackOutcome outcome)
         {
@@ -2854,12 +3088,19 @@ namespace WoundBound.Game.Combat
         /// Takes off the board every adversary no character has within Long — it has got clear,
         /// and takes no further part. Whatever it was holding, it let go of to run.
         /// </summary>
+        /// <summary>Whoever last changed square, by their own feet or by force — to tell a foe leaving from the party leaving it.</summary>
+        private Combatant? lastMoved;
+
         private void CheckDepartures()
         {
             foreach (var gone in Fighting(Side.Adversaries).Where(a => !IsWithinLongOfParty(a.Position)).ToList())
             {
                 Release(gone, "lets go");
                 gone.HasFled = true;
+
+                // Whose move put it out of reach: a character walking off is the party getting clear;
+                // the creature's own going, or being carried off, is it leaving.
+                gone.WasOutdistanced = lastMoved is { Side: Side.Party };
                 Write($"{gone.Name} is beyond Long of everyone, and off the board.");
             }
         }

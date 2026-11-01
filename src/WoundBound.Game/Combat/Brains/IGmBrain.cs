@@ -95,6 +95,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Stand up from Prone, for a move.</summary>
         public sealed record StandUp : GmStep;
 
+        /// <summary>Spend the action regaining the footing a hazard took.</summary>
+        public sealed record RegainFooting : GmStep;
+
         /// <summary>Help an adjacent ally or Harry an adjacent enemy, with the action.</summary>
         public sealed record Aid(Rules.Enums.CombatAction Action, Combatant Target) : GmStep;
 
