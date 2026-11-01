@@ -149,7 +149,7 @@ namespace WoundBound.Game.Combat
             }
 
             var shelterers = new Queue<Combatant>(combatants.Where(c => c.Side == hurt.Side && c != hurt && c.HasShelter && !c.HasShelteredThisRound
-                && !c.IsOutOfFight && c.Position.DistanceTo(hurt.Position) <= ShortRangeSquares));
+                && !c.IsOutOfFight && c.DistanceTo(hurt) <= ShortRangeSquares));
             OfferShelter(hurt, amount, type, shelterers, then);
         }
 

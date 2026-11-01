@@ -25,7 +25,7 @@ namespace WoundBound.Game.Combat.Brains
             view.EnemiesOf(actor)
                 .Where(c => BattleView.ControlRefusal(actor, ControlAction.Trip, c) is null)
                 .Where(c => view.Adversaries.Any(a => a != actor && !a.IsProne
-                    && (a.CanReach(c.Position) || view.StrikeSquare(a, c) is not null)))
+                    && (a.CanReach(c) || view.StrikeSquare(a, c) is not null)))
                 .OrderBy(c => c.StabilityThreshold)
                 .FirstOrDefault();
     }

@@ -39,7 +39,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     SpellType.Harm => enemies
                         .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => HarmWorth(actor, spell, plan)))),
                     SpellType.Heal => View.PartyOnBoard.Concat(View.Adversaries)
-                        .Where(c => c.Side == actor.Side && c != actor && c.Position.DistanceTo(at) <= 1)
+                        .Where(c => c.Side == actor.Side && c != actor && c.DistanceTo(at) <= 1)
                         .Select(c => (Mend(spell, c), (Func<CastPlan, double>)(plan => HealWorth(actor, spell, plan)))),
                     SpellType.Buff when usesTricks => View.PartyOnBoard.Concat(View.Adversaries)
                         .Where(c => c.Side == actor.Side && !c.IsOutOfFight)
@@ -95,7 +95,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             foreach (var aim in Aims)
             {
-                var starts = enemies.Where(e => e.Position.DistanceTo(at) <= 12).Select(e => e.Position)
+                var starts = enemies.Where(e => e.DistanceTo(at) <= 12).SelectMany(e => e.Footprint)
                     .Append(new GridPosition(at.X + aim.X, at.Y + aim.Y))
                     .Distinct();
                 foreach (var start in starts)
@@ -108,7 +108,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         /// <summary>Each block that puts at least one enemy under it.</summary>
         private static IEnumerable<GridPosition> VolumeCorners(SpellDefinition spell, IEnumerable<Combatant> enemies) =>
-            enemies.SelectMany(e => SpellArea.CornersCovering(e.Position, spell.Size)).Distinct();
+            enemies.SelectMany(e => e.Footprint).SelectMany(sq => SpellArea.CornersCovering(sq, spell.Size)).Distinct();
 
         /// <summary>
         /// The cheapest way to pay for <paramref name="cast"/> that the rules allow: its own pool, or
@@ -223,6 +223,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var odds = Odds.Of(plan.CastBonus, dodge + answer, target.IsDefenceless,
                     actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried);
                 var (dealt, kill) = Damage(actor, spell, target, type);
+                if (target.IsSwarm)
+                {
+                    // Only a blanket over the whole mass gets the dice; a corner of it, a wound a square (GM Reference §3).
+                    (dealt, kill) = type != WoundType.Body ? (0, 0)
+                        : Encounter.SwarmCoverage(target, plan) is { } covered ? (Math.Min(covered, target.Body), covered >= target.Body ? 1 : 0)
+                        : (dealt, kill);
+                }
                 var value = (odds.Success * dealt * PerWound(target, type) + 0.3 * odds.Success * kill * assess.Value(target))
                             * (target.Side == actor.Side ? -1.5 : 1);
                 worth += value;
@@ -366,7 +373,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 2 => holds * holds,
                 _ => 0,
             };
-            var engaged = victims.Any(a => a.Position.DistanceTo(target.Position) <= target.Reach);
+            var engaged = victims.Any(a => a.DistanceTo(target) <= target.Reach);
             return lands * (gone * 0.9 * assess.Value(target) + (1 - gone) * turns * (engaged ? 0.8 : 0.4) * turnWorth);
         }
 
@@ -379,7 +386,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var target = plan.Targets[0];
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
             var chance = Odds.Of(plan.CastBonus, target.StabilityThreshold + answer).Success;
-            var engaged = View.EnemiesOf(target).Count(a => a.Position.DistanceTo(target.Position) <= target.Reach);
+            var engaged = View.EnemiesOf(target).Count(a => a.DistanceTo(target) <= target.Reach);
             var separation = engaged > 0 ? 0.6 * assess.Threat(target) * assess.PerWound(actor) : 0;
 
             var step = (Math.Sign(target.Position.X - actor.Position.X), Math.Sign(target.Position.Y - actor.Position.Y));
@@ -408,7 +415,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             double best = 0;
             foreach (var spell in actor.Spells.Where(s => s.SpellType == SpellType.Harm && s.Target == SpellTarget.One))
             {
-                foreach (var enemy in View.EnemiesOf(actor).Where(e => e.Position.DistanceTo(square) <= 8))
+                foreach (var enemy in View.EnemiesOf(actor).Where(e => e.DistanceTo(square) <= 8))
                 {
                     var plan = View.PlanCastFrom(actor, square, new SpellCast(spell) { Target = enemy });
                     if (plan.CanCast)

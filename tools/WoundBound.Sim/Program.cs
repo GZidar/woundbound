@@ -53,6 +53,8 @@ Encounter Stage(IDiceRoller dice) => which switch
     "camp" => SampleEncounters.CampfireAmbush(data, dice, Gm()),
     "witches" => SampleEncounters.HedgeWitchesToll(data, dice, Gm()),
     "rivals" => SampleEncounters.RivalBand(data, dice, Gm()),
+    "swarm" => SampleEncounters.RatswarmOnTheCauseway(data, dice, Gm()),
+    "swarmopen" => SampleEncounters.RatswarmOnTheCauseway(data, dice, Gm(), openGround: true),
     _ => SampleEncounters.SignpostAmbush(data, dice, Gm()),
 };
 
@@ -66,6 +68,8 @@ var fight = which switch
     "ford" => "The Dumb Fighter, Salla and Drovan, ambushed mid-ford at Longreach Crossing by two Skulkers and an Ambusher",
     "witches" => "Salla, Drovan, Joren, Mirella and Elthric v a Tollroad Bandit, his wolf, and three casters: Hex-Caller, Bloodwright, Chanter",
     "rivals" => "Salla, Drovan, Joren, Mirella and Elthric v the Grey Lanterns, a rival company of five built from the same rules",
+    "swarm" => "Salla, Drovan, Joren, Mirella and Elthric v a Fenmoor Ratswarm and four Bramble Ratkin on the fen causeway",
+    "swarmopen" => "Salla, Drovan, Joren, Mirella and Elthric v a Fenmoor Ratswarm and four Bramble Ratkin on open ground",
     "camp" => "Salla, Drovan, Joren, Mirella and Elthric round their campfire at night v a Tollroad Bandit, two Timber Wolves and two Ambushers",
     "fordcasters" => "Salla, Drovan, Joren, Mirella and Elthric, ambushed mid-ford at Longreach Crossing by three Skulkers and two Ambushers",
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
@@ -74,11 +78,12 @@ var fight = which switch
 Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}.");
 Console.WriteLine();
 
-// --show N: play the one fight on seed N with the best utility party, and print its log.
+// --show N: play the one fight on seed N with the best utility party (or --show-as balanced|poor), and print its log.
 if (Text("--show", null) is { } show && int.TryParse(show, out var shown))
 {
     var one = Stage(new RandomDiceRoller(new Random(shown)));
-    Simulator.PlayOne(one, new UtilityPartyBrain(BrainSkill.Best));
+    var showAs = BrainSkill.Levels.FirstOrDefault(l => l.Name.Equals(Text("--show-as", "Best"), StringComparison.OrdinalIgnoreCase)) ?? BrainSkill.Best;
+    Simulator.PlayOne(one, new UtilityPartyBrain(showAs));
     Console.WriteLine(string.Join(Environment.NewLine, one.Log));
     return;
 }

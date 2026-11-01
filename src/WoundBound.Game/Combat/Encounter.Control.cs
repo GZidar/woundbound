@@ -252,7 +252,7 @@ namespace WoundBound.Game.Combat
         private void Frightened(Combatant creature, ControlHold hold, Action resume, Action endTurn)
         {
             var source = hold.Caster;
-            var distance = creature.Position.DistanceTo(source.Position);
+            var distance = creature.DistanceTo(source);
             if (environment is { } tables && RangeBandCalculator.BandForSquares(bands, distance) is { } seenBand
                 && !EnvironmentCalculator.AllowsTargeting(tables, VisibilityOf(source), seenBand))
             {
@@ -274,8 +274,8 @@ namespace WoundBound.Game.Combat
 
             var squares = CanMoveItself(creature) ? SquaresWithin(creature, MovesAvailable(creature)) : new Dictionary<GridPosition, int>();
             var further = squares
-                .Where(o => RangeBandCalculator.BandForSquares(bands, o.Key.DistanceTo(source.Position)) is not { } b || b > band)
-                .OrderBy(o => o.Value).ThenByDescending(o => o.Key.DistanceTo(source.Position))
+                .Where(o => RangeBandCalculator.BandForSquares(bands, creature.DistanceFrom(o.Key, source)) is not { } b || b > band)
+                .OrderBy(o => o.Value).ThenByDescending(o => creature.DistanceFrom(o.Key, source))
                 .Select(o => (Square: (GridPosition?)o.Key, Cost: o.Value))
                 .FirstOrDefault();
 
@@ -297,8 +297,8 @@ namespace WoundBound.Game.Combat
             }
 
             // Cornered: as far from the source as it can get, and the turn is spent regardless.
-            var best = squares.Where(o => o.Key.DistanceTo(source.Position) > distance)
-                .OrderByDescending(o => o.Key.DistanceTo(source.Position)).ThenBy(o => o.Value)
+            var best = squares.Where(o => creature.DistanceFrom(o.Key, source) > distance)
+                .OrderByDescending(o => creature.DistanceFrom(o.Key, source)).ThenBy(o => o.Value)
                 .Select(o => (Square: (GridPosition?)o.Key, Cost: o.Value))
                 .FirstOrDefault();
             Write($"{creature.Name} is Frightened of {source.Name}, and has nowhere to give ground to.");
@@ -318,7 +318,7 @@ namespace WoundBound.Game.Combat
         private void Confused(Combatant creature, Action resume, Action endTurn)
         {
             var inReach = combatants
-                .Where(o => o != creature && o.OccupiesSquare && (!o.IsOutOfFight || o.IsDefenceless) && creature.CanReach(o.Position))
+                .Where(o => o != creature && o.OccupiesSquare && (!o.IsOutOfFight || o.IsDefenceless) && creature.CanReach(o))
                 .ToList();
             if (inReach.Count == 0 || creature.ActionsRemaining < 1)
             {

@@ -77,7 +77,7 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Squares from <paramref name="square"/> to the nearest character still fighting.</summary>
         public int DistanceToNearestCharacter(GridPosition square) =>
-            Characters.Select(c => c.Position.DistanceTo(square)).DefaultIfEmpty(int.MaxValue).Min();
+            Characters.Select(c => c.DistanceTo(square)).DefaultIfEmpty(int.MaxValue).Min();
 
         /// <summary>Whether a character still fighting has <paramref name="square"/> within Long. An adversary nobody does has left the board.</summary>
         public bool IsWithinLongOfParty(GridPosition square) => encounter.IsWithinLongOfParty(square);
@@ -118,6 +118,10 @@ namespace WoundBound.Game.Combat.Brains
         public static bool CanReachFrom(Combatant attacker, GridPosition from, GridPosition square) =>
             attacker.CanReachFrom(from, square);
 
+        /// <summary>Whether a melee blow from <paramref name="from"/> could land on any square <paramref name="target"/> stands on.</summary>
+        public static bool CanReachFrom(Combatant attacker, GridPosition from, Combatant target) =>
+            attacker.CanReachFrom(from, target);
+
         /// <summary>Everybody still fighting on the other side from <paramref name="combatant"/>.</summary>
         public IEnumerable<Combatant> EnemiesOf(Combatant combatant) =>
             encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party);
@@ -127,7 +131,7 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>The closest enemy still fighting, or null if there's nobody left.</summary>
         public Combatant? NearestEnemy(Combatant combatant) =>
-            EnemiesOf(combatant).MinBy(e => combatant.Position.DistanceTo(e.Position));
+            EnemiesOf(combatant).MinBy(e => combatant.DistanceTo(e));
 
         /// <summary>
         /// The nearest free square at most <paramref name="moves"/> moves away from which
@@ -137,7 +141,7 @@ namespace WoundBound.Game.Combat.Brains
         {
             var origin = actor.Position;
             return SquaresWithin(actor, moves).Keys
-                .Where(square => actor.CanReachFrom(square, target.Position))
+                .Where(square => actor.CanReachFrom(square, target))
                 .OrderBy(square => square.DistanceTo(origin))
                 .Select(square => (GridPosition?)square)
                 .FirstOrDefault();

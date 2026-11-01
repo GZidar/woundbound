@@ -23,7 +23,35 @@ namespace WoundBound.Game.Combat
 
         public required Side Side { get; init; }
 
+        /// <summary>Where it stands — for a creature bigger than one square, the top-left corner of its footprint.</summary>
         public GridPosition Position { get; internal set; }
+
+        /// <summary>
+        /// How many squares across it stands: 1 for Tiny, Small and Medium, 2 for Large (4
+        /// squares), 3 for Huge (9) — GM Reference §9, "Role - Size Type".
+        /// </summary>
+        public int Across { get; init; } = 1;
+
+        /// <summary>Every square it stands on.</summary>
+        public IEnumerable<GridPosition> Footprint => Footprints.At(Position, Across);
+
+        /// <summary>Whether <paramref name="square"/> is one it stands on.</summary>
+        public bool Covers(GridPosition square) => Footprints.Contains(Position, Across, square);
+
+        /// <summary>
+        /// Holds the ground it stands on, closing it to enemies. A Swarm occupies none of its
+        /// squares: anyone may walk through the mass or stop in it (Core Rules §9, "Movement").
+        /// </summary>
+        public bool HoldsGround => !IsSwarm;
+
+        /// <summary>Squares from the nearest square of its footprint to <paramref name="square"/>.</summary>
+        public int DistanceTo(GridPosition square) => Footprints.Distance(Position, Across, square, 1);
+
+        /// <summary>Squares between the nearest squares of the two footprints — 0 where they share one.</summary>
+        public int DistanceTo(Combatant other) => Footprints.Distance(Position, Across, other.Position, other.Across);
+
+        /// <summary>Squares to <paramref name="other"/> were this creature standing at <paramref name="at"/>.</summary>
+        public int DistanceFrom(GridPosition at, Combatant other) => Footprints.Distance(at, Across, other.Position, other.Across);
 
         public required int BodyMax { get; init; }
 
@@ -536,10 +564,17 @@ namespace WoundBound.Game.Combat
         public bool CanReach(GridPosition square) => CanReachFrom(Position, square);
 
         /// <summary>Whether a melee blow from <paramref name="from"/>, were this creature standing there, could land on <paramref name="square"/>.</summary>
-        public bool CanReachFrom(GridPosition from, GridPosition square)
-        {
-            var distance = from.DistanceTo(square);
-            return distance <= Reach && !(MeleeAttack.IsUnwieldy && distance <= 1);
-        }
+        public bool CanReachFrom(GridPosition from, GridPosition square) => Reaches(Footprints.Distance(from, Across, square, 1));
+
+        /// <summary>Whether a melee blow could land on any square <paramref name="target"/> stands on.</summary>
+        public bool CanReach(Combatant target) => CanReachFrom(Position, target);
+
+        /// <summary>Whether a melee blow from <paramref name="from"/> could land on any square <paramref name="target"/> stands on.</summary>
+        public bool CanReachFrom(GridPosition from, Combatant target) => Reaches(DistanceFrom(from, target));
+
+        /// <summary>Whether a melee blow could land on a creature <paramref name="across"/> squares across standing with its corner on <paramref name="corner"/>.</summary>
+        public bool CanReachBlock(GridPosition corner, int across) => Reaches(Footprints.Distance(Position, Across, corner, across));
+
+        private bool Reaches(int distance) => distance <= Reach && !(MeleeAttack.IsUnwieldy && distance <= 1 && Reach > 0);
     }
 }

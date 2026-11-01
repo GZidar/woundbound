@@ -68,7 +68,8 @@ namespace WoundBoundGame
 
         /// <summary>The centre of the square a token belongs on — pinned to the edge when it's off the map.</summary>
         private Vector2 SquareCentreOf(Combatant c) =>
-            SquareRect(new GridPosition(Mathf.Clamp(c.Position.X, 0, encounter.Width - 1), Mathf.Clamp(c.Position.Y, 0, encounter.Height - 1))).GetCenter();
+            SquareRect(new GridPosition(Mathf.Clamp(c.Position.X, 0, encounter.Width - 1), Mathf.Clamp(c.Position.Y, 0, encounter.Height - 1))).GetCenter()
+            + Vector2.One * (CellSize * (c.Across - 1) / 2f);
 
         private Vector2 TokenCentre(Combatant c) => tokenAt.TryGetValue(c, out var at) ? at : SquareCentreOf(c);
 
@@ -195,7 +196,7 @@ namespace WoundBoundGame
         {
             null => null,
             WeaponManoeuvre.Cleave => new Manoeuvre(WeaponManoeuvre.Cleave, encounter.Fighting(Side.Adversaries)
-                .Where(e => e != target && attacker.CanReach(e.Position)).OrderBy(e => e.Body).FirstOrDefault()),
+                .Where(e => e != target && attacker.CanReach(e)).OrderBy(e => e.Body).FirstOrDefault()),
             { } kind => new Manoeuvre(kind),
         };
         private static readonly Color SpellArea = new(0.65f, 0.35f, 0.95f, 0.35f);
@@ -286,7 +287,7 @@ namespace WoundBoundGame
                 };
             }
 
-            return encounter.At(square) is { } target ? cast with { Target = target } : null;
+            return encounter.AnyAt(square) is { } target ? cast with { Target = target } : null;
         }
 
         /// <summary>Whether the armed Help, Harry, Heal, Meditate, Pray or Shield could be aimed at <paramref name="target"/>.</summary>
@@ -571,7 +572,7 @@ namespace WoundBoundGame
             // Choosing who goes next: click one of the characters still to act.
             if (encounter.Phase == EncounterPhase.ChoosingCharacter)
             {
-                if (encounter.At(clicked) is { } chosen)
+                if (encounter.AnyAt(clicked) is { } chosen)
                 {
                     encounter.TryBeginTurn(chosen);
                     Refresh();
@@ -592,7 +593,7 @@ namespace WoundBoundGame
                     encounter.TryCast(cast);
                 }
             }
-            else if (encounter.At(clicked) is { } occupant)
+            else if (encounter.AnyAt(clicked) is { } occupant)
             {
                 if (armed is { } action)
                 {
@@ -705,7 +706,8 @@ namespace WoundBoundGame
                 DrawRect(SquareRect(hover).Grow(-2), HoverOutline, filled: false, width: 2);
             }
 
-            foreach (var combatant in encounter.Combatants)
+            // A Swarm first, beneath: whoever stands in the mass is drawn on top of it.
+            foreach (var combatant in encounter.Combatants.OrderBy(c => c.HoldsGround))
             {
                 DrawToken(combatant, active);
             }
@@ -722,8 +724,9 @@ namespace WoundBoundGame
             var shownAt = new GridPosition(Mathf.Clamp(combatant.Position.X, 0, encounter.Width - 1), Mathf.Clamp(combatant.Position.Y, 0, encounter.Height - 1));
             var offMap = shownAt != combatant.Position;
             var centre = TokenCentre(combatant);
-            var rect = new Rect2(centre - new Vector2(CellSize, CellSize) / 2, new Vector2(CellSize, CellSize));
-            var radius = CellSize * (offMap ? 0.22f : 0.36f);
+            var across = CellSize * combatant.Across;
+            var rect = new Rect2(centre - new Vector2(across, across) / 2, new Vector2(across, across));
+            var radius = across * (offMap ? 0.22f : combatant.IsSwarm ? 0.46f : 0.36f);
 
             // Gone from the field altogether.
             if (combatant.HasFled)
@@ -741,7 +744,7 @@ namespace WoundBoundGame
 
             // A character dying or stable lies there, faded, still to be reached.
             var colour = ColourOf(combatant);
-            DrawCircle(centre, radius, combatant.IsDefenceless ? colour with { A = 0.35f } : colour);
+            DrawCircle(centre, radius, combatant.IsDefenceless ? colour with { A = 0.35f } : combatant.IsSwarm ? colour with { A = 0.5f } : colour);
 
             if (combatant == encounter.Active)
             {
@@ -769,7 +772,7 @@ namespace WoundBoundGame
             }
 
             DrawString(font, new Vector2(rect.Position.X, centre.Y + 6), Initials(combatant.Name), HorizontalAlignment.Center,
-                CellSize, Mathf.Max(9, CellSize / 4), Colors.White);
+                across, Mathf.Max(9, CellSize / 4), Colors.White);
 
             if (offMap)
             {
@@ -810,13 +813,13 @@ namespace WoundBoundGame
             }.Where(m => m is not null));
             if (marks.Length > 0)
             {
-                DrawString(font, new Vector2(rect.Position.X, rect.Position.Y + 13), marks, HorizontalAlignment.Center, CellSize, Mathf.Max(7, CellSize / 6),
+                DrawString(font, new Vector2(rect.Position.X, rect.Position.Y + 13), marks, HorizontalAlignment.Center, across, Mathf.Max(7, CellSize / 6),
                     new Color(1f, 0.85f, 0.5f));
             }
 
             // Body bar along the foot of the square.
             var inset = CellSize / 9f;
-            var bar = new Rect2(rect.Position.X + inset, rect.End.Y - inset - 2, CellSize - inset * 2, Mathf.Max(2, CellSize / 14));
+            var bar = new Rect2(rect.Position.X + inset, rect.End.Y - inset - 2, across - inset * 2, Mathf.Max(2, CellSize / 14));
             DrawRect(bar, new Color(0, 0, 0, 0.6f));
             var fraction = Mathf.Clamp((float)combatant.Body / combatant.BodyMax, 0, 1);
             DrawRect(new Rect2(bar.Position, new Vector2(bar.Size.X * fraction, bar.Size.Y)), new Color(0.35f, 0.85f, 0.4f));
@@ -1216,7 +1219,7 @@ namespace WoundBoundGame
             {
                 shown = acting;
             }
-            else if (hovered is { } square && encounter.At(square) is { Side: Side.Party } pointedAt)
+            else if (hovered is { } square && encounter.AnyAt(square) is { Side: Side.Party } pointedAt)
             {
                 shown = pointedAt;
             }
@@ -1303,14 +1306,14 @@ namespace WoundBoundGame
                        $"catching {string.Join(", ", plan.Targets.Select(t => t.Name))}.";
             }
 
-            if (encounter.Phase == EncounterPhase.ChoosingCharacter && encounter.At(square) is { Side: Side.Party } candidate)
+            if (encounter.Phase == EncounterPhase.ChoosingCharacter && encounter.AnyAt(square) is { Side: Side.Party } candidate)
             {
                 return encounter.PartyStillToAct.Contains(candidate)
                     ? $"Click to have {candidate.Name} act next."
                     : $"{candidate.Name} has already acted this round.";
             }
 
-            if (encounter.At(square) is { Side: Side.Adversaries } foe)
+            if (encounter.AnyAt(square) is { Side: Side.Adversaries } foe)
             {
                 var stats = $"{foe.Name}: Body {foe.Body}/{foe.BodyMax} · DT {foe.DodgeThreshold} · " +
                             $"{foe.Attack.Name} +{foe.Attack.AttackModifier}, {foe.Attack.DamageDiceCount}d{foe.Attack.DamageDieSides}" +

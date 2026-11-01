@@ -13,6 +13,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>Tricks this brain leaves alone even though it uses the rest — for measuring what each is worth.</summary>
         public IReadOnlySet<Trick> Off { get; init; } = new HashSet<Trick>();
 
+        /// <summary>
+        /// How many of the top-scored options a loose pick is made among. Without it, a choice
+        /// worth little more than standing about — a blow that costs a Swarm 1 wound — is drowned by
+        /// the hundreds of squares there are to walk to, and the brain wanders.
+        /// </summary>
+        public int Breadth { get; init; } = int.MaxValue;
+
         /// <summary>Whether this brain reaches for <paramref name="trick"/>.</summary>
         public bool Uses(Trick trick) => UsesTricks && !Off.Contains(trick);
 
@@ -20,10 +27,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public static BrainSkill Best { get; } = new("Best", Temperature: 0, Care: 1, UsesTricks: true);
 
         /// <summary>Usually the best, sometimes the second best.</summary>
-        public static BrainSkill Balanced { get; } = new("Balanced", Temperature: 0.6, Care: 0.8, UsesTricks: true);
+        public static BrainSkill Balanced { get; } = new("Balanced", Temperature: 0.6, Care: 0.8, UsesTricks: true) { Breadth = 3 };
 
         /// <summary>Picks loosely, barely minds where it stands, and never reaches past a plain blow.</summary>
-        public static BrainSkill Poor { get; } = new("Poor", Temperature: 2.0, Care: 0.3, UsesTricks: false);
+        public static BrainSkill Poor { get; } = new("Poor", Temperature: 2.0, Care: 0.3, UsesTricks: false) { Breadth = 8 };
 
         public static IReadOnlyList<BrainSkill> Levels { get; } = [Best, Balanced, Poor];
     }
@@ -231,6 +238,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var odds = Odds.Of(attack.AttackModifier, dodgeThreshold + answer, advantage, disadvantage);
             var plainHit = odds.Success - odds.CriticalSuccess;
 
+            // A single blow costs a Swarm exactly 1 wound, whatever is rolled (GM Reference §3).
+            if (target.IsSwarm)
+            {
+                return (odds.Success, odds.Success, target.Body <= 1 ? odds.Success : 0);
+            }
+
             var absorbs = Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise);
             var modifier = attack.DamageModifier + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
             var (plainDealt, plainKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: null, absorbs, target);
@@ -353,7 +366,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                             (dodge, die) = (shot.DodgeThreshold, shot.DamageDieSides);
                         }
                     }
-                    else if (square.DistanceTo(enemy.Position) <= attack.Reach + stride)
+                    else if (creature.DistanceFrom(square, enemy) <= attack.Reach + stride)
                     {
                         (dodge, die) = (creature.DodgeThreshold + view.VisibilityDodgeModifier(creature, square), attack.DamageDieSides);
                     }
@@ -369,7 +382,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var choices = 1 + view.EnemiesOf(enemy).Count(o => o != creature && o.Position.DistanceTo(enemy.Position) <= enemy.Reach + stride);
+                var choices = 1 + view.EnemiesOf(enemy).Count(o => o != creature && o.DistanceTo(enemy) <= enemy.Reach + stride);
                 expected += best / choices;
             }
 
@@ -385,7 +398,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return 0;
             }
 
-            foreach (var enemy in view.EnemiesOf(mover).Where(e => e.CanReach(mover.Position) && !e.CanReach(to) && BattleView.TacticalSpendRefusal(e) is null))
+            foreach (var enemy in view.EnemiesOf(mover).Where(e => e.CanReach(mover) && !e.CanReachBlock(to, mover.Across) && BattleView.TacticalSpendRefusal(e) is null))
             {
                 var plan = view.PlanAttack(enemy, mover);
                 if (plan.CanAttack)

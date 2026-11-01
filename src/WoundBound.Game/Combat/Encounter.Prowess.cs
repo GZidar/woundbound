@@ -140,7 +140,7 @@ namespace WoundBound.Game.Combat
             }
 
             if (manoeuvre.Kind == WeaponManoeuvre.Cleave
-                && (manoeuvre.Second is not { } second || second == target || second.Side == attacker.Side || second.IsOutOfFight || !attacker.CanReach(second.Position)))
+                && (manoeuvre.Second is not { } second || second == target || second.Side == attacker.Side || second.IsOutOfFight || !attacker.CanReach(second)))
             {
                 return "Cleave needs a second enemy within your Reach.";
             }
@@ -423,9 +423,10 @@ namespace WoundBound.Game.Combat
                 }
 
                 var absorbed = Math.Min(outcome.RolledDamage, InventoryCalculator.ArmourAbsorbedAgainst(second.Armour, WoundType.Body, isDirect: false));
-                Write($"Cleave: {roll.Total} against {second.Name}'s DT {against} — the sweep carries into {second.Name}: {outcome.RolledDamage} damage" +
-                      (absorbed > 0 ? $", armour absorbs {absorbed}." : "."));
-                Shelter(second, outcome.RolledDamage - absorbed, WoundType.Body, left =>
+                var through = second.IsSwarm ? 1 : outcome.RolledDamage - absorbed;
+                Write($"Cleave: {roll.Total} against {second.Name}'s DT {against} — the sweep carries into {second.Name}: " +
+                      (second.IsSwarm ? "1 wound, a Swarm's due from a single blow." : $"{outcome.RolledDamage} damage" + (absorbed > 0 ? $", armour absorbs {absorbed}." : ".")));
+                Shelter(second, through, WoundType.Body, left =>
                 {
                     TakeBodyWounds(second, left);
                     Write(second.IsOutOfFight ? $"{second.Name} is out of the fight." : $"{second.Name} has {second.Body}/{second.BodyMax} Body.");

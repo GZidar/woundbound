@@ -428,7 +428,7 @@ namespace WoundBound.Game.Combat
         /// on until every one of them is down, gone that far, or has given up.
         /// </summary>
         public bool IsWithinLongOfParty(GridPosition square) =>
-            Fighting(Side.Party).Any(c => RangeBandCalculator.BandForSquares(bands, c.Position.DistanceTo(square)) is not null);
+            Fighting(Side.Party).Any(c => RangeBandCalculator.BandForSquares(bands, c.DistanceTo(square)) is not null);
 
         /// <summary>The most squares <paramref name="speed"/> covers for <paramref name="moves"/> moves, by the band prices (Core Rules §9, "Speed").</summary>
         /// <param name="nimble">Priced as a Nimble character's: a Long move one cheaper (Core Rules §9, "Footwork").</param>
@@ -488,7 +488,14 @@ namespace WoundBound.Game.Combat
         public IEnumerable<Combatant> Fighting(Side side) => combatants.Where(c => c.Side == side && !c.IsOutOfFight);
 
         /// <summary>Whoever takes up <paramref name="square"/>: anybody still fighting, a character lying dying or stable there, or a foe who gave up.</summary>
-        public Combatant? At(GridPosition square) => combatants.FirstOrDefault(c => c.Position == square && c.OccupiesSquare);
+        public Combatant? At(GridPosition square) => combatants.FirstOrDefault(c => c.Covers(square) && c.OccupiesSquare && c.HoldsGround);
+
+        /// <summary>
+        /// Anybody to be found on <paramref name="square"/> — whoever holds it, or else a Swarm or
+        /// other creature that only stands there. For pointing at things, not for who's in the way.
+        /// </summary>
+        public Combatant? AnyAt(GridPosition square) =>
+            At(square) ?? combatants.FirstOrDefault(c => c.Covers(square) && c.OccupiesSquare);
 
         /// <summary>
         /// Whether <paramref name="square"/> is on the mapped ground — the grid the fight is drawn
@@ -613,7 +620,7 @@ namespace WoundBound.Game.Combat
                 return "A Swarm can be neither grabbed, shoved nor tripped: there's no body in it to take hold of.";
             }
 
-            var distance = actor.Position.DistanceTo(target.Position);
+            var distance = actor.DistanceTo(target);
             if (distance > actor.OwnReach)
             {
                 return $"Out of reach — hands reach {actor.OwnReach} square(s), whatever is in them, and {target.Name} is {distance} away.";
@@ -656,7 +663,7 @@ namespace WoundBound.Game.Combat
                 return $"{target.Name} isn't in the fight.";
             }
 
-            if (actor.Position.DistanceTo(target.Position) > 1)
+            if (actor.DistanceTo(target) > 1)
             {
                 return $"{target.Name} has to be adjacent.";
             }
@@ -687,7 +694,7 @@ namespace WoundBound.Game.Combat
                 return $"{target.Name} is beyond help.";
             }
 
-            if (target != actor && actor.Position.DistanceTo(target.Position) > 1)
+            if (target != actor && actor.DistanceTo(target) > 1)
             {
                 return $"{target.Name} has to be beside them.";
             }
@@ -763,7 +770,7 @@ namespace WoundBound.Game.Combat
                     return $"A {shield.Weight} shield covers nobody but its bearer.";
                 }
 
-                if (bearer.Position.DistanceTo(ally.Position) > bearer.Reach)
+                if (bearer.DistanceTo(ally) > bearer.Reach)
                 {
                     return $"{ally.Name} is beyond {bearer.Name}'s Reach.";
                 }
@@ -847,7 +854,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         internal AttackPlan PlanAttackWith(Combatant attacker, AttackProfile attack, GridPosition from, Combatant target, GridPosition? targetAt = null)
         {
-            var distance = from.DistanceTo(targetAt ?? target.Position);
+            var distance = Footprints.Distance(from, attacker.Across, targetAt ?? target.Position, target.Across);
             if (distance > 1 && Setting.Walls.Count > 0 && !Sight.Clear(from, targetAt ?? target.Position, Setting.IsWall))
             {
                 return new AttackPlan("Something solid is in the way.", 0, 0, null, "Something solid is in the way.", attack);
@@ -1704,7 +1711,8 @@ namespace WoundBound.Game.Combat
                     Declare(actor, $"{(attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack).Name} at {attack.Target.Name}"
                                    + (attack.Manoeuvre is { } declaredManoeuvre ? $", to {declaredManoeuvre.Kind}" : string.Empty), attack.Target,
                         () => CanAttack(actor, attack.Target) && (attack.With is not { } with || PlanAttackWith(actor, with, actor.Position, attack.Target).CanAttack),
-                        () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage, _ => TakeStep(turn, done), attack.With, manoeuvre: attack.Manoeuvre),
+                        () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage,
+                            _ => SwarmBites(actor, attack.Target, attack.With, () => TakeStep(turn, done)), attack.With, manoeuvre: attack.Manoeuvre),
                         () => TakeStep(turn, done));
                     return;
 
@@ -1897,7 +1905,7 @@ namespace WoundBound.Game.Combat
         private Queue<Combatant> LeavingReachOf(Combatant mover, IReadOnlyList<GridPosition> path) =>
             new(Fighting(mover.Side == Side.Party ? Side.Adversaries : Side.Party)
                 .Where(_ => !mover.IsSlipping)
-                .Select(e => (Enemy: e, At: LeaveIndex(e, path)))
+                .Select(e => (Enemy: e, At: LeaveIndex(e, mover, path)))
                 .Where(x => x.At is not null)
                 .OrderBy(x => x.At)
                 .Select(x => x.Enemy));
@@ -1907,11 +1915,11 @@ namespace WoundBound.Game.Combat
         /// last square still within it before the step out — or null if it never does. A route that
         /// passes through somebody's reach and out again leaves it, however briefly it was in.
         /// </summary>
-        private static int? LeaveIndex(Combatant enemy, IReadOnlyList<GridPosition> path)
+        private static int? LeaveIndex(Combatant enemy, Combatant mover, IReadOnlyList<GridPosition> path)
         {
             for (var i = 0; i + 1 < path.Count; i++)
             {
-                if (enemy.CanReach(path[i]) && !enemy.CanReach(path[i + 1]))
+                if (enemy.CanReachBlock(path[i], mover.Across) && !enemy.CanReachBlock(path[i + 1], mover.Across))
                 {
                     return i;
                 }
@@ -2063,7 +2071,7 @@ namespace WoundBound.Game.Combat
 
                 // The blow lands where the mover is when it leaves: the last square of the route
                 // still within this enemy's reach.
-                if (LeaveIndex(enemy, path) is { } leaving && leaving < path.Count)
+                if (LeaveIndex(enemy, mover, path) is { } leaving && leaving < path.Count)
                 {
                     mover.Position = path[leaving];
                 }
@@ -2101,8 +2109,8 @@ namespace WoundBound.Game.Combat
                     continue;
                 }
 
-                var leftAt = LeaveIndex(enemy, path) ?? 0;
-                var catchAt = path.Take(leftAt + 1).LastOrDefault(square => square.DistanceTo(enemy.Position) <= enemy.OwnReach
+                var leftAt = LeaveIndex(enemy, mover, path) ?? 0;
+                var catchAt = path.Take(leftAt + 1).LastOrDefault(square => Footprints.Distance(square, mover.Across, enemy.Position, enemy.Across) <= enemy.OwnReach
                     && (square == mover.Position || At(square) is null), mover.Position);
                 var reacting = enemy;
 
@@ -2261,8 +2269,48 @@ namespace WoundBound.Game.Combat
         /// a critical's consequences either way (Core Rules §10).
         /// </summary>
         /// <param name="with">Which of the attacker's attacks; null for whichever does most from where it stands.</param>
+        /// <summary>
+        /// A Swarm's one attack falls on every creature standing in any of its squares (GM
+        /// Reference §3; the Fenmoor Ratswarm's "to every creature standing in one of its four
+        /// squares"): having bitten <paramref name="first"/>, it bites each of the rest in turn, its
+        /// own side's included — the rats don't choose. Nothing else does this.
+        /// </summary>
+        private void SwarmBites(Combatant swarm, Combatant first, AttackProfile? with, Action then)
+        {
+            if (!swarm.IsSwarm)
+            {
+                then();
+                return;
+            }
+
+            var rest = new Queue<Combatant>(combatants.Where(c => c != swarm && c != first && c.OccupiesSquare
+                && (!c.IsOutOfFight || c.IsDefenceless) && swarm.Footprint.Any(c.Covers)));
+            void Next()
+            {
+                while (rest.TryDequeue(out var victim))
+                {
+                    if (swarm.IsOutOfFight || swarm.HasFled)
+                    {
+                        break;
+                    }
+
+                    if (!victim.OccupiesSquare || !swarm.Footprint.Any(victim.Covers))
+                    {
+                        continue;
+                    }
+
+                    ResolveAttack(swarm, victim, asReaction: false, opportunityBonus: false, _ => Next(), with, spendsAction: false);
+                    return;
+                }
+
+                then();
+            }
+
+            Next();
+        }
+
         private void ResolveAttack(Combatant attacker, Combatant target, bool asReaction, bool opportunityBonus, Action<AttackOutcome> then,
-            AttackProfile? with = null, bool sacrifice = false, Manoeuvre? manoeuvre = null)
+            AttackProfile? with = null, bool sacrifice = false, Manoeuvre? manoeuvre = null, bool spendsAction = true)
         {
             var plan = with is null ? PlanAttack(attacker, target) : PlanAttackWith(attacker, with, attacker.Position, target);
             target.HasBeenAttackedSinceTurnStart = true;
@@ -2322,7 +2370,7 @@ namespace WoundBound.Game.Combat
             var roll = RollCalculator.Resolve(rolled, attack.AttackModifier, plan.DodgeThreshold, advantage, disadvantage);
             Slip(attacker, roll);
 
-            if (!asReaction)
+            if (!asReaction && spendsAction)
             {
                 attacker.ActionsRemaining--;
             }
@@ -2462,7 +2510,7 @@ namespace WoundBound.Game.Combat
             foreach (var covered in combatants.Where(c => c.CoveredBy.Count > 0))
             {
                 var lapsed = covered.CoveredBy.RemoveAll(c => c.Bearer.IsOutOfFight
-                    || (c.Bearer != covered && c.Bearer.Position.DistanceTo(covered.Position) > c.Bearer.Reach));
+                    || (c.Bearer != covered && c.Bearer.DistanceTo(covered) > c.Bearer.Reach));
                 if (lapsed > 0)
                 {
                     Write($"{covered.Name} is no longer behind a shield.");
@@ -2952,7 +3000,7 @@ namespace WoundBound.Game.Combat
                 var held = holder.Holding!;
                 var why = holder.IsOutOfFight ? "is in no state to hold on"
                     : held.IsOutOfFight ? "lets the body drop"
-                    : holder.Position.DistanceTo(held.Position) > holder.OwnReach ? "can no longer reach to hold on"
+                    : holder.DistanceTo(held) > holder.OwnReach ? "can no longer reach to hold on"
                     : !holder.HasFreeHand ? "has no hand free to hold with"
                     : null;
 
@@ -3025,6 +3073,13 @@ namespace WoundBound.Game.Combat
                 absorbed = Math.Min(rolledDamage,
                     InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise));
                 dealt = rolledDamage - absorbed;
+
+                // A single attack covers one square of a Swarm: exactly 1 Body wound, whatever was
+                // rolled (GM Reference §3, "Damage Reduction").
+                if (target.IsSwarm)
+                {
+                    (absorbed, dealt) = (0, 1);
+                }
 
                 // What got past the armour may yet be taken by somebody else (Core Rules §3, "Shelter").
                 var (hit, rolledHit, absorbedHit) = (roll, rolledDamage, absorbed);
@@ -3227,17 +3282,27 @@ namespace WoundBound.Game.Combat
 
             var tables = environment;
             var enemySide = mover.Side == Side.Party ? Side.Adversaries : Side.Party;
-            var standing = combatants.Where(c => c.OccupiesSquare && c != mover).GroupBy(c => c.Position).ToDictionary(g => g.Key, g => g.First());
+            // A Swarm or a Tiny thing holds no ground: its squares are open to everyone.
+            var standing = combatants.Where(c => c.OccupiesSquare && c != mover && c.HoldsGround)
+                .SelectMany(c => c.Footprint.Select(sq => (Square: sq, Creature: c)))
+                .GroupBy(x => x.Square).ToDictionary(g => g.Key, g => g.First().Creature);
             var threats = Fighting(enemySide).ToList();
+            bool ClosedSquare(GridPosition square) => standing.TryGetValue(square, out var there)
+                && (there.Side != mover.Side || threats.Any(e => e.CanReach(square)));
+
+            // A creature bigger than a square goes where the whole of it fits; a Swarm flows over
+            // and onto anybody, since arriving on top of them is the only way it bites (GM Reference §3).
+            var across = mover.Across;
+            bool AnyUnder(GridPosition corner, Func<GridPosition, bool> test) =>
+                across == 1 ? test(corner) : Footprints.At(corner, across).Any(test);
             var map = new MovementMap(
                 mover.Position,
                 radius: reach,
-                isWall: Setting.IsWall,
-                isClosed: square => standing.TryGetValue(square, out var there)
-                    && (there.Side != mover.Side || threats.Any(e => e.CanReach(square))),
-                canStop: square => !standing.ContainsKey(square),
-                isBroken: square => tables is not null && Setting.GroundAt(square) == Terrain.Broken,
-                isDeep: Setting.IsDeepWater,
+                isWall: corner => AnyUnder(corner, Setting.IsWall),
+                isClosed: corner => !mover.IsSwarm && AnyUnder(corner, ClosedSquare),
+                canStop: corner => mover.IsSwarm || !AnyUnder(corner, standing.ContainsKey),
+                isBroken: corner => tables is not null && AnyUnder(corner, sq => Setting.GroundAt(sq) == Terrain.Broken),
+                isDeep: corner => AnyUnder(corner, Setting.IsDeepWater),
                 price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.IsNimble, freeStep: FreeStepFor(mover)),
                 brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken));
             movementMaps[mover] = (stamp, map);
@@ -3293,7 +3358,8 @@ namespace WoundBound.Game.Combat
             {
                 var critical = roll.IsAbsoluteSuccess ? " — double twelve!" : roll.IsCritical ? " — critical hit!" : " — hit";
                 line += $"{critical} {outcome.RolledDamage} damage";
-                line += outcome.Absorbed > 0 ? $", armour absorbs {outcome.Absorbed}, {outcome.Dealt} Body." : " Body.";
+                line += outcome.Target.IsSwarm ? $", but a single blow costs a Swarm 1 Body."
+                    : outcome.Absorbed > 0 ? $", armour absorbs {outcome.Absorbed}, {outcome.Dealt} Body." : " Body.";
 
                 line += outcome.Target.IsOutOfFight
                     ? $" {outcome.Target.Name} is out of the fight."

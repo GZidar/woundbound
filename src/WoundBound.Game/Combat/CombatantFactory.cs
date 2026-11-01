@@ -90,7 +90,7 @@ namespace WoundBound.Game.Combat
                 StatblockAttacks = attackSpell is null && !string.IsNullOrWhiteSpace(info.AttackName)
                     ? foe.StatblockAttacks
                     : [StatblockLine("Unarmed", AdversarySkillCalculator.Baseline(info.Tier), 1, "d4", 0, info.Reach)],
-                Armour = foe.Armour, InnateSpeed = foe.InnateSpeed, IsSwarm = foe.IsSwarm, Role = foe.Role, Morale = foe.Morale,
+                Armour = foe.Armour, InnateSpeed = foe.InnateSpeed, IsSwarm = foe.IsSwarm, Across = foe.Across, Role = foe.Role, Morale = foe.Morale,
                 SkillBonusFor = foe.SkillBonusFor, IsMinion = foe.IsMinion, StaminaMax = foe.StaminaMax, Stamina = foe.Stamina,
                 TacticalSpendsPerRound = foe.TacticalSpendsPerRound,
                 StatblockManoeuvres = foe.StatblockManoeuvres,
@@ -157,6 +157,7 @@ namespace WoundBound.Game.Combat
             Armour = info.Armour,
             InnateSpeed = info.Speed,
             IsSwarm = info.Role == AdversaryRole.Swarm,
+            Across = Footprints.AcrossFor(info.Size),
             Role = info.Role,
             Morale = Morale.FromStatblock(info),
             SkillBonusFor = info.Kind == AdversaryKind.Combat ? SkillsOf(info) : _ => 0,

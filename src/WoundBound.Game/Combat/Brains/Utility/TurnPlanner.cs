@@ -88,7 +88,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             // The one it's aimed at, out of a blade's reach — nothing left to do.
             if (victim == actor && option.Square is { } square && !foe.HasRangedAttack && foe.Spells.Count == 0
-                && !BattleView.CanReachFrom(foe, foe.Position, square))
+                && !foe.CanReachBlock(square, actor.Across))
             {
                 return whole;
             }
@@ -283,7 +283,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
                 if (permitted.Contains(WeaponManoeuvre.Cleave))
                 {
-                    var second = enemies.Where(e => e != target && BattleView.CanReachFrom(actor, at, e.Position))
+                    var second = enemies.Where(e => e != target && BattleView.CanReachFrom(actor, at, e))
                         .Select(e => (Who: e, Worth: assess.BestAttack(actor, at, e).Worth))
                         .OrderByDescending(x => x.Worth).FirstOrDefault();
                     if (second.Who is not null)
@@ -350,7 +350,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 yield break;
             }
 
-            foreach (var target in enemies.Where(e => skill.Uses(Trick.Grapple) && at.DistanceTo(e.Position) <= actor.OwnReach))
+            foreach (var target in enemies.Where(e => skill.Uses(Trick.Grapple) && actor.DistanceFrom(at, e) <= actor.OwnReach))
             {
                 foreach (var (control, worth) in new[]
                 {
@@ -368,7 +368,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             // Help an ally beside me who acts before I do again, or Harry a foe beside me.
-            foreach (var ally in (stillToAct ?? []).Where(a => skill.Uses(Trick.Aid) && a != actor && !a.IsHelped && at.DistanceTo(a.Position) <= 1))
+            foreach (var ally in (stillToAct ?? []).Where(a => skill.Uses(Trick.Aid) && a != actor && !a.IsHelped && actor.DistanceFrom(at, a) <= 1))
             {
                 if (checkRules && BattleView.AidRefusal(actor, CombatAction.Help, ally) is not null)
                 {
@@ -385,7 +385,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
-            foreach (var foe in enemies.Where(e => skill.Uses(Trick.Aid) && !e.IsHarried && at.DistanceTo(e.Position) <= 1))
+            foreach (var foe in enemies.Where(e => skill.Uses(Trick.Aid) && !e.IsHarried && actor.DistanceFrom(at, e) <= 1))
             {
                 if (checkRules && BattleView.AidRefusal(actor, CombatAction.Harry, foe) is not null)
                 {
@@ -398,7 +398,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // Heal: the dying first — a body back in the fight, and a death put off.
             foreach (var hurt in View.PartyOnBoard.Concat(View.Adversaries).Where(c => skill.Uses(Trick.Tend) && c.Side == actor.Side && c.CanBeTended(WoundType.Body)))
             {
-                if (hurt != actor && at.DistanceTo(hurt.Position) > 1)
+                if (hurt != actor && actor.DistanceFrom(at, hurt) > 1)
                 {
                     continue;
                 }
@@ -509,7 +509,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return BattleView.ControlRefusal(actor, control, target) is null;
             }
 
-            return !target.IsSwarm && !actor.IsSwarm && at.DistanceTo(target.Position) <= actor.OwnReach
+            return !target.IsSwarm && !actor.IsSwarm && actor.DistanceFrom(at, target) <= actor.OwnReach
                    && (control != ControlAction.Grab || (actor.HasFreeHand && actor.Holding is null && target.HeldBy is null))
                    && (control != ControlAction.Trip || !target.IsProne);
         }
@@ -541,7 +541,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         private double Position(Combatant actor, GridPosition square)
         {
-            var nearest = View.EnemiesOf(actor).Select(e => e.Position.DistanceTo(square)).DefaultIfEmpty(int.MaxValue).Min();
+            var nearest = View.EnemiesOf(actor).Select(e => actor.DistanceFrom(square, e)).DefaultIfEmpty(int.MaxValue).Min();
 
             // Out past Long of every enemy is out of the fight: for a creature that means to win,
             // that's walking away from it — the party getting clear, or the GM's quarry escaping.
@@ -578,7 +578,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             double best = 0;
             foreach (var enemy in Pursued(actor))
             {
-                var distance = square.DistanceTo(enemy.Position);
+                var distance = actor.DistanceFrom(square, enemy);
                 foreach (var attack in actor.Attacks)
                 {
                     var reachable = attack.IsRanged
@@ -594,7 +594,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             best = Math.Max(best, spells.BestHarmFrom(actor, square));
-            var nearest = Pursued(actor).Select(e => e.Position.DistanceTo(square)).DefaultIfEmpty(0).Min();
+            var nearest = Pursued(actor).Select(e => actor.DistanceFrom(square, e)).DefaultIfEmpty(0).Min();
             return best - 0.05 * nearest;
         }
 
@@ -617,25 +617,26 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 throw new ArgumentException("Nothing to choose from.", nameof(options));
             }
 
-            var best = options.MaxBy(score)!;
             if (skill.Temperature <= 0 || options.Count == 1)
             {
-                return best;
+                return options.MaxBy(score)!;
             }
 
-            var top = score(best);
-            var weights = options.Select(o => Math.Exp((score(o) - top) / skill.Temperature)).ToList();
+            // Scored once each, best first; the loose pick is made among the top few only.
+            var ranked = options.Select(o => (Option: o, Score: score(o))).OrderByDescending(x => x.Score).Take(skill.Breadth).ToList();
+            var top = ranked[0].Score;
+            var weights = ranked.Select(x => Math.Exp((x.Score - top) / skill.Temperature)).ToList();
             var roll = random.NextDouble() * weights.Sum();
-            for (var i = 0; i < options.Count; i++)
+            for (var i = 0; i < ranked.Count; i++)
             {
                 roll -= weights[i];
                 if (roll <= 0)
                 {
-                    return options[i];
+                    return ranked[i].Option;
                 }
             }
 
-            return best;
+            return ranked[0].Option;
         }
     }
 }

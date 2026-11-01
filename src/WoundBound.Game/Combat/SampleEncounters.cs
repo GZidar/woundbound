@@ -652,6 +652,59 @@ namespace WoundBound.Game.Combat
             Ground = Setting.Patches(Terrain.Broken, (0, 3, 27, 4), (0, 14, 27, 15)),
         };
 
+        /// <summary>
+        /// A causeway through the fen — staged for the game, not taken from a book: four squares of
+        /// firm ground running east to west, a square of shallow reed-water either side, and deep
+        /// marsh beyond that goes on past the map's edges. A corridor, so a Swarm on it is a fight
+        /// the party must stand in (GM Reference §3, "The counter is the ground").
+        /// </summary>
+        public static Setting FenCauseway { get; } = BuildFenCauseway();
+
+        private static Setting BuildFenCauseway()
+        {
+            var water = new Dictionary<GridPosition, WaterDepth>();
+            for (var x = -6; x < FieldWidth + 6; x++)
+            {
+                for (var y = -6; y < FieldHeight + 6; y++)
+                {
+                    if (y is >= 7 and <= 10)
+                    {
+                        continue;
+                    }
+
+                    water[new GridPosition(x, y)] = y is 6 or 11 ? WaterDepth.Shallow : WaterDepth.Deep;
+                }
+            }
+
+            return Setting.Daylight with { Name = "The fen causeway", Water = water };
+        }
+
+        /// <summary>
+        /// The Quickstart's five met by a Fenmoor Ratswarm and the four Bramble Ratkin who herd it —
+        /// on the fen causeway, or, with <paramref name="openGround"/>, on dry open ground where the
+        /// party can back off and chip it (GM Reference §3). The rats come first; the ratkin behind.
+        /// </summary>
+        public static Encounter RatswarmOnTheCauseway(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool openGround = false)
+        {
+            var ratkin = data.Adversary("Bramble Ratkin");
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(5, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(5, 9)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(3, 7)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(3, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(2, 8)),
+                CombatantFactory.FromAdversary(data.Adversary("Fenmoor Ratswarm"), "Ratswarm", new GridPosition(14, 8)),
+                CombatantFactory.FromAdversary(ratkin, "Ratkin Herder", new GridPosition(18, 7)),
+                CombatantFactory.FromAdversary(ratkin, "Ratkin Biter", new GridPosition(18, 10)),
+                CombatantFactory.FromAdversary(ratkin, "Ratkin Sneak", new GridPosition(19, 8)),
+                CombatantFactory.FromAdversary(ratkin, "Ratkin Shiv", new GridPosition(19, 9)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: openGround ? Setting.Daylight with { Name = "Open ground" } : FenCauseway, environment: data.Environment);
+        }
+
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
         public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {

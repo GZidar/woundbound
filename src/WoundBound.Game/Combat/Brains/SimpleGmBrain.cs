@@ -15,7 +15,7 @@ namespace WoundBound.Game.Combat.Brains
             var targets = view.Characters.ToList();
             return view.YetToAct
                 .OrderBy(a => a.IsBroken ? 1 : CanStrikeThisTurn(view, a) ? 0 : 2)
-                .ThenBy(a => targets.Min(t => a.Position.DistanceTo(t.Position)))
+                .ThenBy(a => targets.Min(t => a.DistanceTo(t)))
                 .First();
         }
 
@@ -30,7 +30,7 @@ namespace WoundBound.Game.Combat.Brains
             return view.Adversaries
                 .Where(a => a.CanTakeExtraTurn && !a.IsBroken && CanStrikeThisTurn(view, a))
                 .OrderBy(a => a.HasActedThisRound ? 0 : 1)
-                .ThenBy(a => targets.Min(t => a.Position.DistanceTo(t.Position)))
+                .ThenBy(a => targets.Min(t => a.DistanceTo(t)))
                 .FirstOrDefault();
         }
 
@@ -74,7 +74,7 @@ namespace WoundBound.Game.Combat.Brains
                 return new GmStep.Attack(target, advantage);
             }
 
-            if (turn.HasAttacked || turn.HasMoved || actor.CanReach(target.Position))
+            if (turn.HasAttacked || turn.HasMoved || actor.CanReach(target))
             {
                 return GmStep.End;
             }
@@ -85,7 +85,7 @@ namespace WoundBound.Game.Combat.Brains
             }
 
             var closest = view.SquaresWithin(actor, view.MovesAvailable(actor))
-                .OrderBy(o => o.Key.DistanceTo(target.Position))
+                .OrderBy(o => actor.DistanceFrom(o.Key, target))
                 .ThenBy(o => o.Value)
                 .Select(o => (GridPosition?)o.Key)
                 .FirstOrDefault();
@@ -160,17 +160,17 @@ namespace WoundBound.Game.Combat.Brains
                 }
             }
 
-            foreach (var adversary in stillIdle.OrderBy(a => NearestTarget(view, a) is { } t ? t.Position.DistanceTo(a.Position) : int.MaxValue))
+            foreach (var adversary in stillIdle.OrderBy(a => NearestTarget(view, a) is { } t ? t.DistanceTo(a) : int.MaxValue))
             {
-                if (adversary.IsBroken || !Encounter.CanMoveItself(adversary) || NearestTarget(view, adversary) is not { } target || adversary.CanReach(target.Position))
+                if (adversary.IsBroken || !Encounter.CanMoveItself(adversary) || NearestTarget(view, adversary) is not { } target || adversary.CanReach(target))
                 {
                     continue;
                 }
 
                 var destination = StrikeSquare(view, adversary, target)
                     ?? view.SquaresWithin(adversary, 1).Keys
-                        .Where(square => square.DistanceTo(target.Position) < adversary.Position.DistanceTo(target.Position))
-                        .OrderBy(square => square.DistanceTo(target.Position))
+                        .Where(square => adversary.DistanceFrom(square, target) < adversary.DistanceTo(target))
+                        .OrderBy(square => adversary.DistanceFrom(square, target))
                         .ThenBy(square => square.DistanceTo(adversary.Position))
                         .Select(square => (GridPosition?)square)
                         .FirstOrDefault();
@@ -189,7 +189,7 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Whether <paramref name="adversary"/> could hit a character on a fresh turn: from where it stands, or after a single move.</summary>
         protected static bool CanStrikeThisTurn(BattleView view, Combatant adversary) =>
             NearestTarget(view, adversary) is { } target
-            && (adversary.CanReach(target.Position) || StrikeSquare(view, adversary, target) is not null);
+            && (adversary.CanReach(target) || StrikeSquare(view, adversary, target) is not null);
 
         /// <summary>The nearest square one move away from which <paramref name="actor"/> can strike <paramref name="target"/>, leaving the action for the blow.</summary>
         protected static GridPosition? StrikeSquare(BattleView view, Combatant actor, Combatant target) =>

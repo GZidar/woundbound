@@ -182,7 +182,7 @@ namespace WoundBound.Game.Combat
                     return CastPlan.Refused($"{target.Name} isn't on the board.");
                 }
 
-                if (touch && from.DistanceTo(target.Position) > 1)
+                if (touch && caster.DistanceFrom(from, target) > 1)
                 {
                     return CastPlan.Refused($"{spell.Name} is cast at Touch — {target.Name} has to be in reach of a hand.");
                 }
@@ -210,7 +210,7 @@ namespace WoundBound.Game.Combat
                 var covered = squares.ToHashSet();
 
                 // Aimed away from the hand that casts it: the caster isn't caught in their own Line or Cone.
-                caught = combatants.Where(c => c != caster && c.OccupiesSquare && covered.Contains(c.Position)).ToList();
+                caught = combatants.Where(c => c != caster && c.OccupiesSquare && c.Footprint.Any(covered.Contains)).ToList();
             }
             else if (shape == SpellShape.Volume)
             {
@@ -228,7 +228,7 @@ namespace WoundBound.Game.Combat
                 origin = block.OrderBy(sq => from.DistanceTo(sq)).ThenBy(sq => Math.Abs(sq.X - from.X) + Math.Abs(sq.Y - from.Y)).First();
                 squares = SpellArea.Reached(corner, spell.Size, origin, Setting.IsWall);
                 var covered = squares.ToHashSet();
-                caught = combatants.Where(c => c.OccupiesSquare && covered.Contains(c.Position)).ToList();
+                caught = combatants.Where(c => c.OccupiesSquare && c.Footprint.Any(covered.Contains)).ToList();
             }
             else
             {
@@ -327,9 +327,21 @@ namespace WoundBound.Game.Combat
                     return CastPlan.Refused("Only a T1 Bind — Slowed — is in the game yet.");
             }
 
+            // A Swarm is moved, held or hurried only as a whole: a Motion spell must cover every square
+            // of it, or it does nothing to the mass (the user's ruling, 2026-11-02).
+            var swarmUnmoved = spell.SpellType == SpellType.Motion
+                ? caught.FirstOrDefault(c => c.IsSwarm && !c.Footprint.All(squares.Contains))
+                : null;
+            if (swarmUnmoved is not null)
+            {
+                caught = caught.Where(c => c != swarmUnmoved && !(c.IsSwarm && !c.Footprint.All(squares.Contains))).ToList();
+            }
+
             if (caught.Count == 0)
             {
-                return CastPlan.Refused($"{spell.Name} would catch nobody there.");
+                return CastPlan.Refused(swarmUnmoved is not null
+                    ? $"{spell.Name} has to cover the whole of {swarmUnmoved.Name} to move it — a part of a Swarm can't be moved."
+                    : $"{spell.Name} would catch nobody there.");
             }
 
             // What it costs, and whether it can be paid (Core Rules §11, "Spell Wound Cost"; §4).
@@ -638,7 +650,15 @@ namespace WoundBound.Game.Combat
                         return;
                     }
 
-                    var amount = SpellDice(caster, spell, final.IsCritical);
+                    // Only an area over the whole of a Swarm gets the dice; anything less is a wound
+                    // a square covered, and rolls nothing (GM Reference §3).
+                    var partial = target.IsSwarm ? SwarmCoverage(target, plan) : null;
+                    var amount = partial ?? SpellDice(caster, spell, final.IsCritical);
+                    if (partial is { } covered)
+                    {
+                        line += $" — covers {covered} of its {target.Across * target.Across} squares";
+                    }
+
                     Write(line + (final.IsCritical ? $" — critical! {amount} {type}." : $" — hit, {amount} {type}."));
                     Wound(target, type, amount, direct: false, Next);
                 }
@@ -681,6 +701,17 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
+        /// What a Harm spell costs a Swarm when it doesn't blanket the whole mass: 1 wound for a Ray
+        /// or Touch (a single point), 1 per square for an area that covers part of it. Null when the
+        /// area covers every square — then the rolled damage lands in full (GM Reference §3).
+        /// </summary>
+        internal static int? SwarmCoverage(Combatant swarm, CastPlan plan)
+        {
+            var covered = swarm.Footprint.Count(plan.Area.Contains);
+            return covered >= swarm.Across * swarm.Across ? null : Math.Max(1, covered);
+        }
+
+        /// <summary>
         /// Wounds of any type landing on <paramref name="target"/>. Body is soaked by armour unless
         /// <paramref name="direct"/>; Mind and Soul never are, and may be Backlashed onto Body instead
         /// of dropping the track to 0 (Core Rules §4). A Minion hit on Mind or Soul simply goes down
@@ -690,6 +721,13 @@ namespace WoundBound.Game.Combat
         {
             if (amount <= 0)
             {
+                then();
+                return;
+            }
+
+            if (target.IsSwarm && type != WoundType.Body)
+            {
+                Write($"{target.Name} has no single mind or spirit for {type} damage to find (GM Reference §3).");
                 then();
                 return;
             }

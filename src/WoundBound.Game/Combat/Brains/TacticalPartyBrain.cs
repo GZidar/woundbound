@@ -199,7 +199,7 @@ namespace WoundBound.Game.Combat.Brains
         {
             foreach (var spell in character.Spells.Where(s => s.SpellType == Rules.Enums.SpellType.Harm && s.Target == Rules.Enums.SpellTarget.One))
             {
-                foreach (var enemy in view.EnemiesOf(character).OrderBy(e => e.Position.DistanceTo(character.Position)))
+                foreach (var enemy in view.EnemiesOf(character).OrderBy(e => e.DistanceTo(character)))
                 {
                     var cast = new SpellCast(spell) { Target = enemy };
                     var plan = view.PlanCast(character, cast);
@@ -222,7 +222,7 @@ namespace WoundBound.Game.Combat.Brains
         public virtual Combatant ChooseNextCharacter(BattleView view, IReadOnlyList<Combatant> stillToAct) =>
             stillToAct
                 .OrderBy(c => CanStrikeWithoutMoving(view, c) ? 0 : 1)
-                .ThenBy(c => view.NearestEnemy(c) is { } e ? c.Position.DistanceTo(e.Position) : int.MaxValue)
+                .ThenBy(c => view.NearestEnemy(c) is { } e ? c.DistanceTo(e) : int.MaxValue)
                 .First();
 
         /// <summary>Whether an attack could be made at somebody from where <paramref name="character"/> stands, armed as they are.</summary>
@@ -252,7 +252,7 @@ namespace WoundBound.Game.Combat.Brains
 
             return fallen
                 .Where(f => f.CanBeTended(WoundType.Body))
-                .SelectMany(f => view.SquaresWithin(character, 1).Keys.Where(sq => sq.DistanceTo(f.Position) <= 1))
+                .SelectMany(f => view.SquaresWithin(character, 1).Keys.Where(sq => character.DistanceFrom(sq, f) <= 1))
                 .OrderBy(sq => sq.DistanceTo(character.Position))
                 .Select(sq => (PartyStep)new PartyStep.Move(sq))
                 .FirstOrDefault();
@@ -317,7 +317,7 @@ namespace WoundBound.Game.Combat.Brains
             && character.Body <= character.BodyMax * Tactics.BraceBelowBody
             && character.HasMove
             && BattleView.StandGroundRefusal(character, CombatAction.Dodge) is null
-            && view.EnemiesOf(character).Any(e => e.CanReach(character.Position) || view.StrikeSquare(e, character) is not null);
+            && view.EnemiesOf(character).Any(e => e.CanReach(character) || view.StrikeSquare(e, character) is not null);
 
         /// <summary>Whoever can be attacked now — runners first when hunting them — weakest first, then nearest.</summary>
         protected Combatant? BestTarget(BattleView view, Combatant character) =>
@@ -325,7 +325,7 @@ namespace WoundBound.Game.Combat.Brains
                 .Where(e => view.CanAttack(character, e))
                 .OrderBy(e => Tactics.HuntRunners && e.IsBroken ? view.MustNotEscape(e) ? 0 : 1 : 2)
                 .ThenBy(e => e.Body)
-                .ThenBy(e => character.Position.DistanceTo(e.Position))
+                .ThenBy(e => character.DistanceTo(e))
                 .FirstOrDefault();
 
         /// <summary>Enemies that have broken, the ones that mustn't escape first, then whichever is nearest getting clear.</summary>
@@ -395,7 +395,7 @@ namespace WoundBound.Game.Combat.Brains
         private PartyStep WithRangedWeaponInHand(BattleView view, Combatant character, Combatant nearest)
         {
             // Somebody at Close, where a bow can't shoot: back to the blade, if there is one.
-            if (character.Position.DistanceTo(nearest.Position) <= 1 && character.ReadyWeapon is { IsRanged: false }
+            if (character.DistanceTo(nearest) <= 1 && character.ReadyWeapon is { IsRanged: false }
                 && BattleView.SwapRefusal(character) is null)
             {
                 return new PartyStep.Swap();
@@ -407,8 +407,8 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>As near to <paramref name="nearest"/> as what's left will carry them, the cheaper move where it's no further.</summary>
         private static PartyStep CloseIn(BattleView view, Combatant character, Combatant nearest) =>
             view.SquaresWithin(character, view.MovesAvailable(character))
-                .Where(o => o.Key.DistanceTo(nearest.Position) < character.Position.DistanceTo(nearest.Position))
-                .OrderBy(o => o.Key.DistanceTo(nearest.Position))
+                .Where(o => character.DistanceFrom(o.Key, nearest) < character.DistanceTo(nearest))
+                .OrderBy(o => character.DistanceFrom(o.Key, nearest))
                 .ThenBy(o => o.Value)
                 .Select(o => (PartyStep)new PartyStep.Move(o.Key))
                 .FirstOrDefault() ?? PartyStep.End;
