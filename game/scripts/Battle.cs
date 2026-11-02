@@ -322,6 +322,10 @@ namespace WoundBoundGame
             if (OS.GetCmdlineUserArgs() is var args && System.Array.IndexOf(args, "--radial") is var at and >= 0 && at + 1 < args.Length)
             {
                 OpenRadialPath(args[at + 1]);
+                if (System.Array.IndexOf(args, "--radial-click") is var c and >= 0 && c + 1 < args.Length)
+                {
+                    ClickRadial(args[c + 1]);
+                }
             }
         }
 

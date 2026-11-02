@@ -103,7 +103,7 @@ namespace WoundBoundGame
             }
 
             hover = null;
-            MouseFilter = rings.Count > 0 ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore;
+            
             QueueRedraw();
             return true;
         }
@@ -119,6 +119,15 @@ namespace WoundBoundGame
 
             QueueRedraw();
         }
+
+        /// <summary>How many rings are open — for checking the menu without a mouse.</summary>
+        public int OpenRings => rings.Count;
+
+        /// <summary>Where the item on the last ring whose label starts with <paramref name="label"/> is drawn, or null.</summary>
+        public Vector2? WhereIs(string label) =>
+            rings.Count > 0 && rings[^1].Items.ToList().FindIndex(i => i.Label.StartsWith(label, StringComparison.OrdinalIgnoreCase)) is var at and >= 0
+                ? rings[^1].Pills[at].GetCenter()
+                : null;
 
         /// <summary>Chooses the item on the last ring whose label starts with <paramref name="label"/>, as a click would.</summary>
         public void Follow(string label)
@@ -136,7 +145,6 @@ namespace WoundBoundGame
             var ring = new Ring(centre, title, items()) { Source = items };
             Layout(ring);
             rings.Add(ring);
-            MouseFilter = MouseFilterEnum.Stop;
             QueueRedraw();
         }
 
@@ -216,6 +224,11 @@ namespace WoundBoundGame
             return null;
         }
 
+        /// <summary>
+        /// While a ring is open it takes every mouse button, mouse motion and Escape before anything
+        /// else sees them — the board under it never gets a click meant for the menu. Read here rather
+        /// than as GUI input, so it doesn't hang on this control's size or the HUD's mouse filters.
+        /// </summary>
         public override void _Input(InputEvent @event)
         {
             if (!IsOpen)
@@ -223,17 +236,12 @@ namespace WoundBoundGame
                 return;
             }
 
-            if (@event is InputEventKey { Pressed: true, Keycode: Key.Escape })
+            switch (MakeInputLocal(@event))
             {
-                CloseLast();
-                GetViewport().SetInputAsHandled();
-            }
-        }
+                case InputEventKey { Pressed: true, Keycode: Key.Escape }:
+                    CloseLast();
+                    break;
 
-        public override void _GuiInput(InputEvent @event)
-        {
-            switch (@event)
-            {
                 case InputEventMouseMotion motion:
                     var over = ItemAt(motion.Position);
                     if (over != hover)
@@ -249,20 +257,26 @@ namespace WoundBoundGame
                     break;
 
                 case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } click:
-                    if (ItemAt(click.Position) is not { } hit)
+                    if (ItemAt(click.Position) is { } hit)
+                    {
+                        Choose(hit.Ring, hit.Item);
+                    }
+                    else
                     {
                         CloseAll();
-                        break;
                     }
 
-                    Choose(hit.Ring, hit.Item);
+                    break;
+
+                case InputEventMouseButton:
+                    // Releases and wheel turns: swallowed too, so the board sees nothing of the menu.
                     break;
 
                 default:
                     return;
             }
 
-            AcceptEvent();
+            GetViewport().SetInputAsHandled();
         }
 
         private void Choose(int r, int i)

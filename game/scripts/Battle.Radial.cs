@@ -49,6 +49,29 @@ namespace WoundBoundGame
             }
         }
 
+        /// <summary>
+        /// For checking the menu without a mouse (<c>-- --radial Fighter --radial-click Hands-on</c>):
+        /// a real left click, pushed through Godot's input, on the item named — then prints whether a
+        /// ring opened and whether the acting character moved.
+        /// </summary>
+        private async void ClickRadial(string label)
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (radial.WhereIs(label) is not { } at || encounter.Active is not { } acting)
+            {
+                GD.Print($"radial-click: no item '{label}' on the open ring");
+                return;
+            }
+
+            var (rings, square) = (radial.OpenRings, acting.Position);
+            var screen = GetViewport().GetFinalTransform() * at;
+            Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true, Position = screen, GlobalPosition = screen });
+            Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = false, Position = screen, GlobalPosition = screen });
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            GD.Print($"radial-click: rings {rings} -> {radial.OpenRings}; {acting.Name} at {square} -> {acting.Position}");
+        }
+
         private IReadOnlyList<RadialItem> RootItems(Combatant acting)
         {
             var items = new List<RadialItem>
