@@ -20,6 +20,8 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Grabs, Shoves and Trips.</summary>
         public int Manoeuvres { get; internal set; }
 
+        public int OffHandStrikes { get; internal set; }
+
         public int StandUps { get; internal set; }
 
         /// <summary>Helps and Harries.</summary>
@@ -181,6 +183,11 @@ namespace WoundBound.Game.Combat.Brains
                     Tally.Sacrifices += attack.Sacrifice ? 1 : 0;
                     Tally.Manoeuvres += attack.Manoeuvre is null ? 0 : 1;
                 }),
+                PartyStep.OffHand offHand => Count(encounter.TryOffHandAttack(offHand.Target, offHand.Manoeuvre) is not null, () =>
+                {
+                    Tally.OffHandStrikes++;
+                    Tally.Manoeuvres += offHand.Manoeuvre is null ? 0 : 1;
+                }),
                 PartyStep.Exploit exploit => Count(encounter.TryExploit(exploit.Which), () => Tally.Exploits++),
                 PartyStep.Cast cast => Count(encounter.TryCast(cast.Spell), () =>
                 {
@@ -223,6 +230,8 @@ namespace WoundBound.Game.Combat.Brains
                     PartyStep.Attack attack => encounter.PlanAttack(character, attack.Target).Refusal
                         ?? (attack.Sacrifice ? Encounter.SacrificeRefusal(character) : null)
                         ?? (attack.Manoeuvre is { } m ? Encounter.ManoeuvreRefusal(character, attack.Target, m) : null) ?? "no action left",
+                    PartyStep.OffHand offHand => encounter.OffHandRefusal(character, offHand.Target)
+                        ?? (offHand.Manoeuvre is { } om ? Encounter.ManoeuvreRefusal(character, offHand.Target, om, offHand: true) : null),
                     PartyStep.Exploit exploit => Encounter.ExploitRefusal(character, exploit.Which),
                     PartyStep.Cast cast => encounter.PlanCast(character, cast.Spell).Refusal,
                     _ => null,

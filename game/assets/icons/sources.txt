@@ -51,3 +51,4 @@ backlash lorc/return-arrow
 sustain lorc/concentration-orb
 shelter delapouite/heart-shield
 shoot lorc/pocket-bow
+off-hand lorc/plain-dagger

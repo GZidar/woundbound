@@ -50,12 +50,12 @@ public class SecondaryWoundRuleTests
         var drovan = CombatantFactory.FromCharacter(SampleEncounters.DrovanThale(Data), new GridPosition(3, 4));
         var salla = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(0, 8));
         var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(4, 4));
-        bandit.Stamina = 0; // nothing to strike at him with as he goes
         var encounter = Fight([], salla, drovan, bandit);
 
         encounter.TryBeginTurn(salla);
         encounter.EndTurn();
         encounter.RunAdversaryTurn();
+        bandit.Stamina = 0; // its turn begun: nothing left to strike at him with as he goes
         Assert.Equal(drovan, encounter.Pending!.Against);
         encounter.RespondToReaction(true);
 

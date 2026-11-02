@@ -340,8 +340,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// after armour, and the chance it takes the target out of the fight.
         /// </summary>
         /// <param name="precise">As though Precise were held: Direct, and the attacker's Vitality on the damage.</param>
+        /// <param name="woundsAlready">Wounds the target is reckoned to have taken already, earlier in the same exchange — a second reaction lands on what the first left.</param>
         public (double Hit, double ExpectedDealt, double Kill) Blow(Combatant attacker, AttackProfile attack, Combatant target, int? dieSides, int dodgeThreshold,
-            bool advantage = false, bool disadvantage = false, bool precise = false)
+            bool advantage = false, bool disadvantage = false, bool precise = false, int woundsAlready = 0)
         {
             advantage |= attacker.IsHelped || target.IsDefenceless || attacker.HoldsPatient;
             precise |= attacker.HoldsPrecise;
@@ -364,8 +365,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var absorbs = Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise);
             var modifier = attack.DamageModifier + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
-            var (plainDealt, plainKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: null, absorbs, target, attack.Edge);
-            var (critDealt, critKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: attack.DamageDieSides, absorbs, target, attack.Edge);
+            var (plainDealt, plainKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: null, absorbs, target, attack.Edge, woundsAlready);
+            var (critDealt, critKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: attack.DamageDieSides, absorbs, target, attack.Edge, woundsAlready);
 
             return (odds.Success,
                 plainHit * plainDealt + odds.CriticalSuccess * critDealt,
@@ -377,7 +378,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// target. A critical rolls the maximum on its dice and adds the weapon's base die (Core
         /// Rules §10). A Minion is dropped by any wound that gets through.
         /// </summary>
-        private static (double Dealt, double Kill) Damage(int count, int? sides, int modifier, int? bonusDie, int absorbs, Combatant target, WeaponEdge? edge = null)
+        private static (double Dealt, double Kill) Damage(int count, int? sides, int modifier, int? bonusDie, int absorbs, Combatant target, WeaponEdge? edge = null, int woundsAlready = 0)
         {
             var critical = bonusDie is not null;
             var fixedDice = critical && sides is { } s ? count * s : 0;
@@ -398,15 +399,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var rolled = Math.Max(PlayStateCalculator.DamageFloor, fixedDice + sum + modifier);
                 var through = Encounter.ByEdge(edge, target, rolled, absorbs).Dealt;
                 dealt += through;
-                kills += Drops(target, through) ? 1 : 0;
+                kills += Drops(target, through, woundsAlready) ? 1 : 0;
                 outcomes++;
             }
 
             return (dealt / outcomes, kills / outcomes);
         }
 
-        private static bool Drops(Combatant target, int through) =>
-            through > 0 && (target.IsMinion || through >= target.Body || target.IsDefenceless && target.Body - 1 <= PlayStateCalculator.MinBodyWounds);
+        private static bool Drops(Combatant target, int through, int woundsAlready = 0) =>
+            through > 0 && (target.IsMinion || through >= target.Body - woundsAlready || target.IsDefenceless && target.Body - 1 <= PlayStateCalculator.MinBodyWounds);
 
         private static IEnumerable<int> Sums(IReadOnlyList<int> dice)
         {
@@ -511,24 +512,66 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>The reaction blows <paramref name="mover"/> draws going from where it stands to <paramref name="to"/>, in wounds' worth.</summary>
-        public double LeavingCost(Combatant mover, GridPosition to)
+        public double LeavingCost(Combatant mover, GridPosition to) => LeavingRisk(mover, to).Cost;
+
+        /// <summary>
+        /// What leaving the reach of the enemies around <paramref name="mover"/> for <paramref name="to"/>
+        /// costs (Core Rules §9, "Leaving an enemy's reach is a trigger"): each enemy whose reach it
+        /// leaves, that still has its reaction this round and would spend it, strikes as it goes — one
+        /// blow landing on what the last left. <c>Cost</c> is the wounds and the chance of being dropped,
+        /// in wounds' worth; <c>DropChance</c> is the chance it never gets where it was going, and so
+        /// never does what it moved there to do. An enemy that has spent its reaction this round — or
+        /// has no Stamina, or is Ringed — strikes at nobody, and the way out is free of it.
+        /// </summary>
+        /// <param name="harried">An enemy reckoned Harried by the mover first: its reaction rolls at Disadvantage (Core Rules §9, "Harry").</param>
+        public (double Cost, double DropChance) LeavingRisk(Combatant mover, GridPosition to, Combatant? harried = null)
         {
-            double cost = 0;
             if (mover.IsSlipping)
             {
-                return 0;
+                return (0, 0);
             }
 
-            foreach (var enemy in view.EnemiesOf(mover).Where(e => e.CanReach(mover) && !e.CanReachBlock(to, mover.Across) && BattleView.TacticalSpendRefusal(e) is null))
+            double dealt = 0, survives = 1;
+            foreach (var enemy in view.EnemiesOf(mover).Where(e => !e.IsBroken && e.CanReach(mover) && !e.CanReachBlock(to, mover.Across)
+                                                                   && BattleView.TacticalSpendRefusal(e) is null))
             {
                 var plan = view.PlanAttack(enemy, mover);
-                if (plan.CanAttack)
+                if (!plan.CanAttack)
                 {
-                    cost += Blow(enemy, plan.Profile ?? enemy.Attack, mover, plan.DamageDieSides, plan.DodgeThreshold).ExpectedDealt * PerWound(mover);
+                    continue;
                 }
+
+                var blow = Blow(enemy, plan.Profile ?? enemy.Attack, mover, plan.DamageDieSides, plan.DodgeThreshold,
+                    disadvantage: enemy == harried, woundsAlready: (int)Math.Round(dealt));
+                if (!WouldStrikeAtLeaver(enemy, mover, blow))
+                {
+                    continue;
+                }
+
+                dealt += blow.ExpectedDealt;
+                survives *= 1 - blow.Kill;
             }
 
-            return cost;
+            var dropped = 1 - survives;
+            return (dealt * PerWound(mover) + 0.3 * dropped * Value(mover), dropped);
+        }
+
+        /// <summary>
+        /// Whether <paramref name="enemy"/> would spend its reaction on <paramref name="leaver"/>, as
+        /// the brains decide it: the GM for a blow worth 0.4 or more; a party member for one worth the
+        /// Stamina, with a Stamina to spare. A blow that would drop the leaver is always taken.
+        /// </summary>
+        public bool WouldStrikeAtLeaver(Combatant enemy, Combatant leaver, (double Hit, double ExpectedDealt, double Kill) blow)
+        {
+            if (blow.Kill >= 0.25)
+            {
+                return true;
+            }
+
+            var worth = Worth(blow, leaver);
+            return enemy.Side == Side.Adversaries
+                ? worth >= 0.4
+                : enemy.Stamina >= 2 && worth > 0.6 + 0.4 * Threat(leaver) * PerWound(enemy);
         }
 
         /// <summary>The chance a Grab, Shove or Trip lands — against Stability, and the target standing firm if it can.</summary>

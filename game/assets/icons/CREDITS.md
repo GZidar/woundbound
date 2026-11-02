@@ -18,6 +18,7 @@ The action icons are from [game-icons.net](https://game-icons.net), used under [
 | end-turn | [hourglass](https://game-icons.net/1x1/lorc/hourglass.html) | Lorc |
 | strike | [broadsword](https://game-icons.net/1x1/lorc/broadsword.html) | Lorc |
 | shoot | [pocket-bow](https://game-icons.net/1x1/lorc/pocket-bow.html) | Lorc |
+| off-hand | [plain-dagger](https://game-icons.net/1x1/lorc/plain-dagger.html) | Lorc |
 | cleave | [axe-swing](https://game-icons.net/1x1/lorc/axe-swing.html) | Lorc |
 | topple | [groundbreaker](https://game-icons.net/1x1/lorc/groundbreaker.html) | Lorc |
 | ring | [ringing-bell](https://game-icons.net/1x1/lorc/ringing-bell.html) | Lorc |

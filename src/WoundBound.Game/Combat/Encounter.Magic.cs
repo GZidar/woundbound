@@ -324,7 +324,12 @@ namespace WoundBound.Game.Combat
                     var moves = cast.Threshold ?? spell.Threshold ?? ThresholdType.Dodge;
                     if (moves == ThresholdType.Fortitude)
                     {
-                        return CastPlan.Refused("Fortitude isn't in the game yet.");
+                        // Nothing with no living body has a Fortitude for it to move (GM Reference §9).
+                        caught = caught.Where(c => c.BaseFortitudeThreshold is not null).ToList();
+                        if (caught.Count == 0)
+                        {
+                            return CastPlan.Refused("No living body there for Fortitude to measure.");
+                        }
                     }
 
                     break;
@@ -870,7 +875,7 @@ namespace WoundBound.Game.Combat
             var threshold = cast.Threshold ?? spell.Threshold ?? ThresholdType.Dodge;
             var amount = spell.SpellType == SpellType.Buff
                 ? ThresholdModifierCalculator.BuffAmount(spell.SpellTier)
-                : RuleTrials.BaneAmount(spell.SpellTier);
+                : ThresholdModifierCalculator.BaneAmount(spell.SpellTier);
             var modifier = new ThresholdModifier
             {
                 Threshold = threshold,

@@ -150,6 +150,13 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Let go of whatever it's holding. Free.</summary>
         public sealed record LetGo : GmStep;
 
+        /// <summary>
+        /// 1 Stamina for an extra action — a tactical spend, as for anyone (GM Reference §3: "Stamina
+        /// works for a Solo as it does for anyone: an extra action..."). An adversary's spend hands
+        /// the GM nothing.
+        /// </summary>
+        public sealed record BuyExtraAction : GmStep;
+
         /// <summary>Done for this turn, whatever is left unspent.</summary>
         public sealed record EndTurn : GmStep;
 

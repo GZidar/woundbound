@@ -116,14 +116,38 @@ namespace WoundBoundGame
         private List<RadialItem> AttackItems(Combatant acting)
         {
             var noAction = acting.ActionsRemaining < 1 ? "No action left this turn." : null;
-            var items = new List<RadialItem>
+            var items = new List<RadialItem>();
+
+            // The off-hand strike the Attack action just allowed comes first, with its own manoeuvres.
+            if (acting.OffHandAttack is { } offHand && acting.OffHandOwed)
+            {
+                var why = encounter.OffHandRefusal(acting);
+                items.Add(new RadialItem($"Off-hand ({offHand.Name})", why,
+                    $"Strike with the {offHand.Name} too: 1 Stamina, levied by the equipment — no action, no tactical spend, and no Opportunity for the GM. Rolled on its own.")
+                {
+                    Children = why is null ? () => Targets(acting, null, offHand: true) : null,
+                    Icon = "off-hand",
+                });
+
+                var offPermitted = Encounter.ManoeuvresOf(acting, offHand: true);
+                items.AddRange(manoeuvreButtons
+                    .Where(m => offPermitted.Contains(m.Key))
+                    .Select(m => new RadialItem($"{m.Key} (off-hand {offHand.Name})", why,
+                        m.Value.TooltipText.Replace(" Then click the foe.", " Then choose who.") + $"\nMade with the {offHand.Name}, as the off-hand strike.")
+                    {
+                        Children = why is null ? () => Targets(acting, m.Key, offHand: true) : null,
+                        Icon = m.Key.ToString().ToLowerInvariant(),
+                    }));
+            }
+
+            items.AddRange(new RadialItem[]
             {
                 new($"Strike ({acting.Attack.Name})", noAction, "Choose who to strike: everyone your weapon can reach from here, allies included.")
                 {
                     Children = noAction is null ? () => Targets(acting, null) : null,
                     Icon = AttackIcon(acting),
                 },
-            };
+            });
 
             // Only what the weapon in hand permits — read from the rules, not the HUD buttons, which
             // may not have caught up with whoever's turn just began.
@@ -151,13 +175,14 @@ namespace WoundBoundGame
         /// it — a blade whoever is in its Reach, a bow or a sling whoever is beyond Close and in sight,
         /// allies too — foes first, nearest first. Choosing one makes the attack.
         /// </summary>
-        private IReadOnlyList<RadialItem> Targets(Combatant attacker, WeaponManoeuvre? kind)
+        /// <param name="offHand">The off-hand strike of a Two Weapons loadout, rather than the Attack action.</param>
+        private IReadOnlyList<RadialItem> Targets(Combatant attacker, WeaponManoeuvre? kind, bool offHand = false)
         {
             var targets = encounter.Combatants
-                .Where(c => c.OccupiesSquare && encounter.CanAttack(attacker, c))
+                .Where(c => c.OccupiesSquare && (offHand ? encounter.OffHandRefusal(attacker, c) is null : encounter.CanAttack(attacker, c)))
                 .Where(c => kind is null || (kind == WeaponManoeuvre.Cleave
-                    ? CleaveSeconds(attacker, c).Count > 0
-                    : Encounter.ManoeuvreRefusal(attacker, c, new Manoeuvre(kind.Value)) is null))
+                    ? CleaveSeconds(attacker, c, offHand).Count > 0
+                    : Encounter.ManoeuvreRefusal(attacker, c, new Manoeuvre(kind.Value), offHand) is null))
                 .OrderBy(c => c.Side == attacker.Side)
                 .ThenBy(c => attacker.DistanceTo(c))
                 .ToList();
@@ -171,7 +196,7 @@ namespace WoundBoundGame
 
             return targets.Select(target =>
             {
-                var plan = encounter.PlanAttack(attacker, target);
+                var plan = offHand ? encounter.PlanOffHandAttack(attacker, target) : encounter.PlanAttack(attacker, target);
                 var attack = plan.Profile ?? attacker.Attack;
                 var hit = Odds.Of(attack.AttackModifier, plan.DodgeThreshold).Success;
                 var ally = target.Side == attacker.Side;
@@ -185,7 +210,7 @@ namespace WoundBoundGame
                     // Cleave asks who the sweep carries on into; Hook, which way the target is hauled.
                     WeaponManoeuvre.Cleave => new RadialItem(label, null, hint + "\nThen choose who the sweep carries on into.")
                     {
-                        Children = () => CleaveSeconds(attacker, target).Select(second => new RadialItem(second.Name, null,
+                        Children = () => CleaveSeconds(attacker, target, offHand).Select(second => new RadialItem(second.Name, null,
                             $"The same damage roll lands on {second.Name} too, if it beats their DT {second.DodgeThreshold}. Armour absorbs it as normal.")
                         {
                             Pick = () => Strike(target, new Manoeuvre(WeaponManoeuvre.Cleave, second)),
@@ -209,16 +234,24 @@ namespace WoundBoundGame
             void Strike(Combatant target, Manoeuvre? manoeuvre)
             {
                 Disarm();
-                encounter.TryAttack(target, sacrificeBox.ButtonPressed, manoeuvre);
+                if (offHand)
+                {
+                    encounter.TryOffHandAttack(target, manoeuvre);
+                }
+                else
+                {
+                    encounter.TryAttack(target, sacrificeBox.ButtonPressed, manoeuvre);
+                }
+
                 Refresh();
             }
         }
 
         /// <summary>Every enemy a Cleave at <paramref name="target"/> could sweep on into, as the rules allow it, weakest first.</summary>
-        private List<Combatant> CleaveSeconds(Combatant attacker, Combatant target) =>
+        private List<Combatant> CleaveSeconds(Combatant attacker, Combatant target, bool offHand = false) =>
             encounter.Combatants
                 .Where(c => c != target && c.OccupiesSquare
-                            && Encounter.ManoeuvreRefusal(attacker, target, new Manoeuvre(WeaponManoeuvre.Cleave, c)) is null)
+                            && Encounter.ManoeuvreRefusal(attacker, target, new Manoeuvre(WeaponManoeuvre.Cleave, c), offHand) is null)
                 .OrderBy(c => c.Body)
                 .ToList();
 

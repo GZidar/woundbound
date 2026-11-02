@@ -340,12 +340,14 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>What the Visibility <paramref name="target"/> is seen at adds to their Dodge Threshold: +2 at Poor, +4 at None.</summary>
-        public int VisibilityDodgeModifier(Combatant target, GridPosition? at = null) =>
-            environment is { } tables ? EnvironmentCalculator.DodgeThresholdModifier(tables, VisibilityOf(target, at)) : 0;
+        /// <param name="seer">Who's looking: one with Nightvision ignores the dark altogether.</param>
+        public int VisibilityDodgeModifier(Combatant target, GridPosition? at = null, Combatant? seer = null) =>
+            environment is { } tables && seer?.SeesInDark != true ? EnvironmentCalculator.DodgeThresholdModifier(tables, VisibilityOf(target, at)) : 0;
 
         /// <summary>Whether <paramref name="target"/>, on <paramref name="at"/>, can be targeted at all from <paramref name="distance"/> squares — nothing beyond Close at None.</summary>
-        private bool CanBeTargeted(Combatant target, GridPosition at, int distance) =>
+        private bool CanBeTargeted(Combatant target, GridPosition at, int distance, Combatant? seer = null) =>
             environment is not { } tables
+            || seer?.SeesInDark == true
             || RangeBandCalculator.BandForSquares(bands, distance) is not { } band
             || EnvironmentCalculator.AllowsTargeting(tables, VisibilityOf(target, at), band);
 
@@ -889,6 +891,20 @@ namespace WoundBound.Game.Combat
                 return new AttackPlan("Something solid is in the way.", 0, 0, null, "Something solid is in the way.", attack);
             }
 
+            if (attack.Against == ThresholdType.Fortitude)
+            {
+                // Breathed or swallowed: within its reach, against Fortitude, and nothing about the
+                // light or the range makes the body any readier to take it (Core Rules §10).
+                if (target.FortitudeThreshold is not { } fortitude)
+                {
+                    return Refused($"{target.Name} has no living body for the {attack.Name} to take hold in.");
+                }
+
+                return distance > attack.Reach
+                    ? Refused($"Out of reach — the {attack.Name} reaches {attack.Reach} square(s) and they're {distance} away.")
+                    : new AttackPlan(null, fortitude, 0, attack.DamageDieSides, $"Against Fortitude, within {attack.Reach}.", attack);
+            }
+
             if (!attack.IsRanged)
             {
                 if (attack.IsUnwieldy && distance <= 1)
@@ -901,12 +917,12 @@ namespace WoundBound.Game.Combat
                     return Refused($"Out of reach — the {attack.Name} reaches {attack.Reach} square(s) and they're {distance} away.");
                 }
 
-                if (!CanBeTargeted(target, targetAt ?? target.Position, distance))
+                if (!CanBeTargeted(target, targetAt ?? target.Position, distance, attacker))
                 {
                     return Refused("Too dark to see them past arm's length.");
                 }
 
-                var dark = VisibilityDodgeModifier(target, targetAt);
+                var dark = VisibilityDodgeModifier(target, targetAt, attacker);
                 return new AttackPlan(null, target.DodgeThreshold + dark, 0, attack.DamageDieSides,
                     $"Melee, within Reach {attack.Reach}" + (dark > 0 ? $"; +{dark} DT for the dark." : "."), attack);
             }
@@ -920,12 +936,12 @@ namespace WoundBound.Game.Combat
                 _ => TargetRange.BeyondLong,
             };
             var shot = WeaponCalculator.ShotAt(attack.Weapon!, attack.DamageModifier, range);
-            if (shot.CanAttack && !CanBeTargeted(target, targetAt ?? target.Position, distance))
+            if (shot.CanAttack && !CanBeTargeted(target, targetAt ?? target.Position, distance, attacker))
             {
                 return Refused("Too dark to see them — nothing can be targeted beyond Close at Visibility None.");
             }
 
-            var gloom = VisibilityDodgeModifier(target, targetAt);
+            var gloom = VisibilityDodgeModifier(target, targetAt, attacker);
 
             return shot.CanAttack
                 ? new AttackPlan(
@@ -1046,6 +1062,9 @@ namespace WoundBound.Game.Combat
             ResolveAttack(attacker, target, asReaction: false, opportunityBonus: false, outcome =>
             {
                 result = outcome;
+                // The Attack action of a Two Weapons loadout carries a second strike, for the
+                // off-hand's Stamina (Core Rules §9, "Two Weapons").
+                attacker.OffHandOwed = attacker.OffHandWeapon is not null && Active == attacker;
                 CheckForEnd();
             }, sacrifice: sacrifice, manoeuvre: manoeuvre);
 
@@ -1480,6 +1499,7 @@ namespace WoundBound.Game.Combat
             Active = next;
             next.HasMove = true;
             next.ActionsRemaining = 1;
+            next.OffHandOwed = false;
             next.HasActedThisRound = true;
             Phase = EncounterPhase.PartyTurn;
             Write($"{next.Name}'s turn.");
@@ -1686,9 +1706,21 @@ namespace WoundBound.Game.Combat
         private void TakeAdversaryTurn(Combatant actor, bool allowOpportunityBonus, Action done)
         {
             StartTurnFor(actor);
+            if (actor.Stamina <= 0)
+            {
+                // Adversaries too: whoever starts a turn on 0 Stamina falls unconscious (Core Rules §6;
+                // the user's ruling, 2026-11-02).
+                actor.IsUnconscious = true;
+                Write($"{actor.Name} starts its turn with no Stamina and falls unconscious.");
+                FinishTurn(actor);
+                done();
+                return;
+            }
+
             Active = actor;
             actor.HasMove = true;
             actor.ActionsRemaining = 1;
+            actor.OffHandOwed = false;
 
             // The Opportunity bonus goes to "an adversary yet to act this round" (Core Rules §9).
             var turn = new GmTurn(actor, isExtraTurn: !allowOpportunityBonus,
@@ -1790,7 +1822,7 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain had {actor.Name} use {attack.With.Name} two rounds running; it's every other round.");
                     }
 
-                    PaySoloSecondAttack(actor);
+                    CountAttack(actor, turn);
                     if (attack.With is { AreaSquares: not null })
                     {
                         actor.LastAreaAttackRound = Round;
@@ -1814,7 +1846,7 @@ namespace WoundBound.Game.Combat
 
                     if (cast.Spell.Spell.SpellType == SpellType.Harm)
                     {
-                        PaySoloSecondAttack(actor);
+                        CountAttack(actor, turn);
                     }
 
                     turn.HasAttacked = true;
@@ -1943,6 +1975,18 @@ namespace WoundBound.Game.Combat
 
                 case GmStep.LetGo:
                     throw new InvalidOperationException($"The GM brain had {actor.Name} let go, but it's holding nobody.");
+
+                case GmStep.BuyExtraAction:
+                    if (TacticalSpendRefusal(actor) is { } spendWhy)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} buy an extra action: {spendWhy}");
+                    }
+
+                    PayTacticalSpend(actor, CombatActionCatalog.ExtraActionStaminaCost);
+                    actor.ActionsRemaining++;
+                    Write($"{actor.Name} spends 1 Stamina for an extra action ({actor.Stamina} left).");
+                    TakeStep(turn, done);
+                    return;
 
                 case GmStep.StandGround brace:
                     if (StandGroundRefusal(actor, brace.Action) is { } why)
@@ -2273,7 +2317,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void ResolveReactiveControl(Combatant actor, ControlAction action, Combatant target, GridPosition catchAt, Action<bool> then)
         {
-            var dt = target.DodgeThreshold + VisibilityDodgeModifier(target);
+            var dt = target.DodgeThreshold + VisibilityDodgeModifier(target, seer: actor);
             var st = target.StabilityThreshold;
             var (helped, harried) = TakeAid(actor);
             var roll = RollAgainst(actor.UnarmedAttackModifier, Math.Max(dt, st), helped, AttacksAtDisadvantage(actor) || harried, actor);
@@ -2386,11 +2430,35 @@ namespace WoundBound.Game.Combat
             : TacticalSpendRefusal(solo) is { } spent ? $"{solo.Name} has made its attack this round: {spent}"
             : null;
 
-        /// <summary>Counts a Solo's attack, and pays the Stamina for a second.</summary>
-        private void PaySoloSecondAttack(Combatant actor)
+        /// <summary>
+        /// Why <paramref name="actor"/> can't attack again this round, or null if it can: an adversary
+        /// attacks once a round, and Stamina buys it the move, the reposition, the Grab or the spell
+        /// around that attack — never a second one. Extra attacks come from the GM's Opportunities, an
+        /// extra turn (<paramref name="extraTurn"/>); a Solo buys its second with Stamina (GM Reference §3;
+        /// the user's ruling, 2026-11-02).
+        /// </summary>
+        public static string? OnceARoundRefusal(Combatant actor, bool extraTurn) =>
+            actor.Side != Side.Adversaries || actor.IsSolo || extraTurn || actor.AttacksThisRound == 0
+                ? null
+                : $"{actor.Name} has made its attack this round — Stamina buys it anything but a second.";
+
+        /// <summary>Counts an adversary's attack — once a round, outside an extra turn — and pays the Stamina for a Solo's second.</summary>
+        private void CountAttack(Combatant actor, GmTurn turn)
         {
             if (!actor.IsSolo)
             {
+                if (OnceARoundRefusal(actor, turn.IsExtraTurn) is { } once)
+                {
+                    throw new InvalidOperationException($"The GM brain had {actor.Name} attack again: {once}");
+                }
+
+                // An extra turn's attack is the Opportunity's, bought by the party: it leaves the
+                // creature's own once-a-round attack where it was.
+                if (!turn.IsExtraTurn)
+                {
+                    actor.AttacksThisRound++;
+                }
+
                 return;
             }
 
@@ -2568,6 +2636,13 @@ namespace WoundBound.Game.Combat
                 ? Math.Max(0, InventoryCalculator.ShieldDodgeThresholdBonus(shield.Weight) - target.ShieldBonus)
                 : 0;
             var riposte = roll.IsCritical ? " — a critical, so turning it would Riposte it" : string.Empty;
+
+            // Fortitude can't be braced: no shield and no panic dodge turns a lungful aside (Core Rules §10).
+            if (attack.Against == ThresholdType.Fortitude)
+            {
+                FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, boost: 0, boostedBy: null, then);
+                return;
+            }
 
             if (shieldGain > 0 && BoostWouldTurn(roll, plan.DodgeThreshold, shieldGain))
             {
@@ -3296,8 +3371,18 @@ namespace WoundBound.Game.Combat
                 var swung = plan.Profile ?? attacker.Attack;
                 rolledDamage = RollDamage(swung, plan, roll.IsCritical)
                                + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
+                if (swung.Track != WoundType.Body)
+                {
+                    // Mind or Soul: armour has no part in it, and Backlash and Shelter have their say in Wound.
+                    var struck = new AttackOutcome(attacker, target, roll, plan, rolledDamage, 0, rolledDamage, false,
+                        usedOpportunity, asReaction, dodged, boost, boostedBy);
+                    Write(Describe(struck) + $" ({swung.Track})");
+                    Wound(target, swung.Track, rolledDamage, direct: true, () => then(struck));
+                    return;
+                }
+
                 (rolledDamage, absorbed, dealt) = ByEdge(swung.Edge, target, rolledDamage,
-                    InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise));
+                    InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise || swung.IsDirect));
                 if (swung.Edge == WeaponEdge.Breaking && target.IsVulnerableToBreaking && !target.IsSwarm)
                 {
                     Write($"{target.Name} is Vulnerable to Breaking: +2 Body from the {swung.Name}.");
@@ -3315,14 +3400,14 @@ namespace WoundBound.Game.Combat
                 }
 
                 // What got past the armour may yet be taken by somebody else (Core Rules §3, "Shelter").
-                var (hit, rolledHit, absorbedHit) = (roll, rolledDamage, absorbed);
+                var (hit, rolledHit, absorbedHit, gotThrough) = (roll, rolledDamage, absorbed, dealt);
                 Shelter(target, dealt, WoundType.Body, left =>
                 {
                     TakeBodyWounds(target, left);
                     var landed = new AttackOutcome(attacker, target, hit, plan, rolledHit, absorbedHit, left, false,
                         usedOpportunity, asReaction, dodged, boost, boostedBy);
                     Write(Describe(landed));
-                    then(landed);
+                    Envenom(swung, target, hit, gotThrough, () => then(landed));
                 });
                 return;
             }
@@ -3544,16 +3629,18 @@ namespace WoundBound.Game.Combat
                 && (there.Side != mover.Side || threats.Any(e => e.CanReach(square)));
 
             // A creature bigger than a square goes where the whole of it fits; a Swarm flows over
-            // and onto anybody, since arriving on top of them is the only way it bites (GM Reference §3).
+            // and onto anybody, since arriving on top of them is the only way it bites (GM Reference §3)
+            // — and a Tiny thing, holding no ground and reaching 0, lands on them the same way.
             var across = mover.Across;
+            var groundless = !mover.HoldsGround;
             bool AnyUnder(GridPosition corner, Func<GridPosition, bool> test) =>
                 across == 1 ? test(corner) : Footprints.At(corner, across).Any(test);
             var map = new MovementMap(
                 mover.Position,
                 radius: reach,
                 isWall: corner => AnyUnder(corner, Setting.IsWall),
-                isClosed: corner => !mover.IsSwarm && AnyUnder(corner, ClosedSquare),
-                canStop: corner => mover.IsSwarm || !AnyUnder(corner, standing.ContainsKey),
+                isClosed: corner => !groundless && AnyUnder(corner, ClosedSquare),
+                canStop: corner => groundless || !AnyUnder(corner, standing.ContainsKey),
                 isBroken: corner => tables is not null && AnyUnder(corner, sq => GroundAt(sq) == Terrain.Broken),
                 isDeep: corner => AnyUnder(corner, Setting.IsDeepWater),
                 price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.IsNimble, freeStep: FreeStepFor(mover)),

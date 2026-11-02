@@ -68,8 +68,24 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             var planner = Planner(view, out _);
-            var options = planner.Options(actor, actor.HasMove, actor.ActionsRemaining, real: true,
-                turn.BonusAvailable, view.BankedOpportunities >= view.MaxBankedOpportunities, StillToAct(view, actor));
+            var attacked = Encounter.OnceARoundRefusal(actor, turn.IsExtraTurn) is not null;
+            var options = WithoutAttacks(attacked, planner.Options(actor, actor.HasMove, actor.ActionsRemaining, real: true,
+                turn.BonusAvailable, view.BankedOpportunities >= view.MaxBankedOpportunities, StillToAct(view, actor)));
+
+            // Out of actions: another, for Stamina, where the best thing it buys beats keeping the
+            // Stamina — and the reaction that Stamina would otherwise pay for this round.
+            if (actor.ActionsRemaining == 0 && actor.Stamina >= 2 && BattleView.TacticalSpendRefusal(actor) is null && Skill.UsesTricks)
+            {
+                var bought = WithoutAttacks(attacked, planner.Options(actor, actor.HasMove, 1, real: false, turn.BonusAvailable, stillToAct: StillToAct(view, actor)))
+                    .Where(o => o.Kind is not (OptionKind.End or OptionKind.Move))
+                    .Select(o => o.Score).DefaultIfEmpty(double.MinValue).Max();
+                var keep = options.Select(o => o.Score).DefaultIfEmpty(0).Max();
+                if (bought - keep > planner.ExtraActionPrice(actor))
+                {
+                    return new GmStep.BuyExtraAction();
+                }
+            }
+
             if (options.Count == 0)
             {
                 return GmStep.End;
@@ -95,6 +111,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 _ => GmStep.End,
             };
         }
+
+        /// <summary>Leaves out every blow and Harm, once the adversary has made its one attack this round.</summary>
+        private static List<Option> WithoutAttacks(bool attacked, List<Option> options) =>
+            !attacked ? options : options.Where(o =>
+                o.Kind != OptionKind.Attack && o.Then != OptionKind.Attack
+                && !((o.Kind == OptionKind.Cast || o.Then == OptionKind.Cast) && o.Cast?.Spell.SpellType == SpellType.Harm)).ToList();
 
         /// <summary>Strikes at a leaver where the blow is worth the Stamina — and never while running.</summary>
         public override bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) =>
@@ -251,6 +273,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var planner = Planner(view, out var assess);
             var stillToAct = view.PartyStillToAct;
+
+            // The off-hand strike its Attack action allows, where a blow with it is worth the Stamina.
+            if (OffHandStrike(view, assess, character) is { } offHand)
+            {
+                return offHand;
+            }
             var options = planner.Options(character, character.HasMove, character.ActionsRemaining, real: true, stillToAct: stillToAct,
                 interrupting: view.Interrupting);
 
@@ -354,6 +382,29 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         private static bool CanSpare(Combatant c) => c.Stamina - 1 >= StaminaReserve;
+
+        /// <summary>
+        /// The off-hand blow that's worth most, once the Attack action has allowed one: Stamina from the
+        /// equipment, so no Opportunity — only the Stamina itself, which keeps a character on their feet.
+        /// </summary>
+        private static PartyStep? OffHandStrike(BattleView view, Assessor assess, Combatant character)
+        {
+            if (!character.OffHandOwed || character.OffHandAttack is not { } offHand || !CanSpare(character)
+                || character.NeedsFooting || character.IsOutOfFight)
+            {
+                return null;
+            }
+
+            var best = view.EnemiesOf(character)
+                .Select(e => (Who: e, Plan: view.PlanAttackWith(character, offHand, character.Position, e)))
+                .Where(x => x.Plan.CanAttack && !x.Who.IsOutOfFight)
+                .Select(x => (x.Who, Worth: assess.Worth(assess.Blow(character, offHand, x.Who, x.Plan.DamageDieSides, x.Plan.DodgeThreshold,
+                    view.PackMateOf(character, x.Who) is not null), x.Who)))
+                .OrderByDescending(x => x.Worth)
+                .FirstOrDefault();
+
+            return best.Who is not null && best.Worth >= 0.3 ? new PartyStep.OffHand(best.Who) : null;
+        }
 
         /// <summary>
         /// Interrupts where the turn taken now beats the same turn taken later by more than the Mind it

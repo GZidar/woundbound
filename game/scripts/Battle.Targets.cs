@@ -97,6 +97,7 @@ namespace WoundBoundGame
                 ThresholdType.Dodge => (int?)target.DodgeThreshold,
                 ThresholdType.Stability => target.StabilityThreshold,
                 ThresholdType.Resolve => target.ResolveThreshold,
+                ThresholdType.Fortitude => target.FortitudeThreshold,
                 _ => null,
             };
             if (spell.Threshold is { } threshold && target.Side != caster.Side)

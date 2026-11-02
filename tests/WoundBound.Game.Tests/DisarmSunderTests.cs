@@ -81,6 +81,7 @@ public class DisarmSunderTests
         encounter.TryBeginTurn(joren);
         encounter.TryAttack(bandit, manoeuvre: new Manoeuvre(WeaponManoeuvre.Disarm));
         encounter.EndTurn();
+        bandit.Stamina = 1; // awake for its turn: a creature that starts one on 0 falls unconscious
 
         encounter.RunAdversaryTurn();
 

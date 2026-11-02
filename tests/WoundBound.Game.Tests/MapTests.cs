@@ -135,12 +135,16 @@ public class MapTests
         Assert.Equal(new GridPosition(3, 4), fighter.Position);
         Assert.Contains(encounter.Log, line => line.StartsWith("The Dumb Fighter struggles in the deep water and gets nowhere"));
 
-        // Next turn, he tries again.
+        // Next turn, he tries again. The biter is awake for its own turn (on 0 it would fall
+        // unconscious), and spent again before he swims off.
         encounter.EndTurn();
+        biter.Stamina = 1;
         while (encounter.Phase == EncounterPhase.AdversaryTurn)
         {
             encounter.RunAdversaryTurn();
         }
+
+        biter.Stamina = 0;
 
         Assert.True(encounter.TryMove(new GridPosition(5, 4)));
         Assert.Equal(new GridPosition(5, 4), fighter.Position);

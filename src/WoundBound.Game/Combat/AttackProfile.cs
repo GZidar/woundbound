@@ -11,6 +11,16 @@ namespace WoundBound.Game.Combat
     /// <param name="DamageDieSides">The weapon's base die — what a hit rolls at Close or in melee, and what a critical's bonus die always is.</param>
     /// <param name="Reach">How far it can put a blade into somebody (Core Rules §9, "Reach"), in squares. Shooting is measured in bands instead.</param>
     /// <param name="Weapon">The weapon in hand, or null for a statblock attack.</param>
+    /// <summary>
+    /// A poison on a blade, a bite or a dart: on a hit that got past armour at all, the attack's own
+    /// total against the target's Fortitude, and if it holds, this much Direct damage on top of the
+    /// weapon's (Core Rules §10, "Fortitude Threshold").
+    /// </summary>
+    public sealed record Poison(int DiceCount, int DieSides, int Modifier, WoundType Track)
+    {
+        public override string ToString() => $"{DiceCount}d{DieSides}{(Modifier == 0 ? string.Empty : Modifier.ToString("+0;-0"))} {Track} (Direct)";
+    }
+
     public sealed record AttackProfile(
         string Name,
         int AttackModifier,
@@ -33,6 +43,22 @@ namespace WoundBound.Game.Combat
         /// Reference §3, "An area attack is one attack"). Null for a blow at one target.
         /// </summary>
         public int? AreaSquares { get; init; }
+
+        /// <summary>
+        /// The Threshold the roll is made against: Dodge for a blow, Fortitude for something breathed
+        /// or swallowed with no attack behind it (Core Rules §10). Nothing turns a Fortitude roll aside —
+        /// no panic dodge, no shield.
+        /// </summary>
+        public ThresholdType Against { get; init; } = ThresholdType.Dodge;
+
+        /// <summary>The track it wounds: Body for any weapon (Core Rules §9, "Damage Types"); Mind or Soul for what a statblock says strikes there.</summary>
+        public WoundType Track { get; init; } = WoundType.Body;
+
+        /// <summary>Damage armour doesn't absorb — a gas, a swallowed poison (Core Rules §4, "What Armour Absorbs").</summary>
+        public bool IsDirect { get; init; }
+
+        /// <summary>A poison the blow carries, rolled against Fortitude with the same total (Core Rules §10). Null for a clean blade.</summary>
+        public Poison? Poison { get; init; }
 
         /// <summary>Rationed to every other round, as a statblock may write an area attack.</summary>
         public bool EveryOtherRound { get; init; }

@@ -96,6 +96,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <param name="Manoeuvre">A Martial manoeuvre declared with it (Core Rules §9).</param>
         public sealed record Attack(Combatant Target, bool Sacrifice = false, Manoeuvre? Manoeuvre = null) : PartyStep;
 
+        /// <summary>The off-hand strike of a Two Weapons loadout, straight after the Attack action (Core Rules §9).</summary>
+        public sealed record OffHand(Combatant Target, Manoeuvre? Manoeuvre = null) : PartyStep;
+
         /// <summary>Buy a Nimble Exploit — Slip, Precise or Patient — for 1 Stamina.</summary>
         public sealed record Exploit(Rules.Enums.NimbleExploit Which) : PartyStep;
 

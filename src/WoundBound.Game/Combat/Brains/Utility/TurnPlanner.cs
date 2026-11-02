@@ -151,10 +151,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
             foreach (var (square, _) in squares)
             {
                 var moved = square != here;
+                // Leaving somebody's reach invites their reaction: wounds, and at T1 often the end of
+                // it — in which case what it moved to do never happens. Staying puts up with what the
+                // enemy does on its own turn instead; Exposure prices that, here and there alike.
+                var (leaving, dropped) = moved ? assess.LeavingRisk(actor, square) : (0.0, 0.0);
                 // What standing here sets up for next turn counts whatever is done this turn, so
                 // acting is never scored below standing still.
                 var standing = Position(actor, square) - Peril(actor, square) - care * assess.Exposure(actor, square)
-                               - (moved ? care * assess.LeavingCost(actor, square) : 0)
+                               - care * leaving
                                + 0.5 * Approach(actor, square);
                 var first = moved ? new Option(OptionKind.Move, 0, $"to {square}", Square: square) : null;
 
@@ -162,7 +166,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 {
                     foreach (var act in Actions(actor, square, real && !moved, bonusAvailable, bankFull, stillToAct, care))
                     {
-                        var score = standing + act.Score;
+                        var score = standing + (1 - dropped) * act.Score;
                         options.Add(first is null ? act with { Score = score } : first with { Score = score, Why = $"{first.Why}, then {act.Why}", Target = act.Target, Then = act.Kind, Cast = act.Cast });
                     }
                 }
@@ -197,6 +201,20 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     var score = Position(actor, square) - Peril(actor, square) - care * assess.Exposure(actor, square)
                                 - care * assess.LeavingCost(actor, square) + 0.5 * Approach(actor, square);
                     options.Add(new Option(OptionKind.Move, score, $"dash to {square} ({cost} moves)", Square: square));
+                }
+            }
+
+            // Harry the one beside it, then leave its reach and buy the action to strike elsewhere.
+            if (skill.UsesTricks && canMove && actions == 1 && !actor.IsSolo && actor.Stamina >= 2
+                && BattleView.TacticalSpendRefusal(actor) is null)
+            {
+                foreach (var foe in View.EnemiesOf(actor).Where(f => f.CanReach(actor) && actor.DistanceTo(f) <= 1 && !f.IsOutOfFight))
+                {
+                    if ((!real || BattleView.AidRefusal(actor, CombatAction.Harry, foe) is null)
+                        && HarryAndGo(actor, foe, squares, real, stillToAct, care) is { } plan)
+                    {
+                        options.Add(plan);
+                    }
                 }
             }
 
@@ -275,7 +293,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 double worth = 0;
                 foreach (var victim in caught)
                 {
-                    var blow = assess.Blow(actor, line, victim, line.DamageDieSides, victim.DodgeThreshold + View.VisibilityDodgeModifier(victim));
+                    var blow = assess.Blow(actor, line, victim, line.DamageDieSides, victim.DodgeThreshold + View.VisibilityDodgeModifier(victim, seer: actor));
                     var value = blow.ExpectedDealt * assess.PerWound(victim) + 0.3 * blow.Kill * assess.Value(victim);
                     worth += victim.Side == actor.Side ? -1.5 * value : value;
                 }
@@ -485,7 +503,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                yield return new Option(OptionKind.Aid, HarryWorth(actor, foe), $"Harry {foe.Name}", Target: foe, Action: CombatAction.Harry);
+                yield return new Option(OptionKind.Aid, HarryWorth(actor, foe, care), $"Harry {foe.Name}", Target: foe, Action: CombatAction.Harry);
             }
 
             // Heal: the dying first — a body back in the fight, and a death put off.
@@ -555,16 +573,20 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>
-        /// A Harry is worth what Disadvantage takes off the foe's next roll: its best blow at the one
-        /// of ours it is likeliest to hit — the one that blow is worth most against — with and without,
-        /// in that one's wounds. Nothing if it can reach nobody to use the roll on.
+        /// A Harry is worth what Disadvantage takes off the foe's next roll — its next blow, at
+        /// whichever of ours it can reach, each as likely as the next, as Exposure shares a blow out.
+        /// What it spares the harrier itself is weighed at the harrier's care, as its own skin is
+        /// everywhere else: a Brute shrugs off what a Skirmisher would pay to avoid. Nothing if the
+        /// foe can reach nobody to use the roll on. On its own it seldom beats a blow of one's own;
+        /// where it pays is ahead of leaving that foe's reach (see <see cref="HarryAndGo"/>).
         /// </summary>
-        private double HarryWorth(Combatant actor, Combatant foe)
+        private double HarryWorth(Combatant actor, Combatant foe, double care)
         {
             var stride = View.SquaresFor(foe.Speed, 1);
-            double best = 0;
+            var spared = new List<double>();
             foreach (var victim in View.AlliesOf(actor).Where(a => !a.IsOutOfFight || a.IsDefenceless))
             {
+                double best = -1;
                 foreach (var attack in foe.Attacks.Where(a => a.AreaSquares is null))
                 {
                     if (!attack.IsRanged && foe.DistanceTo(victim) > attack.Reach + stride)
@@ -572,15 +594,63 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         continue;
                     }
 
-                    var dodge = victim.DodgeThreshold + View.VisibilityDodgeModifier(victim);
-                    var plain = assess.Blow(foe, attack, victim, attack.DamageDieSides, dodge).ExpectedDealt;
-                    var harried = assess.Blow(foe, attack, victim, attack.DamageDieSides, dodge, disadvantage: true).ExpectedDealt;
-                    best = Math.Max(best, (plain - harried) * assess.PerWound(victim));
+                    var dodge = victim.DodgeThreshold + View.VisibilityDodgeModifier(victim, seer: foe);
+                    var plain = assess.Blow(foe, attack, victim, attack.DamageDieSides, dodge);
+                    var harried = assess.Blow(foe, attack, victim, attack.DamageDieSides, dodge, disadvantage: true);
+                    best = Math.Max(best, assess.Worth(plain, victim) - assess.Worth(harried, victim));
+                }
+
+                if (best >= 0)
+                {
+                    spared.Add(victim == actor ? care * best : best);
                 }
             }
 
-            return best;
+            return spared.Count == 0 ? 0 : spared.Average();
         }
+
+        /// <summary>
+        /// Harry the foe beside it, step out of its reach — its reaction now rolled at Disadvantage —
+        /// and buy an action with Stamina to strike somebody worth more (the user's direction,
+        /// 2026-11-02). Scored as that whole plan: the Harry, the move with the cheaper reaction, the
+        /// blow if it gets there, less the extra action's price. Null where there's no such plan.
+        /// </summary>
+        private Option? HarryAndGo(Combatant actor, Combatant foe, IReadOnlyDictionary<GridPosition, int> squares, bool real,
+            IReadOnlyCollection<Combatant>? stillToAct, double care)
+        {
+            var best = double.MinValue;
+            string? why = null;
+            foreach (var square in squares.Keys.Where(sq => sq != actor.Position && !foe.CanReachBlock(sq, actor.Across)))
+            {
+                var (leaving, dropped) = assess.LeavingRisk(actor, square, harried: foe);
+                var strike = Actions(actor, square, checkRules: false, bonusAvailable: false, bankFull: false, stillToAct, care)
+                    .Where(o => o.Kind is OptionKind.Attack or OptionKind.Cast && o.Target != foe)
+                    .MaxBy(o => o.Score);
+                if (strike is null)
+                {
+                    continue;
+                }
+
+                var score = Position(actor, square) - Peril(actor, square) - care * assess.Exposure(actor, square) - care * leaving
+                            + 0.5 * Approach(actor, square) + (1 - dropped) * strike.Score;
+                if (score > best)
+                {
+                    (best, why) = (score, $"Harry {foe.Name}, slip past to {square}, then {strike.Why}");
+                }
+            }
+
+            return why is null ? null : new Option(OptionKind.Aid, best - ExtraActionPrice(actor), why, Target: foe, Action: CombatAction.Harry);
+        }
+
+        /// <summary>
+        /// What 1 Stamina for an extra action costs: for a character, the Stamina and the banked
+        /// Opportunity it hands the GM; for an adversary, which hands nobody anything, the Stamina and
+        /// the reaction it can no longer make this round.
+        /// </summary>
+        public double ExtraActionPrice(Combatant actor) =>
+            actor.Side == Side.Party
+                ? 1.0 + 0.8 * View.EnemiesOf(actor).Select(assess.Threat).DefaultIfEmpty(0).Average() * assess.PerWound(actor)
+                : Assessor.SpendPrice(actor, 1.0);
 
         /// <summary>
         /// A Heal on somebody dying puts them back on 1 Body: worth a death put off, and their place
@@ -622,7 +692,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 gain += (down.ExpectedDealt - now.ExpectedDealt) * assess.PerWound(target) + 0.3 * (down.Kill - now.Kill) * assess.Value(target);
             }
 
-            return assess.ControlChance(actor, target, topples: true) * (gain + HarryWorth(actor, target));
+            return assess.ControlChance(actor, target, topples: true) * (gain + HarryWorth(actor, target, care: 1));
         }
 
         /// <summary>

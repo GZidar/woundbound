@@ -95,8 +95,24 @@ namespace WoundBoundGame
                     promptedTurn = turn;
                     OpenActions();
                 }
+
+                // The Attack action of a Two Weapons loadout leaves the off-hand strike to take:
+                // straight back to the Attack ring, once, to offer it.
+                if (!acting.OffHandOwed)
+                {
+                    offHandPrompted = false;
+                }
+                else if (!offHandPrompted && !radial.IsOpen)
+                {
+                    offHandPrompted = true;
+                    OpenActions();
+                    radial.Follow("Attack");
+                }
             }
         }
+
+        /// <summary>Whether the Attack ring has reopened for the off-hand strike now owed.</summary>
+        private bool offHandPrompted;
 
         /// <summary>
         /// The reaction on offer, in a ring round whoever is asked: what they could spend, and letting

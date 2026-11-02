@@ -534,7 +534,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return 0;
             }
 
-            var amount = -RuleTrials.BaneAmount(tier);
+            var amount = -ThresholdModifierCalculator.BaneAmount(tier);
             var sign = target.Side == actor.Side ? -1.0 : 1.0;
 
             // Those who would be glad of it: the other side from the target, still to act before the

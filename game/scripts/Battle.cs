@@ -203,7 +203,7 @@ namespace WoundBoundGame
             { } other => new Manoeuvre(other),
         };
         private static readonly Color SpellArea = new(0.65f, 0.35f, 0.95f, 0.35f);
-        private static readonly ThresholdType[] BuffThresholds = [ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve];
+        private static readonly ThresholdType[] BuffThresholds = [ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve, ThresholdType.Fortitude];
 
         private void Disarm()
         {
@@ -1109,10 +1109,12 @@ namespace WoundBoundGame
                 $"Move: {(character.HasMove ? "available" : "used")}   Actions left: {character.ActionsRemaining}\n" +
                 $"In hand: {attack.Name} +{attack.AttackModifier}, 1d{attack.DamageDieSides}+{attack.DamageModifier}" +
                 (attack.IsRanged ? " (ranged — not at Close)" : $" (Reach {attack.Reach})") + "\n" +
+                (character.OffHandWeapon is { } offHand ? $"Off hand: {offHand.Name} (1 Stamina to strike with it after an Attack)\n" : string.Empty) +
                 $"At the ready: {character.ReadyWeapon?.Name ?? "nothing"}\n" +
                 $"{Threshold("DT", character.DodgeThreshold, character.BaseDodgeThreshold)} · " +
                 $"{Threshold("ST", character.StabilityThreshold, character.BaseStabilityThreshold)} · " +
                 $"{Threshold("RT", character.ResolveThreshold, character.BaseResolveThreshold)} · " +
+                $"{Threshold("FT", character.FortitudeThreshold, character.BaseFortitudeThreshold)} · " +
                 $"{character.Armour} armour (absorbs {armourAbsorbs})" +
                 (character.IsStandingGround
                     ? $"\nStanding your ground ({string.Join(", ", character.StandingGround)}): no moving, and Disadvantage on attacks, until your next turn."

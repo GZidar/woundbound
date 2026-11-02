@@ -44,6 +44,7 @@ namespace WoundBound.Game.Combat
                 BaseDodgeThreshold = stats.DodgeThreshold,
                 BaseStabilityThreshold = stats.StabilityThreshold,
                 BaseResolveThreshold = stats.ResolveThreshold,
+                BaseFortitudeThreshold = stats.FortitudeThreshold,
                 Armour = armour,
                 InnateSpeed = Speed.Normal,
                 StaminaMax = stats.Stamina,
@@ -86,6 +87,7 @@ namespace WoundBound.Game.Combat
                 Name = foe.Name, Side = foe.Side, Position = foe.Position,
                 BodyMax = foe.BodyMax, Body = foe.Body, MindMax = foe.MindMax, Mind = foe.Mind, SoulMax = foe.SoulMax, Soul = foe.Soul,
                 BaseDodgeThreshold = foe.BaseDodgeThreshold, BaseStabilityThreshold = foe.BaseStabilityThreshold, BaseResolveThreshold = foe.BaseResolveThreshold,
+                BaseFortitudeThreshold = foe.BaseFortitudeThreshold,
                 // The Attack line was the spell; what is left in the hands is a punch.
                 StatblockAttacks = attackSpell is null && !string.IsNullOrWhiteSpace(info.AttackName)
                     ? foe.StatblockAttacks
@@ -152,12 +154,17 @@ namespace WoundBound.Game.Combat
             BaseDodgeThreshold = info.DodgeThreshold,
             BaseStabilityThreshold = info.StabilityThreshold,
             BaseResolveThreshold = info.ResolveThreshold,
-            StatblockAttacks = new[] { Area(StatblockLine(info.AttackName, info.AttackModifier, info.DamageDiceCount, info.DamageDie, info.DamageModifier, info.Reach), info.AttackEffect) }
-                .Concat((info.MoreAttacks ?? []).Select(a => Area(StatblockLine(a.Name, a.Modifier, a.DamageDiceCount, a.DamageDie, a.DamageModifier, info.Reach), a.Effect)))
+            BaseFortitudeThreshold = FortitudeOf(info),
+            StatblockAttacks = new[] { Area(Rolled(StatblockLine(info.AttackName, info.AttackModifier, info.DamageDiceCount, info.DamageDie, info.DamageModifier, info.Reach),
+                    info.AttackVsThreshold, info.DamageType, info.DamageIsDirect), info.AttackEffect) }
+                .Concat((info.MoreAttacks ?? []).Select(a => Area(Rolled(StatblockLine(a.Name, a.Modifier, a.DamageDiceCount, a.DamageDie, a.DamageModifier, info.Reach),
+                    a.VsThreshold, a.DamageType, a.DamageIsDirect), a.Effect)))
                 .ToList(),
             Armour = info.Armour,
             InnateSpeed = info.Speed,
             IsSwarm = info.Role == AdversaryRole.Swarm,
+            IsTiny = info.Size == AdversarySize.Tiny,
+            SeesInDark = info.Features?.Any(f => f.Name.Contains("Nightvision", StringComparison.OrdinalIgnoreCase)) == true,
             Across = Footprints.AcrossFor(info.Size),
             Role = info.Role,
             Morale = Morale.FromStatblock(info),
@@ -201,8 +208,27 @@ namespace WoundBound.Game.Combat
         /// An attack line written "against every creature within N squares" becomes an area attack
         /// reaching that far; "every other round" rations it (GM Reference §3, §11).
         /// </summary>
+        /// <summary>
+        /// A foe's Fortitude Threshold: its statblock's FT, or null where it is immune — written so,
+        /// or carrying No Living Body or Bound, Not Alive (GM Reference §9, "On Type"). A block that
+        /// leaves FT out gets 11 + Tier, a Role's middling Vitality.
+        /// </summary>
+        private static int? FortitudeOf(StartingAdversaryInfo info) =>
+            info.FortitudeImmune || info.Traits?.Contains(AdversaryTrait.NoLivingBody) == true || info.Traits?.Contains(AdversaryTrait.BoundNotAlive) == true
+                ? null
+                : info.FortitudeThreshold ?? 11 + (int)info.Tier;
+
+        /// <summary>
+        /// What an Attack line's effect adds to the line: a poison carried on the blow — "poison vs FT,
+        /// 1d4 Body (Direct)" (Core Rules §10) — and an area — "against every creature within N squares".
+        /// </summary>
         public static AttackProfile Area(AttackProfile line, string? effect)
         {
+            if (PoisonIn(effect) is { } poison)
+            {
+                line = line with { Poison = poison };
+            }
+
             if (string.IsNullOrWhiteSpace(effect)
                 || System.Text.RegularExpressions.Regex.Match(effect, @"every creature within (\d+) squares?", System.Text.RegularExpressions.RegexOptions.IgnoreCase) is not { Success: true } within)
             {
@@ -216,6 +242,37 @@ namespace WoundBound.Game.Combat
                 AreaSquares = squares,
                 EveryOtherRound = effect.Contains("every other round", StringComparison.OrdinalIgnoreCase),
             };
+        }
+
+        /// <summary>
+        /// What an Attack line is rolled against and what it wounds: Dodge and Body unless it says
+        /// otherwise — "+2 v FT / 1d6 Body (Direct)" for a gas or a spore cloud, with no attack behind
+        /// it (Core Rules §10, "Fortitude Threshold"); Mind or Soul for what strikes at those. A line
+        /// against Resolve or Stability that isn't a spell is read against Dodge, as before.
+        /// </summary>
+        private static AttackProfile Rolled(AttackProfile line, ThresholdType against, WoundType track, bool direct) =>
+            line with
+            {
+                Against = against == ThresholdType.Fortitude ? ThresholdType.Fortitude : ThresholdType.Dodge,
+                Track = track,
+                IsDirect = direct,
+            };
+
+        /// <summary>The poison an Attack line's effect carries — "poison vs FT, 1d4 Body (Direct)" — or null.</summary>
+        public static Poison? PoisonIn(string? effect)
+        {
+            if (string.IsNullOrWhiteSpace(effect)
+                || System.Text.RegularExpressions.Regex.Match(effect, @"poison\s+vs?\.?\s+FT\s*,?\s*(?<count>\d+)?d(?<die>\d+)\s*(?<mod>[+\-−–]\s*\d+)?\s+(?<track>Body|Mind|Soul)",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase) is not { Success: true } m)
+            {
+                return null;
+            }
+
+            return new Poison(
+                m.Groups["count"].Success ? int.Parse(m.Groups["count"].Value) : 1,
+                int.Parse(m.Groups["die"].Value),
+                m.Groups["mod"].Success ? int.Parse(m.Groups["mod"].Value.Replace(" ", "").Replace('−', '-').Replace('–', '-').Replace("+", "")) : 0,
+                Enum.Parse<WoundType>(m.Groups["track"].Value, ignoreCase: true));
         }
 
         public static AttackProfile StatblockLine(string name, int modifier, int diceCount, string die, int damageModifier, int reach) => new(

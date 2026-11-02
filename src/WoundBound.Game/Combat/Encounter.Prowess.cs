@@ -106,10 +106,11 @@ namespace WoundBound.Game.Combat
         /// permits them by its Edge, Grip, Reach and weight; a generic foe has whatever its Attack line
         /// names, while it still has a melee line to swing (GM Reference §2).
         /// </summary>
-        public static IReadOnlyList<WeaponManoeuvre> ManoeuvresOf(Combatant attacker) =>
+        /// <param name="offHand">For the off-hand weapon of a Two Weapons loadout, which offers its own set (Core Rules §9, "Two Weapons").</param>
+        public static IReadOnlyList<WeaponManoeuvre> ManoeuvresOf(Combatant attacker, bool offHand = false) =>
             attacker.Build is null
-                ? attacker.MeleeAttack.IsRanged ? [] : attacker.StatblockManoeuvres
-                : attacker.IsMartial && attacker.InHandWeapon is { IsRanged: false } weapon
+                ? attacker.MeleeAttack.IsRanged || offHand ? [] : attacker.StatblockManoeuvres
+                : attacker.IsMartial && (offHand ? attacker.OffHandWeapon : attacker.InHandWeapon) is { IsRanged: false } weapon
                     ? WeaponCalculator.ManoeuvresFor(weapon)
                     : [];
 
@@ -117,16 +118,17 @@ namespace WoundBound.Game.Combat
         /// Why <paramref name="attacker"/> can't declare <paramref name="manoeuvre"/> with an attack at
         /// <paramref name="target"/> now, or null if they can (Core Rules §9, "Manoeuvres").
         /// </summary>
-        public static string? ManoeuvreRefusal(Combatant attacker, Combatant target, Manoeuvre manoeuvre)
+        /// <param name="offHand">Made with the off-hand weapon of a Two Weapons loadout.</param>
+        public static string? ManoeuvreRefusal(Combatant attacker, Combatant target, Manoeuvre manoeuvre, bool offHand = false)
         {
             if (attacker.Build is not null && !attacker.IsMartial)
             {
                 return "Only a Martial character can attempt a manoeuvre.";
             }
 
-            if (!ManoeuvresOf(attacker).Contains(manoeuvre.Kind))
+            if (!ManoeuvresOf(attacker, offHand).Contains(manoeuvre.Kind))
             {
-                return $"The {attacker.InHandWeapon?.Name ?? "weapon in hand"} doesn't permit {manoeuvre.Kind}.";
+                return $"The {(offHand ? attacker.OffHandWeapon : attacker.InHandWeapon)?.Name ?? "weapon in hand"} doesn't permit {manoeuvre.Kind}.";
             }
 
             if (!Resolved.Contains(manoeuvre.Kind))
@@ -134,7 +136,7 @@ namespace WoundBound.Game.Combat
                 return $"{manoeuvre.Kind} isn't in the game yet.";
             }
 
-            if (attacker.Attack.IsRanged)
+            if ((offHand ? attacker.OffHandAttack ?? attacker.Attack : attacker.Attack).IsRanged)
             {
                 return "Manoeuvres are melee only.";
             }
@@ -420,7 +422,7 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            var threshold = second.DodgeThreshold + VisibilityDodgeModifier(second);
+            var threshold = second.DodgeThreshold + VisibilityDodgeModifier(second, seer: attacker);
             second.HasBeenAttackedSinceTurnStart = true;
 
             void Resolve(bool dodged)

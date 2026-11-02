@@ -46,9 +46,17 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// Holds the ground it stands on, closing it to enemies. A Swarm occupies none of its
-        /// squares: anyone may walk through the mass or stop in it (Core Rules §9, "Movement").
+        /// squares, and a Tiny creature not its one: anyone may walk through or stop there (Core
+        /// Rules §9, "Movement") — and either may come down on top of somebody, which is the only way
+        /// a Reach of 0 bites anyone (GM Reference §3, "Where a Swarm Stands").
         /// </summary>
-        public bool HoldsGround => !IsSwarm;
+        public bool HoldsGround => !IsSwarm && !IsTiny;
+
+        /// <summary>Tiny (GM Reference §9): stands on a square without occupying it, and reaches 0 unless its block says otherwise.</summary>
+        public bool IsTiny { get; init; }
+
+        /// <summary>Sees clearly even in complete darkness: the Visibility rules for darkness don't touch its attacks (a statblock's Nightvision).</summary>
+        public bool SeesInDark { get; init; }
 
         /// <summary>Squares from the nearest square of its footprint to <paramref name="square"/>.</summary>
         public int DistanceTo(GridPosition square) => Footprints.Distance(Position, Across, square, 1);
@@ -201,6 +209,19 @@ namespace WoundBound.Game.Combat
         public int? ResolveThreshold => BaseResolveThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Resolve) + SceneResolve;
 
         /// <summary>
+        /// Fortitude before any spell moves it: 11 + Tier + Vitality for a character, the statblock's
+        /// FT for a foe (Core Rules §10). Null where nothing rolled against Fortitude can reach it —
+        /// No Living Body, or Bound, Not Alive (GM Reference §9).
+        /// </summary>
+        public int? BaseFortitudeThreshold { get; init; }
+
+        /// <summary>
+        /// Fortitude as it stands: no action or Stamina moves it, only a Buff or a Bane (Core Rules
+        /// §10, "Fortitude Threshold"). Null for a creature immune to anything rolled against it.
+        /// </summary>
+        public int? FortitudeThreshold => BaseFortitudeThreshold + ThresholdModifierCalculator.NetModifier(ThresholdModifiers, ThresholdType.Fortitude);
+
+        /// <summary>
         /// The conditions this creature is under (Core Rules §9, "Conditions"), as the Rules
         /// library keeps them — a set, in the order they went on. Change them through
         /// <see cref="SetCondition"/>, which keeps Off-guard's −2 DT in step.
@@ -288,8 +309,33 @@ namespace WoundBound.Game.Combat
         /// <summary>Whether any of its attacks is a shot — a creature that can fight from a distance.</summary>
         public bool HasRangedAttack => Attacks.Any(a => a.IsRanged);
 
-        /// <summary>The weapon in hand; null when fighting unarmed or for a generic foe.</summary>
-        public WeaponDefinition? InHandWeapon => Build is { } build ? InventoryCalculator.InHandWeapons(build).FirstOrDefault() : null;
+        /// <summary>
+        /// The weapon in hand — the main one, where two are: whichever isn't the Light off-hand
+        /// weapon. Null when fighting unarmed or for a generic foe.
+        /// </summary>
+        public WeaponDefinition? InHandWeapon => Build is { } build
+            ? InventoryCalculator.InHandWeapons(build) is var inHand && inHand.Count == 2 && OffHandOf(inHand) is { } off
+                ? inHand.First(w => w != off)
+                : inHand.FirstOrDefault()
+            : null;
+
+        /// <summary>
+        /// The second weapon of a Two Weapons loadout, which must be Light (Core Rules §9, "Two
+        /// Weapons"); null for anyone holding one weapon, or none. Where both are Light, the second.
+        /// </summary>
+        public WeaponDefinition? OffHandWeapon => Build is { } build ? OffHandOf(InventoryCalculator.InHandWeapons(build)) : null;
+
+        private static WeaponDefinition? OffHandOf(IReadOnlyList<WeaponDefinition> inHand) =>
+            inHand.Count == 2 ? inHand.LastOrDefault(w => w.Weight == WeaponWeight.Light) : null;
+
+        /// <summary>The off-hand weapon's attack, rolled with its own Grip (Core Rules §9, "Two Weapons").</summary>
+        public AttackProfile? OffHandAttack => Build is { } build && OffHandWeapon is { } off ? AttackProfile.ForWeapon(build, off) : null;
+
+        /// <summary>
+        /// Set once its Attack action has been made with a Two Weapons loadout: the off-hand strike
+        /// that action allows is still to be taken. Gone with its next move or action, or at the end of the turn.
+        /// </summary>
+        public bool OffHandOwed { get; internal set; }
 
         /// <summary>The weapon at the ready (Core Rules §15, "Equipped Items"), a swap away.</summary>
         public WeaponDefinition? ReadyWeapon => Build is { } build ? InventoryCalculator.ReadyWeapons(build).FirstOrDefault() : null;
@@ -457,11 +503,34 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public bool HasActedThisRound { get; internal set; }
 
-        /// <summary>The turn's one move, still unspent.</summary>
-        public bool HasMove { get; internal set; }
+        /// <summary>The turn's one move, still unspent. Spending it lets an owed off-hand strike go.</summary>
+        public bool HasMove
+        {
+            get => hasMove;
+            internal set
+            {
+                OffHandOwed &= value || !hasMove;
+                hasMove = value;
+            }
+        }
 
-        /// <summary>Actions still to take this turn: the baseline one plus any bought with Stamina.</summary>
-        public int ActionsRemaining { get; internal set; }
+        private bool hasMove;
+
+        /// <summary>
+        /// Actions still to take this turn: the baseline one plus any bought with Stamina. Spending
+        /// one lets an owed off-hand strike go — it belonged to the Attack action before it.
+        /// </summary>
+        public int ActionsRemaining
+        {
+            get => actionsRemaining;
+            internal set
+            {
+                OffHandOwed &= value >= actionsRemaining;
+                actionsRemaining = value;
+            }
+        }
+
+        private int actionsRemaining;
 
         public BodyStatus BodyStatus => PlayStateCalculator.GetBodyStatus(Body, IsStable);
 

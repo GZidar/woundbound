@@ -74,7 +74,7 @@ namespace WoundBound.Game.Combat.Brains
         public Visibility VisibilityOf(Combatant target, GridPosition? at = null) => encounter.VisibilityOf(target, at);
 
         /// <summary>What the dark adds to <paramref name="target"/>'s Dodge Threshold, standing where they are or on <paramref name="at"/>.</summary>
-        public int VisibilityDodgeModifier(Combatant target, GridPosition? at = null) => encounter.VisibilityDodgeModifier(target, at);
+        public int VisibilityDodgeModifier(Combatant target, GridPosition? at = null, Combatant? seer = null) => encounter.VisibilityDodgeModifier(target, at, seer);
 
         /// <summary>What the dark would add to <paramref name="target"/>'s Dodge Threshold were <paramref name="light"/> conjured too.</summary>
         public int DodgeModifierWith(Combatant target, Working light) => encounter.DodgeModifierWith(target, light);
