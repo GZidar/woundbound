@@ -750,6 +750,16 @@ namespace WoundBoundGame
                 DrawCircle(SquareRect(light).GetCenter(), CellSize * 0.12f, new Color(1f, 0.7f, 0.25f));
             }
 
+            // Weapons lying on the ground — dropped, thrown, or knocked from a hand: a short grey blade.
+            var lying = encounter.GroundWeapons.Select(g => g.At)
+                .Concat(encounter.Combatants.Where(c => c.DroppedWeapon is not null && c.DroppedAt is not null).Select(c => c.DroppedAt!.Value));
+            foreach (var at in lying.Distinct())
+            {
+                var rect = SquareRect(at);
+                var from = rect.Position + new Vector2(rect.Size.X * 0.62f, rect.Size.Y * 0.62f);
+                DrawLine(from, from + new Vector2(rect.Size.X * 0.28f, -rect.Size.Y * 0.28f), new Color(0.75f, 0.75f, 0.8f), 3);
+            }
+
             // The armed spell's ground, where the mouse would put it.
             if (active is not null && hovered is { } aim && CastAt(active, aim) is { } preview
                 && encounter.PlanCast(active, preview) is { CanCast: true } aimed)

@@ -183,6 +183,12 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Why <paramref name="searcher"/> can't test <paramref name="illusion"/> now, or null.</summary>
         public string? SearchRefusal(Combatant searcher, Illusion illusion) => encounter.SearchRefusal(searcher, illusion);
 
+        public string? ThrowRefusal(Combatant thrower, Combatant target) => encounter.ThrowRefusal(thrower, target);
+
+        public string? PickUpRefusal(Combatant who, GroundWeapon lying) => encounter.PickUpRefusal(who, lying);
+
+        public IReadOnlyList<GroundWeapon> GroundWeapons => encounter.GroundWeapons;
+
         /// <summary>Whether a melee blow from <paramref name="from"/> could land on <paramref name="square"/>.</summary>
         public static bool CanReachFrom(Combatant attacker, GridPosition from, GridPosition square) =>
             attacker.CanReachFrom(from, square);

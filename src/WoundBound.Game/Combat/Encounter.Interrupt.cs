@@ -1,3 +1,4 @@
+using WoundBound.Rules.Catalog;
 using WoundBound.Rules.Calculation;
 using WoundBound.Rules.Enums;
 
@@ -53,9 +54,22 @@ namespace WoundBound.Game.Combat
             });
         }
 
-        /// <summary>Who could Interrupt now: a Mind-secondary character still fighting, yet to act this round, with the Mind to pay.</summary>
+        /// <summary>
+        /// Who could Interrupt now: a Mind-secondary character still fighting, yet to act this round,
+        /// with the Mind to pay — and a Sentry who has acted already, with a tactical spend and a
+        /// Stamina left for the action it buys (Core Rules §7, "Trained as Sentry").
+        /// </summary>
         private IEnumerable<Combatant> InterruptersFor(Combatant actor) =>
-            partyStillToAct.Where(c => c.HasInterrupt && !c.IsOutOfFight && Encounter.InterruptRefusal(c) is null);
+            partyStillToAct.Where(c => c.HasInterrupt && !c.IsOutOfFight && !c.HasInterruptedThisRound && Encounter.InterruptRefusal(c) is null)
+                .Concat(combatants.Where(c => c.Side == Side.Party && c.IsSentry && !partyStillToAct.Contains(c) && c.HasActedThisRound
+                                              && !c.IsOutOfFight && !c.HasInterruptedThisRound && Encounter.InterruptRefusal(c) is null
+                                              && TacticalSpendRefusal(c) is null));
+
+        /// <summary>The Sentry taking the one action an Interrupt after acting buys, rather than a turn.</summary>
+        private Combatant? sentryAction;
+
+        /// <summary>Whether <paramref name="character"/> would Interrupt now as a Sentry — having acted this round — rather than taking their turn early.</summary>
+        public bool InterruptsAsSentry(Combatant character) => character.IsSentry && !partyStillToAct.Contains(character);
 
         /// <summary>
         /// Why <paramref name="character"/> can't pay an Interrupt's 1 Mind now, or null if they can.
@@ -77,7 +91,9 @@ namespace WoundBound.Game.Combat
             }
 
             OfferReaction(new PendingReaction(ReactionKind.Interrupt, interrupter, actor, null, 0,
-                    $"{actor.Name} is about to act. {interrupter.Name} may Interrupt — take their turn now, for 1 Mind, before it is rolled.",
+                    InterruptsAsSentry(interrupter)
+                        ? $"{actor.Name} is about to act. {interrupter.Name}, Trained as Sentry, may Interrupt though they've acted — one action now, for 1 Mind and 1 Stamina (a tactical spend: the GM gains an Opportunity)."
+                        : $"{actor.Name} is about to act. {interrupter.Name} may Interrupt — take their turn now, for 1 Mind, before it is rolled.",
                     Against: lastDeclaredTarget),
                 takes =>
                 {
@@ -131,7 +147,19 @@ namespace WoundBound.Game.Combat
             }
 
             interrupter.TendEligible[WoundType.Mind] = true;
-            Write($"{interrupter.Name} Interrupts {actor.Name} — 1 Mind{(backlash ? ", Backlashed onto Body" : drops ? ", their last" : string.Empty)} — and takes their turn now.");
+            interrupter.HasInterruptedThisRound = true;
+            var asSentry = InterruptsAsSentry(interrupter);
+            if (asSentry)
+            {
+                PayTacticalSpend(interrupter, CombatActionCatalog.ExtraActionStaminaCost);
+            }
+
+            Write($"{interrupter.Name} Interrupts {actor.Name} — 1 Mind{(backlash ? ", Backlashed onto Body" : drops ? ", their last" : string.Empty)}" +
+                  (asSentry ? $" and 1 Stamina ({interrupter.Stamina} left) — and, having acted already, takes one action now." : " — and takes their turn now."));
+            if (asSentry)
+            {
+                GrantImmediateOpportunity(interrupter);
+            }
 
             var before = Snapshot(actor);
             Interrupting = new Interruption(actor, lastDeclaredTarget);
@@ -160,7 +188,28 @@ namespace WoundBound.Game.Combat
                 then();
             };
 
+            if (asSentry)
+            {
+                StartSentryAction(interrupter);
+                return;
+            }
+
             StartPartyTurn(interrupter);
+        }
+
+        /// <summary>
+        /// A Sentry's Interrupt after acting: "one action rather than a whole turn" — no move (an
+        /// action can still be spent on one), and nothing that starts or ends a turn.
+        /// </summary>
+        private void StartSentryAction(Combatant sentry)
+        {
+            sentryAction = sentry;
+            Active = sentry;
+            sentry.HasMove = false;
+            sentry.ActionsRemaining = 1;
+            sentry.OffHandOwed = false;
+            Phase = EncounterPhase.PartyTurn;
+            Write($"{sentry.Name} acts: one action.");
         }
 
         /// <summary>Everything an Interrupt's turn could have done to a creature, to tell whether it landed on it.</summary>
@@ -181,8 +230,21 @@ namespace WoundBound.Game.Combat
             }
 
             var shelterers = new Queue<Combatant>(combatants.Where(c => c.Side == hurt.Side && c != hurt && c.HasShelter && !c.HasShelteredThisRound
-                && !c.IsOutOfFight && c.DistanceTo(hurt) <= ShortRangeSquares));
+                && !c.IsOutOfFight && ShelterReaches(c, hurt)));
             OfferShelter(hurt, amount, type, shelterers, then);
+        }
+
+        /// <summary>
+        /// Whether <paramref name="shelterer"/>'s Shelter reaches <paramref name="hurt"/>: within Short —
+        /// or, Trained as Field Medic, anywhere they can see them, which in the dark is back to the
+        /// ordinary reach (Core Rules §7).
+        /// </summary>
+        private bool ShelterReaches(Combatant shelterer, Combatant hurt)
+        {
+            var distance = shelterer.DistanceTo(hurt);
+            return distance <= ShortRangeSquares
+                   || (shelterer.IsFieldMedic && (Setting.Walls.Count == 0 || Sight.Clear(shelterer.Position, hurt.Position, Setting.IsWall))
+                       && CanBeTargeted(hurt, hurt.Position, distance, shelterer));
         }
 
         /// <summary>The far edge of Short, in squares — Shelter's reach.</summary>

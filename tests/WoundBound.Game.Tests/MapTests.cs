@@ -62,7 +62,8 @@ public class MapTests
         // It bites as the fighter goes: 2+3, a miss.
         var walls = Corridor();
         walls.Remove(new GridPosition(4, 5));
-        var (encounter, fighter, _) = Board(new Setting { Name = "Corridor", Walls = walls }, new GridPosition(1, 4), new GridPosition(4, 5), 2, 3);
+        var (encounter, fighter, biter) = Board(new Setting { Name = "Corridor", Walls = walls }, new GridPosition(1, 4), new GridPosition(4, 5), 2, 3);
+        biter.Stamina = 2;
 
         Assert.True(encounter.TryMove(new GridPosition(7, 4)));
 

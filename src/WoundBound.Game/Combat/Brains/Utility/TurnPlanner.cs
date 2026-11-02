@@ -14,6 +14,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         StandUp,
         BreakFree,
         TakeUpWeapon,
+        Throw,
+        DrawWeapon,
+        PickUpWeapon,
         BuyExtraAction,
         RegainFooting,
         Cast,
@@ -29,7 +32,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
     public sealed record Option(OptionKind Kind, double Score, string Why,
         GridPosition? Square = null, Combatant? Target = null, AttackProfile? With = null,
         CombatAction? Action = null, ControlAction? Control = null, bool WithAdvantage = false, SpellCast? Cast = null,
-        Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null, OptionKind? Then = null, Illusion? Illusion = null);
+        Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null, OptionKind? Then = null, Illusion? Illusion = null,
+        Rules.Models.WeaponDefinition? Weapon = null, GroundWeapon? Lying = null);
 
     /// <summary>
     /// Runs through everything a creature could do with what it has left of its turn — every
@@ -262,7 +266,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 (o.Kind == OptionKind.Attack || o.Then == OptionKind.Attack)
                 || ((o.Kind == OptionKind.Cast || o.Then == OptionKind.Cast) && o.Cast?.Spell.SpellType == SpellType.Harm);
 
-            var refused = Encounter.SoloAttackRefusal(actor) is not null;
+            // The last Stamina is never spent on it: a creature starting a turn on 0 falls unconscious.
+            var refused = Encounter.SoloAttackRefusal(actor) is not null || (actor.Side == Side.Adversaries && actor.Stamina < 2);
             return options
                 .Where(o => !(Attacks(o) && refused))
                 .Select(o => Attacks(o) ? o with { Score = o.Score - Assessor.SpendPrice(actor, o.Score) - 0.3 } : o)
@@ -423,6 +428,40 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     {
                         yield return new Option(OptionKind.Attack, worth + gain - spendCost, $"{kind} {target.Name}", Target: target, With: with, Manoeuvre: manoeuvre);
                     }
+                }
+            }
+
+            // Throwing what can be thrown, past Close: a shot by its own Weight — and the weapon gone
+            // from the hand, which costs most where it leaves nothing else to fight with.
+            if (Encounter.ThrowOf(actor) is { } thrown)
+            {
+                var emptied = actor.OffHandWeapon is null && actor.ReadyWeapon is null;
+                var price = emptied ? 0.8 + 0.5 * assess.Threat(actor) : 0.3;
+                foreach (var target in enemies.Where(e => !e.IsDefenceless && actor.DistanceFrom(at, e) > 1))
+                {
+                    var plan = View.PlanAttackWith(actor, thrown, at, target);
+                    if (!plan.CanAttack || (checkRules && View.ThrowRefusal(actor, target) is not null))
+                    {
+                        continue;
+                    }
+
+                    var worth = assess.Worth(assess.Blow(actor, thrown, target, plan.DamageDieSides, plan.DodgeThreshold), target) - price;
+                    yield return new Option(OptionKind.Throw, worth, $"throw the {thrown.Name} at {target.Name}", Target: target);
+                }
+            }
+
+            // Empty-handed with a weapon in the pack: an action to draw it, as to take one up.
+            if (actor.Build is not null && actor.InHandWeapon is null && at == actor.Position)
+            {
+                if (Encounter.PackWeapons(actor).FirstOrDefault(w => Encounter.DrawRefusal(actor, w) is null) is { } spare)
+                {
+                    yield return new Option(OptionKind.DrawWeapon, 0.8 + 1.5 * assess.Threat(actor), $"draw the {spare.Name} from the pack", Weapon: spare);
+                }
+
+                // Or one lying underfoot — a thrown one come back to hand, or anybody's.
+                if (View.GroundWeapons.FirstOrDefault(g => actor.Covers(g.At) && (!checkRules || View.PickUpRefusal(actor, g) is null)) is { } lying)
+                {
+                    yield return new Option(OptionKind.PickUpWeapon, 0.8 + 1.5 * assess.Threat(actor), $"pick up the {lying.Weapon.Name}", Lying: lying);
                 }
             }
 

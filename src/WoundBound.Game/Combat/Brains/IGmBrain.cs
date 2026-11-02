@@ -150,6 +150,15 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Let go of whatever it's holding. Free.</summary>
         public sealed record LetGo : GmStep;
 
+        /// <summary>Throw the throwable weapon in hand at <paramref name="Target"/>: its Attack, as a shot (Core Rules §9).</summary>
+        public sealed record Throw(Combatant Target, bool WithAdvantage = false) : GmStep;
+
+        /// <summary>Take <paramref name="Weapon"/> from the pack into hand, for an action (Core Rules §15).</summary>
+        public sealed record DrawWeapon(Rules.Models.WeaponDefinition Weapon) : GmStep;
+
+        /// <summary>Pick a weapon up off the ground where it stands, for an action.</summary>
+        public sealed record PickUpWeapon(GroundWeapon Lying) : GmStep;
+
         /// <summary>
         /// 1 Stamina for an extra action — a tactical spend, as for anyone (GM Reference §3: "Stamina
         /// works for a Solo as it does for anyone: an extra action..."). An adversary's spend hands

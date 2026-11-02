@@ -172,8 +172,8 @@ namespace WoundBound.Game.Combat
             IsMinion = info.Role == AdversaryRole.Minion,
             IsUnshakable = info.Traits?.Contains(AdversaryTrait.Unshakable) == true,
             StaminaEachRound = info.Features?.Any(f => f.Name == "Fitness") == true ? 1 : 0,
-            StaminaMax = info.Stamina,
-            Stamina = info.Stamina,
+            StaminaMax = RuleTrials.StaminaFor(info.Role, info.Tier, info.Stamina),
+            Stamina = RuleTrials.StaminaFor(info.Role, info.Tier, info.Stamina),
             TacticalSpendsPerRound = CharacterCalculator.TacticalSpendsPerRound(info.Tier),
             Tier = info.Tier,
             StatblockManoeuvres = ManoeuvresIn(info.AttackEffect),
@@ -329,6 +329,9 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>A catalogue weapon in the loadout at the ready — on the body, a swap away.</summary>
+        /// <summary>A weapon carried in the pack: neither in hand nor at the ready, an action to take out (Core Rules §15).</summary>
+        public static WeaponDefinition InPack(StartingWeaponInfo info) => FromCatalogue(info);
+
         public static WeaponDefinition AtTheReady(StartingWeaponInfo info)
         {
             var weapon = FromCatalogue(info);

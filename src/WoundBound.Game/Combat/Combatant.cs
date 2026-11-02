@@ -607,6 +607,15 @@ namespace WoundBound.Game.Combat
         /// <summary>Mind as the Secondary Wound: once a round, for 1 Mind, take their turn inside the GM's, when an adversary declares an action (Core Rules §3, "Interrupt").</summary>
         public bool HasInterrupt => Build?.SecondaryWound == WoundType.Mind;
 
+        /// <summary>Trained as Sentry (Core Rules §7): an Aether Mage who may Interrupt even after acting this round — one action, for 1 Stamina more.</summary>
+        public bool IsSentry => Build is { } build && CharacterCalculator.HasTrainedAsSentry(build);
+
+        /// <summary>Trained as Field Medic (Core Rules §7): a Priest whose Shelter reaches any ally they can see.</summary>
+        public bool IsFieldMedic => Build is { } build && CharacterCalculator.HasTrainedAsFieldMedic(build);
+
+        /// <summary>Has Interrupted this round: a character's one Interrupt of the round, whether before acting or, as a Sentry, after.</summary>
+        public bool HasInterruptedThisRound { get; internal set; }
+
         /// <summary>Soul as the Secondary Wound: once a round, take an ally's damage as Soul (Core Rules §3, "Shelter").</summary>
         public bool HasShelter => Build?.SecondaryWound == WoundType.Soul;
 

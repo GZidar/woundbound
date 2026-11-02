@@ -32,6 +32,7 @@ var seed = Option("--seed", 1);
 var which = Text("--fight", "signpost");
 var gmName = Text("--gm", "simple")!;
 var seats = Text("--party", "all");
+RuleTrials.MinionStamina = Option("--minion-stamina", 1);
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),

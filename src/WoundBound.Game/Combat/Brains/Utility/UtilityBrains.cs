@@ -34,7 +34,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return 0.5;
             }
 
-            var planner = Planner(view, out _);
+            var planner = Planner(view, out var assess);
+
+            // On 0 Stamina, a turn begun is the creature lost: it falls unconscious.
+            if (adversary.Stamina <= 0)
+            {
+                return -assess.Value(adversary);
+            }
+
             return planner.Options(adversary, hasMove: true, actions: 1, real: false, stillToAct: StillToAct(view, adversary))
                 .Select(o => o.Score).DefaultIfEmpty(0).Max();
         }
@@ -97,6 +104,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.Move => new GmStep.Move(choice.Square!.Value),
                 OptionKind.Attack => new GmStep.Attack(choice.Target!, choice.WithAdvantage && turn.BonusAvailable, choice.With, choice.Manoeuvre),
                 OptionKind.TakeUpWeapon => new GmStep.TakeUpWeapon(),
+                OptionKind.Throw => new GmStep.Throw(choice.Target!, choice.WithAdvantage && turn.BonusAvailable),
+                OptionKind.DrawWeapon => new GmStep.DrawWeapon(choice.Weapon!),
+                OptionKind.PickUpWeapon => new GmStep.PickUpWeapon(choice.Lying!),
                 OptionKind.Exploit => new GmStep.Exploit(choice.Exploit!.Value),
                 OptionKind.RaiseShield => new GmStep.RaiseShield(),
                 OptionKind.Cast => new GmStep.Cast(choice.Cast!),
@@ -115,16 +125,17 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>Leaves out every blow and Harm, once the adversary has made its one attack this round.</summary>
         private static List<Option> WithoutAttacks(bool attacked, List<Option> options) =>
             !attacked ? options : options.Where(o =>
-                o.Kind != OptionKind.Attack && o.Then != OptionKind.Attack
+                o.Kind is not (OptionKind.Attack or OptionKind.Throw) && o.Then is not (OptionKind.Attack or OptionKind.Throw)
                 && !((o.Kind == OptionKind.Cast || o.Then == OptionKind.Cast) && o.Cast?.Spell.SpellType == SpellType.Harm)).ToList();
 
         /// <summary>Strikes at a leaver where the blow is worth the Stamina — and never while running.</summary>
         public override bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) =>
-            !adversary.IsBroken && new Assessor(view).BestAttack(adversary, adversary.Position, leaver).Worth >= 0.4;
+            !adversary.IsBroken && CanSpare(adversary) && new Assessor(view).BestAttack(adversary, adversary.Position, leaver).Worth >= 0.4;
 
-        public override bool PanicDodges(BattleView view, PendingReaction reaction) => WorthAvoiding(view, reaction);
+        public override bool PanicDodges(BattleView view, PendingReaction reaction) =>
+            (CanSpare(reaction.Defender) && WorthAvoiding(view, reaction)) || SavesItself(reaction.Defender, reaction);
 
-        public override bool StandsFirm(BattleView view, PendingReaction reaction) => reaction.Defender.Stamina > 0;
+        public override bool StandsFirm(BattleView view, PendingReaction reaction) => CanSpare(reaction.Defender);
 
         /// <summary>A foe built with Shelter weighs it as a character would.</summary>
         public int ShelterAmount(BattleView view, PendingReaction reaction) => Sheltering.Amount(new Assessor(view), reaction);
@@ -308,6 +319,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.Move => new PartyStep.Move(choice.Square!.Value),
                 OptionKind.Attack => new PartyStep.Attack(choice.Target!, Manoeuvre: choice.Manoeuvre),
                 OptionKind.Exploit => new PartyStep.Exploit(choice.Exploit!.Value),
+                OptionKind.Throw => new PartyStep.Throw(choice.Target!),
+                OptionKind.DrawWeapon => new PartyStep.DrawWeapon(choice.Weapon!),
+                OptionKind.PickUpWeapon => new PartyStep.PickUpWeapon(choice.Lying!),
                 OptionKind.Cast => new PartyStep.Cast(choice.Cast!),
                 OptionKind.Control => new PartyStep.Control(choice.Control!.Value, choice.Target!),
                 OptionKind.Aid => new PartyStep.Aid(choice.Action!.Value, choice.Target!),
@@ -422,9 +436,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var planner = Planner(view, out var assess);
             var interruption = new Interruption(reaction.Attacker, reaction.Against);
-            var options = planner.Options(me, hasMove: true, actions: 1, real: false, stillToAct: view.PartyStillToAct);
-            var plain = options.Select(o => o.Score).DefaultIfEmpty(0).Max();
-            var now = options.Select(o => o.Score + planner.Spared(me, o, interruption)).DefaultIfEmpty(0).Max();
+
+            // A Sentry who has acted gets one action, not a turn — and against doing nothing at all
+            // this round, not against the same turn taken later; it pays a Stamina and an Opportunity besides.
+            var sentry = !view.PartyStillToAct.Contains(me);
+            var options = planner.Options(me, hasMove: !sentry, actions: 1, real: false, stillToAct: view.PartyStillToAct);
+            var plain = sentry
+                ? options.Where(o => o.Kind == OptionKind.End).Select(o => o.Score).DefaultIfEmpty(0).Max()
+                : options.Select(o => o.Score).DefaultIfEmpty(0).Max();
+            var now = options.Select(o => o.Score + planner.Spared(me, o, interruption)).DefaultIfEmpty(0).Max()
+                      - (sentry ? planner.ExtraActionPrice(me) : 0);
 
             // The Mind it costs — dear to a caster whose spells run on it — and a turn spent before
             // the round has shown what it most needs.

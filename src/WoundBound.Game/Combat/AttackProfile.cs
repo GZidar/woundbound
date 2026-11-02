@@ -36,7 +36,10 @@ namespace WoundBound.Game.Combat
         /// body's too; a character's is always 1 (Core Rules §9, "Reach").
         /// </summary>
         public int OwnReach { get; init; } = Rules.Calculation.WeaponCalculator.DefaultOwnReach;
-        public bool IsRanged => Weapon?.IsRanged == true;
+        public bool IsRanged => Weapon?.IsRanged == true || IsThrown;
+
+        /// <summary>A melee weapon that "can be thrown", thrown: a shot by its own Weight on the range table (Core Rules §9, "Weapon Range").</summary>
+        public bool IsThrown { get; init; }
 
         /// <summary>
         /// An attack "against every creature within N squares" — one roll each, as one attack (GM

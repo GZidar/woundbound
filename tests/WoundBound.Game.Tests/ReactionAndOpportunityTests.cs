@@ -201,12 +201,13 @@ public class ReactionAndOpportunityTests
         // Stamina, and the GM gains nothing from a creature's spend.
         var board = Fight(10, 8, 4);
         board.Biter.Position = new GridPosition(2, 4);
+        board.Biter.Stamina = 2; // a GM never spends a creature's last: on 0 it falls unconscious at its next turn
 
         Assert.True(board.Encounter.TryMove(new GridPosition(1, 1)));
 
         Assert.Equal(new GridPosition(1, 1), board.Fighter.Position);
         Assert.Equal(board.Fighter.BodyMax - 3, board.Fighter.Body);
-        Assert.Equal(0, board.Biter.Stamina);
+        Assert.Equal(1, board.Biter.Stamina);
         Assert.Equal(0, board.Encounter.GmOpportunities);
         Assert.Equal(EncounterPhase.PartyTurn, board.Encounter.Phase);
     }
@@ -228,6 +229,7 @@ public class ReactionAndOpportunityTests
     {
         var board = Fight(8, 6);
         board.Biter.Position = new GridPosition(2, 4);
+        board.Biter.Stamina = 2;
 
         board.Encounter.TryMove(new GridPosition(1, 1));
 

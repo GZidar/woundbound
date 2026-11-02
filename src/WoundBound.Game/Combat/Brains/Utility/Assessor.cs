@@ -563,14 +563,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public bool WouldStrikeAtLeaver(Combatant enemy, Combatant leaver, (double Hit, double ExpectedDealt, double Kill) blow)
         {
-            if (blow.Kill >= 0.25)
+            if (blow.Kill >= 0.25 && enemy.Stamina >= 2)
             {
                 return true;
             }
 
             var worth = Worth(blow, leaver);
             return enemy.Side == Side.Adversaries
-                ? worth >= 0.4
+                ? enemy.Stamina >= 2 && worth >= 0.4
                 : enemy.Stamina >= 2 && worth > 0.6 + 0.4 * Threat(leaver) * PerWound(enemy);
         }
 

@@ -76,4 +76,16 @@ public class AdversaryStaminaTests
         Assert.NotNull(Encounter.OnceARoundRefusal(bandit, extraTurn: false));
         Assert.Null(Encounter.OnceARoundRefusal(bandit, extraTurn: true));
     }
+
+    [Theory]
+    [InlineData("Bramble Ratkin", 1)]   // a Minion: as written
+    [InlineData("Charnel Revenant", 3)] // T2, written 2: the floor is Tier + 1
+    [InlineData("Noble Champion", 4)]   // T3, written 3
+    [InlineData("Tollroad Bandit", 2)]  // T1, written 2: already at it
+    public void OnlyAMinion_StandsOnLessThanTierPlusOneStamina(string name, int stamina)
+    {
+        var creature = CombatantFactory.FromAdversary(Data.Adversary(name), name, new GridPosition(1, 1));
+
+        Assert.Equal(stamina, creature.StaminaMax);
+    }
 }

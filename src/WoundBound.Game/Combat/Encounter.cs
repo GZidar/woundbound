@@ -1272,6 +1272,15 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            if (sentryAction == ending)
+            {
+                // Not a turn: nothing a turn's end rechecks.
+                sentryAction = null;
+                FinishTurn(ending);
+                AfterPartyTurn();
+                return;
+            }
+
             EndPartyTurn(ending);
         }
 
@@ -1400,6 +1409,7 @@ namespace WoundBound.Game.Combat
                 combatant.HasOverclockedThisRound = false;
                 combatant.HasSacrificedThisRound = false;
                 combatant.HasShelteredThisRound = false;
+                combatant.HasInterruptedThisRound = false;
                 combatant.HasTakenExtraTurnThisRound = false;
                 combatant.HasUsedFreeStep = false;
                 combatant.IsSlipping = false;
@@ -1975,6 +1985,43 @@ namespace WoundBound.Game.Combat
 
                 case GmStep.LetGo:
                     throw new InvalidOperationException($"The GM brain had {actor.Name} let go, but it's holding nobody.");
+
+                case GmStep.Throw toss:
+                    if (ThrowRefusal(actor, toss.Target) is { } noThrow)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} throw at {toss.Target.Name}: {noThrow}");
+                    }
+
+                    if (toss.WithAdvantage && !turn.BonusAvailable)
+                    {
+                        throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s bonus, which this turn can't take.");
+                    }
+
+                    CountAttack(actor, turn);
+                    turn.HasAttacked = true;
+                    turn.BonusAvailable &= !toss.WithAdvantage;
+                    Throw(actor, toss.Target, sacrifice: false, toss.WithAdvantage, _ => TakeStep(turn, done));
+                    return;
+
+                case GmStep.DrawWeapon draw:
+                    if (DrawRefusal(actor, draw.Weapon) is { } noDraw)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} draw the {draw.Weapon.Name}: {noDraw}");
+                    }
+
+                    Draw(actor, draw.Weapon);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.PickUpWeapon pick:
+                    if (PickUpRefusal(actor, pick.Lying) is { } noPick)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} pick up the {pick.Lying.Weapon.Name}: {noPick}");
+                    }
+
+                    PickUp(actor, pick.Lying);
+                    TakeStep(turn, done);
+                    return;
 
                 case GmStep.BuyExtraAction:
                     if (TacticalSpendRefusal(actor) is { } spendWhy)

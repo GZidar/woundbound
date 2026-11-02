@@ -13,8 +13,10 @@ namespace WoundBound.Game.Combat.Brains
         public virtual Combatant ChooseOwedTurn(BattleView view)
         {
             var targets = view.Characters.ToList();
+            // A creature on 0 Stamina falls unconscious the moment its turn starts: last, if at all.
             return view.YetToAct
-                .OrderBy(a => a.IsBroken ? 1 : CanStrikeThisTurn(view, a) ? 0 : 2)
+                .OrderBy(a => a.Stamina <= 0 ? 1 : 0)
+                .ThenBy(a => a.IsBroken ? 1 : CanStrikeThisTurn(view, a) ? 0 : 2)
                 .ThenBy(a => targets.Min(t => a.DistanceTo(t)))
                 .First();
         }
@@ -28,7 +30,7 @@ namespace WoundBound.Game.Combat.Brains
         {
             var targets = view.Characters.ToList();
             return view.Adversaries
-                .Where(a => a.CanTakeExtraTurn && !a.IsBroken && CanStrikeThisTurn(view, a))
+                .Where(a => a.CanTakeExtraTurn && !a.IsBroken && a.Stamina > 0 && CanStrikeThisTurn(view, a))
                 .OrderBy(a => a.HasActedThisRound ? 0 : 1)
                 .ThenBy(a => targets.Min(t => a.DistanceTo(t)))
                 .FirstOrDefault();
@@ -134,14 +136,31 @@ namespace WoundBound.Game.Combat.Brains
         }
 
         /// <summary>A Minion dropped by any blow that lands has every reason to turn whatever it can — unless it's running.</summary>
-        public virtual bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => !adversary.IsBroken;
+        /// <summary>
+        /// Whether <paramref name="adversary"/> can spend a Stamina and still have one to start its next
+        /// turn on: a creature that starts a turn on 0 falls unconscious (Core Rules §6; the user's
+        /// ruling, 2026-11-02), so the last Stamina costs the whole creature, and no GM brain spends it.
+        /// </summary>
+        public static bool CanSpare(Combatant adversary) => adversary.Stamina >= 2;
 
-        public virtual bool PanicDodges(BattleView view, PendingReaction reaction) => true;
+        /// <summary>
+        /// Whether a spend now keeps <paramref name="adversary"/> on the board when it would otherwise go
+        /// down: then even the last Stamina is worth it — on 0 it falls unconscious only when its next
+        /// turn starts, and until then it still holds its ground, which the GM may never give it.
+        /// </summary>
+        public static bool SavesItself(Combatant adversary, PendingReaction reaction) =>
+            adversary.Stamina >= 1 && (adversary.IsMinion || reaction.ImpactWounds >= adversary.Body
+                || Utility.UtilityGmBrain.Incoming(reaction) is var (average, absorbs) && average - absorbs >= adversary.Body);
 
-        public virtual bool StandsFirm(BattleView view, PendingReaction reaction) => true;
+        public virtual bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => !adversary.IsBroken && CanSpare(adversary);
+
+        public virtual bool PanicDodges(BattleView view, PendingReaction reaction) => CanSpare(reaction.Defender) || SavesItself(reaction.Defender, reaction);
+
+        public virtual bool StandsFirm(BattleView view, PendingReaction reaction) => CanSpare(reaction.Defender);
 
         /// <summary>Only when the shove would hurt: a square of ground isn't worth the Stamina otherwise.</summary>
-        public virtual bool ArrestsShove(BattleView view, PendingReaction reaction) => reaction.ImpactWounds > 0;
+        public virtual bool ArrestsShove(BattleView view, PendingReaction reaction) =>
+            reaction.ImpactWounds > 0 && (CanSpare(reaction.Defender) || reaction.Defender.IsMinion || reaction.ImpactWounds >= reaction.Defender.Body);
 
         /// <summary>Nearest first, each a single move toward the nearest character; any already in reach stay put.</summary>
         public virtual GmCloseIn? NextCloseIn(BattleView view, IReadOnlyList<Combatant> stillIdle)

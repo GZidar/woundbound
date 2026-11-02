@@ -146,11 +146,12 @@ public class ManoeuvreTests
     {
         // 4+3 +4 = 11 meets ST 11, but not 13: the Biter spends its Stamina and stays on its feet.
         var (encounter, _, biter) = Beside(4, 3);
+        biter.Stamina = 2; // never its last: on 0 it would fall unconscious at its next turn
 
         encounter.TryControl(ControlAction.Trip, biter);
 
         Assert.False(biter.IsProne);
-        Assert.Equal(0, biter.Stamina);
+        Assert.Equal(1, biter.Stamina);
         Assert.Contains(encounter.Log, line => line == "Ratkin Biter stands firm (1 Stamina, +2 ST).");
     }
 

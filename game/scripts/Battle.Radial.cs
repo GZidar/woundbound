@@ -96,8 +96,8 @@ namespace WoundBoundGame
                 items.Add(Group("Exploits", "A Nimble character's held edges: 1 Stamina each.", exploitButtons.Values.Select(b => Mirror(b)).ToList()));
             }
 
-            items.Add(Group("Gear", "Weapons and lights.", new[] { swapButton, lightButton, dropLightButton, takeUpButton }
-                .Where(b => b.Visible).Select(b => Mirror(b)).ToList()));
+            items.Add(Group("Gear", "Weapons and lights: the swap, the pack, and the ground.", new[] { swapButton, lightButton, dropLightButton, takeUpButton }
+                .Where(b => b.Visible).Select(b => Mirror(b)).Concat(PackItems(acting)).ToList()));
 
             // What only applies now and then is offered only when it does.
             foreach (var button in new[] { standUpButton, breakFreeButton, regainFootingButton })
@@ -159,12 +159,108 @@ namespace WoundBoundGame
                     Children = noAction is null ? () => Targets(acting, m.Key) : null,
                     Icon = m.Key.ToString().ToLowerInvariant(),
                 }));
+            // A weapon that can be thrown, past Close: the Attack action, and the weapon goes with it.
+            if (Encounter.ThrowOf(acting) is { } thrown)
+            {
+                items.Add(new RadialItem($"Throw ({thrown.Name})", noAction,
+                    $"Throw the {thrown.Name}: a shot by its Weight past Close, no manoeuvre — and it lies where it lands until somebody picks it up.")
+                {
+                    Children = noAction is null ? () => ThrowTargets(acting) : null,
+                    Icon = "shoot",
+                });
+            }
+
             if (sacrificeBox.Visible)
             {
                 items.Add(Toggle(sacrificeBox));
             }
 
             return items;
+        }
+
+        /// <summary>Everyone the throwable weapon in hand could be thrown at from here.</summary>
+        private IReadOnlyList<RadialItem> ThrowTargets(Combatant thrower)
+        {
+            var targets = encounter.Combatants
+                .Where(c => c.OccupiesSquare && encounter.ThrowRefusal(thrower, c) is null)
+                .OrderBy(c => c.Side == thrower.Side)
+                .ThenBy(c => thrower.DistanceTo(c))
+                .ToList();
+            if (targets.Count == 0)
+            {
+                return [new RadialItem("Nobody", "Nobody in sight past Close to throw it at.")];
+            }
+
+            var thrown = Encounter.ThrowOf(thrower)!;
+            return targets.Select(target =>
+            {
+                var plan = encounter.PlanThrow(thrower, target);
+                var hit = Odds.Of(thrown.AttackModifier, plan.DodgeThreshold).Success;
+                return new RadialItem(target.Side == thrower.Side ? $"{target.Name} (ally)" : target.Name, null,
+                    $"{plan.Note}\n{thrown.Name}: +{thrown.AttackModifier} against DT {plan.DodgeThreshold} — about {hit:P0} to hit.")
+                {
+                    Pick = () =>
+                    {
+                        Disarm();
+                        encounter.TryThrow(target, sacrificeBox.ButtonPressed);
+                        Refresh();
+                    },
+                };
+            }).ToList();
+        }
+
+        /// <summary>The pack and the ground: drawing a weapon, stowing or dropping the one in hand, picking one up.</summary>
+        private IEnumerable<RadialItem> PackItems(Combatant acting)
+        {
+            foreach (var weapon in Encounter.PackWeapons(acting))
+            {
+                var why = Encounter.DrawRefusal(acting, weapon);
+                yield return new RadialItem($"Draw {weapon.Name}", why,
+                    $"Take the {weapon.Name} from the pack into hand: an action" + (weapon.Weight == WoundBound.Rules.Enums.WeaponWeight.Heavy ? ", and 1 Stamina — it's Heavy." : "."))
+                {
+                    Pick = () =>
+                    {
+                        encounter.TryDrawWeapon(weapon);
+                        Refresh();
+                    },
+                };
+            }
+
+            if (acting.Build is { } build)
+            {
+                foreach (var held in WoundBound.Rules.Calculation.InventoryCalculator.InHandWeapons(build))
+                {
+                    yield return new RadialItem($"Stow {held.Name}", Encounter.StowRefusal(acting, held), $"Put the {held.Name} away into the pack: an action.")
+                    {
+                        Pick = () =>
+                        {
+                            encounter.TryStowWeapon(held);
+                            Refresh();
+                        },
+                    };
+                    yield return new RadialItem($"Drop {held.Name}", null, $"Let the {held.Name} fall at your feet: free. Anyone may pick it up — an action.")
+                    {
+                        Pick = () =>
+                        {
+                            encounter.TryDropWeapon(held);
+                            Refresh();
+                        },
+                    };
+                }
+            }
+
+            foreach (var lying in encounter.GroundWeapons.Where(g => acting.Covers(g.At)))
+            {
+                yield return new RadialItem($"Pick up {lying.Weapon.Name}", encounter.PickUpRefusal(acting, lying),
+                    $"Pick the {lying.Weapon.Name} up off the ground: an action. Into hand if there's room, the pack if not.")
+                {
+                    Pick = () =>
+                    {
+                        encounter.TryPickUpWeapon(lying);
+                        Refresh();
+                    },
+                };
+            }
         }
 
         /// <summary>A sword for a blade (or fists) in hand, a bow for a bow, crossbow or sling.</summary>

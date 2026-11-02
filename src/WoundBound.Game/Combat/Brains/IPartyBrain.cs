@@ -96,6 +96,15 @@ namespace WoundBound.Game.Combat.Brains
         /// <param name="Manoeuvre">A Martial manoeuvre declared with it (Core Rules §9).</param>
         public sealed record Attack(Combatant Target, bool Sacrifice = false, Manoeuvre? Manoeuvre = null) : PartyStep;
 
+        /// <summary>Throw the throwable weapon in hand: the Attack action, as a shot.</summary>
+        public sealed record Throw(Combatant Target) : PartyStep;
+
+        /// <summary>Take a weapon from the pack into hand, for an action.</summary>
+        public sealed record DrawWeapon(Rules.Models.WeaponDefinition Weapon) : PartyStep;
+
+        /// <summary>Pick a weapon up off the ground, for an action.</summary>
+        public sealed record PickUpWeapon(GroundWeapon Lying) : PartyStep;
+
         /// <summary>The off-hand strike of a Two Weapons loadout, straight after the Attack action (Core Rules §9).</summary>
         public sealed record OffHand(Combatant Target, Manoeuvre? Manoeuvre = null) : PartyStep;
 
