@@ -493,6 +493,13 @@ namespace WoundBoundGame
                 steps.Add(("Threshold", thresholdPicker, null, BuffThresholds.Select(t => t.ToString()).ToArray()));
             }
 
+            // A T2 or T3 Bind: its own effect, or a lower Tier's — most binding first.
+            if (IsTieredBind(spell))
+            {
+                steps.Add(("Bind", bindPicker, null, Enumerable.Range(1, (int)spell.SpellTier).Reverse()
+                    .Select(t => Encounter.BindEffect((Tier)t).ToString()).ToArray()));
+            }
+
             if (spell.Target == SpellTarget.Many && spell.Range != SpellRange.Touch)
             {
                 steps.Add(("Shape", shapePicker, null, ["Volume", "Line", "Cone"]));
@@ -580,6 +587,10 @@ namespace WoundBoundGame
                 }
             }
         }
+
+        /// <summary>A Bind above T1, which may be cast for a lower Tier's effect.</summary>
+        private static bool IsTieredBind(SpellDefinition spell) =>
+            spell.SpellType == SpellType.Motion && WoundBound.Game.Combat.SpellArea.MotionOf(spell) == MotionKind.Bind && spell.SpellTier > Tier.T1;
 
         /// <summary>A group of items opening a ring of its own — greyed, though still open to look into, when nothing in it can be done.</summary>
         private static RadialItem Group(string label, string hint, IReadOnlyList<RadialItem> children) =>

@@ -310,8 +310,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
 
                 var squares = line.AreaSquares!.Value;
-                var caught = View.Combatants.Where(c => c != actor && c.OccupiesSquare && !c.IsOutOfFight && actor.DistanceFrom(at, c) <= squares).ToList();
-                var target = caught.FirstOrDefault(c => c.Side != actor.Side);
+                var caught = View.Combatants.Where(c => c != actor && c.OccupiesSquare && !c.IsOutOfFight && actor.DistanceFrom(at, c) <= squares)
+                    .Concat(View.Steeds.Where(m => m != actor.Steed && actor.DistanceFrom(at, m) <= squares)).ToList();
+                var target = caught.FirstOrDefault(c => c.Side != actor.Side && !c.IsSteed);
                 if (target is null || (checkRules && !View.CanAttack(actor, target)))
                 {
                     continue;
@@ -338,6 +339,36 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// (GM Reference §9, "On Opportunity"). Nothing, when the bank is full and it would be lost.
         /// </summary>
         public const double BonusPrice = 1.0;
+
+        /// <summary>
+        /// What the off-hand strike an Attack action allows is worth on top of it (Core Rules §9, "Two
+        /// Weapons"): the best off-hand blow from <paramref name="at"/>, less what it costs — a
+        /// character's Stamina, taken only with one to spare; an adversary's Opportunity, on a turn that
+        /// can spend one on its off-hand bonus (it attacks once a round otherwise — the user's rulings,
+        /// 2026-11-02 and 2026-11-03).
+        /// </summary>
+        private double OffHandFollowUp(Combatant actor, GridPosition at, bool bonusAvailable = false, bool bankFull = false)
+        {
+            if (actor.OffHandAttack is not { } offHand || !skill.UsesTricks)
+            {
+                return 0;
+            }
+
+            var price = actor.Side == Side.Party
+                ? actor.Stamina < 2 ? double.MaxValue : 0.3
+                : bonusAvailable && actor.OpportunityBonus.Kind == OpportunityBonusKind.OffHand ? bankFull ? 0 : BonusPrice : double.MaxValue;
+            if (price == double.MaxValue)
+            {
+                return 0;
+            }
+
+            var best = View.EnemiesOf(actor).Where(e => !e.IsOutOfFight)
+                .Select(e => (Who: e, Plan: View.PlanAttackWith(actor, offHand, at, e)))
+                .Where(x => x.Plan.CanAttack)
+                .Select(x => assess.Worth(assess.Blow(actor, offHand, x.Who, x.Plan.DamageDieSides, x.Plan.DodgeThreshold), x.Who))
+                .DefaultIfEmpty(0).Max();
+            return Math.Max(0, best - price);
+        }
 
         /// <summary>
         /// The best blow <paramref name="actor"/> could land on <paramref name="target"/> with its
@@ -395,6 +426,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 worth += with.IsRanged
                     ? actor.Role == AdversaryRole.Skirmisher ? 0.3 : 0
                     : actor.Role == AdversaryRole.Brute ? 0.2 : 0;
+                worth += OffHandFollowUp(actor, at, bonusAvailable, bankFull);
                 yield return new Option(OptionKind.Attack, worth, $"{with.Name} at {target.Name}", Target: target, With: with, WithBonus: advantage);
 
                 // A Cleave the Opportunity pays for (GM Reference §9): two characters within reach of the same blade.

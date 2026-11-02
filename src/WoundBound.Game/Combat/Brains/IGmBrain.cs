@@ -124,6 +124,12 @@ namespace WoundBound.Game.Combat.Brains
         /// </summary>
         public sealed record Cast(SpellCast Spell, bool WithBonus = false) : GmStep;
 
+        /// <summary>
+        /// Spend an Opportunity on an off-hand bonus: once the creature has made its attack this turn, a
+        /// strike at <paramref name="Target"/> with its off-hand weapon. No action, no Stamina.
+        /// </summary>
+        public sealed record OffHand(Combatant Target) : GmStep;
+
         /// <summary>Spend an Opportunity on an extra-movement bonus: another move this turn. Free in itself.</summary>
         public sealed record BonusMove : GmStep;
 

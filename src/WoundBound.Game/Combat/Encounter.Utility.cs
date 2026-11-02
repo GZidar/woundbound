@@ -13,6 +13,9 @@ namespace WoundBound.Game.Combat
         Light,
         Exposure,
         Ground,
+
+        /// <summary>Not a lever of the scene: a Scrying spell's viewing point, held there for the scene.</summary>
+        Scrying,
     }
 
     /// <summary>
@@ -86,7 +89,7 @@ namespace WoundBound.Game.Combat
 
         /// <summary>The block a Utility spell is put down on — or why it can't be.</summary>
         private static string? UtilityRefusal(SpellDefinition spell, SpellShape shape) =>
-            SpellArea.LeverOf(spell) is null
+            SpellArea.UtilityKindOf(spell) == UtilityKind.Lever && SpellArea.LeverOf(spell) is null
                 ? $"{spell.Name} moves none of the levers a fight turns on — light, weather or ground."
                 : shape != SpellShape.Volume
                     ? $"{spell.Name} is put down on a block of ground, as a Volume."
@@ -96,6 +99,16 @@ namespace WoundBound.Game.Combat
         private void Work(Combatant caster, SpellCast cast, CastPlan plan)
         {
             var spell = cast.Spell;
+            switch (SpellArea.UtilityKindOf(spell))
+            {
+                case UtilityKind.Sensing:
+                    Sense(caster, cast, plan);
+                    return;
+                case UtilityKind.Scrying:
+                    Scry(caster, cast, plan);
+                    return;
+            }
+
             var lever = SpellArea.LeverOf(spell)!.Value;
             var grade = lever switch
             {
@@ -120,6 +133,70 @@ namespace WoundBound.Game.Combat
                     : $"Inside it the {Setting.Exposure.ToString().ToLowerInvariant()} weather eases to {(Setting.Exposure - 1).ToString().ToLowerInvariant()}.",
                 _ => grade > 0 ? $"The ground over {plan.Area.Count} squares firms underfoot." : $"The ground over {plan.Area.Count} squares turns to mire.",
             });
+        }
+
+        /// <summary>
+        /// A Scrying spell's viewing point, put down on the block (Core Rules §11, "Scrying"): the caster
+        /// sees the place as it is now — by Sight alone at T1, with Sound at T2, and Substance at T3. It
+        /// has no Threshold, and it lasts the scene, anchored to its caster. A caster has one at a time.
+        /// </summary>
+        private void Scry(Combatant caster, SpellCast cast, CastPlan plan)
+        {
+            var spell = cast.Spell;
+            workings.RemoveAll(w => w.Caster == caster && w.Lever == Lever.Scrying);
+            workings.Add(new Working(caster, spell.Name, Lever.Scrying, cast.Corner ?? plan.Origin, SpellArea.Across(spell.Size), plan.Area.ToHashSet(), (int)spell.SpellTier));
+            var senses = spell.SpellTier switch { Tier.T1 => "sight", Tier.T2 => "sight and sound", _ => "sight, sound and touch" };
+            var there = combatants.Where(c => c != caster && c.OccupiesSquare && c.Footprint.Any(plan.Area.Contains)).Select(c => c.Name).ToList();
+            Write($"{caster.Name}'s {spell.Name} opens a window on {plan.Area.Count} squares, by {senses}, for the rest of the scene — "
+                  + (there.Count == 0 ? "nobody is there." : $"{string.Join(", ", there)} {(there.Count == 1 ? "is" : "are")} there."));
+        }
+
+        /// <summary>
+        /// A Sensing spell over the block (Core Rules §11, "Sensing"). Whatever isn't hiding simply shows
+        /// itself, the answer as precise as the Tier: whether a creature carries active magic (T1), its
+        /// general character (T2), the exact detail (T3). An Illusion is a lie being told, so seeing
+        /// through it is an opposed roll: the cast roll against its Deceit, the higher winning, as a
+        /// Search is — and on a win the caster sees it for what it is.
+        /// </summary>
+        private void Sense(Combatant caster, SpellCast cast, CastPlan plan)
+        {
+            var spell = cast.Spell;
+            var area = plan.Area.ToHashSet();
+            foreach (var illusion in illusions.Where(i => i.Caster.Side != caster.Side && !i.SeenThrough.Contains(caster)
+                         && (i.Squares.Any(area.Contains) || i.Phantom?.Footprint.Any(area.Contains) == true || i.Subject?.Footprint.Any(area.Contains) == true)).ToList())
+            {
+                var roll = RollAgainst(plan.CastBonus, illusion.Deceit, advantage: false, disadvantage: false, caster);
+                var sees = roll.Total >= illusion.Deceit;
+                Write($"{caster.Name}'s {spell.Name} feels for the lie in {illusion.Spell}: {DescribeRoll(roll)} against Deceit {illusion.Deceit} — "
+                      + (sees ? "it is seen for what it is." : "the lie holds."));
+                if (sees)
+                {
+                    illusion.SeenThrough.Add(caster);
+                }
+            }
+
+            var found = new List<string>();
+            foreach (var creature in combatants.Where(c => c != caster && c.OccupiesSquare && c.Footprint.Any(area.Contains)))
+            {
+                var held = spellEffects.Where(e => e.Target == creature).Select(e => e.Spell.Name).Distinct().ToList();
+                var magic = creature.Spells.Count > 0 || held.Count > 0;
+                if (creature.Spells.Count > 0 && creature.Side != caster.Side)
+                {
+                    creature.IsSensedAsCaster = true;
+                }
+
+                found.Add(spell.SpellTier switch
+                {
+                    Tier.T1 => $"{creature.Name}: {(magic ? "magic" : "no magic")}",
+                    Tier.T2 => $"{creature.Name}: " + (!magic ? "no magic"
+                        : string.Join(", ", creature.Spells.Select(s => SpellCalculator.SourceLabel(s.Source)).Distinct()
+                            .Concat(held.Count > 0 ? ["under a spell"] : []))),
+                    _ => $"{creature.Name}: " + (!magic ? "no magic"
+                        : string.Join(", ", creature.Spells.Select(s => s.Name).Concat(held.Select(h => $"under {h}")))),
+                });
+            }
+
+            Write($"{caster.Name}'s {spell.Name} senses {(found.Count == 0 ? "nobody in the block" : string.Join("; ", found))}.");
         }
 
         /// <summary>Lets go of what a fallen caster was holding (Core Rules §11, "Duration and the Caster").</summary>

@@ -57,7 +57,7 @@ public class SpellTests
             elthric.DodgeThreshold, elthric.ResolveThreshold!.Value, elthric.StabilityThreshold));
 
         Assert.Equal(["Smite", "Scourging Light", "Vital Transfer", "Blessing", "Eye of Eolis", "Shrine Light", "False Portent", "Curse"], mirella.Spells.Select(s => s.Name));
-        Assert.Equal(["Mind Spike", "Foresight", "Telekinetic Shove", "Blood Mist", "Flame Burst", "Conflagration", "Settle the Ground", "Phantom Double", "Phantom Wound", "Phantom Wall", "Fog of Confusion"], elthric.Spells.Select(s => s.Name));
+        Assert.Equal(["Mind Spike", "Foresight", "Telekinetic Shove", "Blood Mist", "Flame Burst", "Conflagration", "Settle the Ground", "Witchsight", "Far Eye", "Phantom Double", "Phantom Wound", "Phantom Wall", "Fog of Confusion"], elthric.Spells.Select(s => s.Name));
         Assert.True(elthric.HasOverclock);
         Assert.True(mirella.HasSacrifice && elthric.HasSacrifice);
     }

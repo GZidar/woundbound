@@ -152,6 +152,17 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     return moved - now >= Math.Max(price, 0.05) ? new GmStep.BonusMove() : null;
                 }
 
+                case OpportunityBonusKind.OffHand when turn.HasAttacked && actor.AttacksThisRound > 0 && actor.OffHandAttack is { } offHand:
+                {
+                    var assess = new Assessor(view);
+                    var best = view.EnemiesOf(actor).Where(e => !e.IsOutOfFight && !e.IsPhantom)
+                        .Select(e => (Who: e, Plan: view.PlanAttackWith(actor, offHand, actor.Position, e)))
+                        .Where(x => x.Plan.CanAttack)
+                        .Select(x => (x.Who, Worth: assess.Worth(assess.Blow(actor, offHand, x.Who, x.Plan.DamageDieSides, x.Plan.DodgeThreshold), x.Who)))
+                        .OrderByDescending(x => x.Worth).FirstOrDefault();
+                    return best.Who is not null && best.Worth >= Math.Max(price, 0.3) ? new GmStep.OffHand(best.Who) : null;
+                }
+
                 case OpportunityBonusKind.ThresholdBoost when actor.ActionsRemaining == 0 && !actor.HasMove:
                 {
                     var assess = new Assessor(view);

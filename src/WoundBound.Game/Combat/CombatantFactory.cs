@@ -28,11 +28,16 @@ namespace WoundBound.Game.Combat
             var stats = CharacterCalculator.Calculate(build);
             var armour = build.Armour.FirstOrDefault(a => a.IsEquipped)?.Weight ?? ArmourWeight.None;
 
+            // A rival who fights with two weapons spends the GM's Opportunity on the off-hand strike: an
+            // adversary attacks once a round, so its off-hand blow is the Opportunity's (the user's ruling, 2026-11-03).
+            var twoWeapons = side == Side.Adversaries && InventoryCalculator.InHandWeapons(build) is { Count: 2 } held && held.Any(w => w.Weight == WeaponWeight.Light);
+
             return new Combatant
             {
                 Name = build.CharacterName,
                 Side = side,
                 Build = build,
+                OpportunityBonus = twoWeapons ? OpportunityBonus.OffHandStrike : OpportunityBonus.Default,
                 Position = position,
                 BodyMax = stats.BodyWoundPool,
                 Body = build.Play.CurrentBodyWounds ?? stats.BodyWoundPool,
@@ -96,7 +101,8 @@ namespace WoundBound.Game.Combat
                 SkillBonusFor = foe.SkillBonusFor, IsMinion = foe.IsMinion, IsUnshakable = foe.IsUnshakable, StaminaEachRound = foe.StaminaEachRound, StaminaMax = foe.StaminaMax, Stamina = foe.Stamina,
                 TacticalSpendsPerRound = foe.TacticalSpendsPerRound,
                 StatblockManoeuvres = foe.StatblockManoeuvres,
-                Kind = foe.Kind, Traits = foe.Traits, IsMindImmune = foe.IsMindImmune, OpportunityBonus = foe.OpportunityBonus,
+                Kind = foe.Kind, Traits = foe.Traits, IsMindImmune = foe.IsMindImmune, OpportunityBonus = foe.OpportunityBonus, Statblock = foe.Statblock,
+                StatblockOffHand = foe.StatblockOffHand,
                 Tier = info.Tier,
                 Casting = casting,
                 StatblockFuel = casting.Source == MagicSource.ElementalMagic && !casting.OfItsElement ? casting.Fuel : 0,
@@ -143,6 +149,7 @@ namespace WoundBound.Game.Combat
 
         private static Combatant Plain(StartingAdversaryInfo info, string name, GridPosition position) => new()
         {
+            Statblock = info,
             Name = name,
             Side = Side.Adversaries,
             Position = position,
@@ -180,6 +187,9 @@ namespace WoundBound.Game.Combat
             StatblockManoeuvres = ManoeuvresIn(info.AttackEffect),
             Kind = info.Name,
             OpportunityBonus = OpportunityBonus.Parse(info.OpportunityText),
+            StatblockOffHand = OpportunityBonus.Parse(info.OpportunityText) is { Kind: OpportunityBonusKind.OffHand } offHand
+                ? StatblockLine("Off-hand blow", info.AttackModifier, 1, offHand.OffHandDie, 0, info.Reach)
+                : null,
             Traits = (info.Traits ?? []).ToHashSet(),
             IsMindImmune = info.Traits?.Contains(AdversaryTrait.BoundNotAlive) == true || info.Features?.Any(f => f.Name == "Deathless Purpose") == true,
         };

@@ -192,9 +192,9 @@ namespace WoundBound.Game.Combat
                 return ($"{spell.Name} needs a place to stand.", default, [], [], false);
             }
 
-            if (form == IllusionForm.Figure && caster.Build is null)
+            if (form == IllusionForm.Figure && caster.Build is null && caster.Statblock is null)
             {
-                return ("A creature's phantom double isn't in the game yet.", default, [], [], false);
+                return ($"{caster.Name} has no likeness to put up.", default, [], [], false);
             }
 
             var squares = form == IllusionForm.Figure
@@ -224,7 +224,11 @@ namespace WoundBound.Game.Combat
             Combatant? phantom = null;
             if (form == IllusionForm.Figure)
             {
-                phantom = CombatantFactory.FromCharacter(caster.Build!, plan.Area[0]);
+                // In the likeness of its caster: a character's sheet, or a creature's statblock — on the
+                // caster's own side, so the taken-in see one more of the enemy, a rival's too.
+                phantom = caster.Build is { } build
+                    ? CombatantFactory.FromCharacter(build, plan.Area[0], caster.Side)
+                    : CombatantFactory.FromAdversary(caster.Statblock!, caster.Name, plan.Area[0]);
                 // It goes by the name of whoever it is the likeness of: that's who the taken-in see.
                 phantom.IsPhantom = true;
             }

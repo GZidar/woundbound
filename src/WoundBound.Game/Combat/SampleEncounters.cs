@@ -216,6 +216,41 @@ namespace WoundBound.Game.Combat
         };
 
         /// <summary>
+        /// A Sensing spell built for the game from Core Rules §11, "Sensing": Aether, a Small Volume at
+        /// Short. At T1 a bare yes or no — does anybody in the block carry active magic — and the cast
+        /// roll against any Illusion there, to see it for the lie it is.
+        /// </summary>
+        public static SpellDefinition Witchsight => new()
+        {
+            Name = "Witchsight",
+            Source = MagicSource.AetherMagic,
+            SpellTier = Tier.T1,
+            SpellType = SpellType.Utility,
+            Target = SpellTarget.Many,
+            Shape = SpellShape.Volume,
+            Size = SpellSize.Small,
+            Range = SpellRange.Short,
+            Notes = "Sensing: the threads of active magic in the block show themselves to him, and a lie woven there frays under his look.",
+        };
+
+        /// <summary>
+        /// A Scrying spell built for the game from Core Rules §11, "Scrying": Aether, a Small Volume as far
+        /// as Long. Sight only at T1; it lasts the scene, anchored to its caster, and rolls against nothing.
+        /// </summary>
+        public static SpellDefinition FarEye => new()
+        {
+            Name = "Far Eye",
+            Source = MagicSource.AetherMagic,
+            SpellTier = Tier.T1,
+            SpellType = SpellType.Utility,
+            Target = SpellTarget.Many,
+            Shape = SpellShape.Volume,
+            Size = SpellSize.Small,
+            Range = SpellRange.Long,
+            Notes = "Scrying: he sees the place as it is now, as though standing in it - by sight alone.",
+        };
+
+        /// <summary>
         /// An Aether working on the ground, built for the game from Core Rules §9's "drying, damping,
         /// firming or fouling ground": a Small Volume pressed flat and dry underfoot, or churned to mire —
         /// one grade either way, for the scene.
@@ -262,7 +297,7 @@ namespace WoundBound.Game.Combat
             Spells =
             {
                 data.Spell("Mind Spike"), data.Spell("Foresight"), data.Spell("Telekinetic Shove"), data.Spell("Blood Mist"),
-                data.Spell("Flame Burst"), data.Spell("Conflagration"), SettleTheGround,
+                data.Spell("Flame Burst"), data.Spell("Conflagration"), SettleTheGround, Witchsight, FarEye,
                 data.Spell("Phantom Double"), data.Spell("Phantom Wound"), PhantomWall, data.Spell("Fog of Confusion"),
             },
         };
@@ -656,7 +691,8 @@ namespace WoundBound.Game.Combat
             SecondaryWound = WoundType.Soul,
             Tier = Tier.T1,
             AbilityModifiers = Array(str: 1, agi: 3, intl: 1, vit: 2, foc: -1, pre: 0),
-            Weapons = { CombatantFactory.InHand(data.Weapon("Rapier")) },
+            // Rapier and dagger, as Salla fights: the off-hand strike is the GM Opportunity's for a rival.
+            Weapons = { CombatantFactory.InHand(data.Weapon("Rapier")), CombatantFactory.InHand(data.Weapon("Dagger")) },
             Armour = { new ArmourDefinition { Name = "Leather", Weight = ArmourWeight.Light, IsEquipped = true } },
         };
 
@@ -765,7 +801,9 @@ namespace WoundBound.Game.Combat
         /// great sword that can Topple, Unshakable, and Fitness to keep his Stamina coming) and the two
         /// retainers riding with him — a Tollroad Bandit and a Bandit Ambusher with a crossbow. Open
         /// ground, so the party can ring him; hard to hit, so it takes rounds — the fight a held Bane
-        /// is for.
+        /// is for. His Opportunity bonus is the game's own: Cleave, for a great sword swung through two
+        /// of the party who crowd him (GM Reference §9: "Cleave when two characters stand within reach
+        /// of the same blade"). The retainer's crossbow is aimed: Precise.
         /// </summary>
         public static Encounter ChampionOnTheGreen(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {
@@ -776,9 +814,9 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
                 CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
-                CombatantFactory.FromAdversary(data.Adversary("Noble Champion"), "Noble Champion", new GridPosition(15, 9)),
+                CombatantFactory.FromAdversary(data.Adversary("Noble Champion") with { OpportunityText = "Cleave" }, "Noble Champion", new GridPosition(15, 9)),
                 CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Retainer with a cudgel", new GridPosition(16, 6)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Retainer with a crossbow", new GridPosition(19, 11)),
+                CombatantFactory.FromAdversary(BanditAmbusher with { OpportunityText = "Precise" }, "Retainer with a crossbow", new GridPosition(19, 11)),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -786,12 +824,31 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
-        /// Outriders on the road — staged for the game: three Tollroad Bandits on
-        /// riding horses (Core Rules §9, "Mounts": Fast, a horse's hooves to borrow, a horse to strike
-        /// instead), with an Ambusher and his crossbow on foot behind. Daylight, open ground.
+        /// A glamourer of the fen, built for the game on the Bog Hex-Caller's frame (GM Reference §9, "On
+        /// Casters"): a T1 Adept, Caster - Aether (+2), who puts up a Phantom Double of itself and fogs
+        /// minds with Fog of Confusion. The statblock Illusion caster.
         /// </summary>
-        public static Encounter Outriders(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        public static StartingAdversaryInfo FenGlamourer(GameData data) => data.Adversary("Bog Hex-Caller") with
         {
+            Name = "Fen Glamourer",
+            AttackName = "None",
+            Notes = "A hedge-glamourer: what it shows you is never quite where it stands.",
+            Casting = new AdversaryCasting { Source = MagicSource.AetherMagic, Bonus = 2 },
+            Spells = [new StartingSpellLineInfo("Phantom Double", "Illusion (Sight): its own likeness", "1 Mind"),
+                new StartingSpellLineInfo("Fog of Confusion", "Control - Confusion over a block", "1 Mind")],
+        };
+
+        /// <summary>
+        /// The glamoured mill — staged for the game: the Quickstart's five at an old mill against a
+        /// Tollroad Bandit and his Timber Wolf, two Vampire Bats out of the mill's dark (their Opportunity
+        /// bonus is Direct damage), and a Fen Glamourer behind them putting up doubles of itself.
+        /// Daylight, open ground.
+        /// </summary>
+        public static Encounter GlamouredMill(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            Combatant Foe(StartingAdversaryInfo info, string name, int x, int y) =>
+                CombatantFactory.FromAdversary(info, name, new GridPosition(x, y), data.Spells);
+
             var combatants = new List<Combatant>
             {
                 CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
@@ -799,9 +856,36 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
                 CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
-                CombatantFactory.Mounted(CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Mounted Tollroad Bandit", new GridPosition(15, 9))),
-                CombatantFactory.Mounted(CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Outrider", new GridPosition(16, 5))),
-                CombatantFactory.Mounted(CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Second outrider", new GridPosition(16, 13))),
+                Foe(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", 14, 8),
+                Foe(data.Adversary("Timber Wolf"), "Timber Wolf", 14, 10),
+                Foe(data.Adversary("Vampire Bat"), "First bat", 13, 6),
+                Foe(data.Adversary("Vampire Bat"), "Second bat", 13, 12),
+                Foe(FenGlamourer(data), "Fen Glamourer", 18, 9),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "The old mill" }, environment: data.Environment);
+        }
+
+        /// <summary>
+        /// Outriders on the road — staged for the game: three Tollroad Bandits on
+        /// riding horses (Core Rules §9, "Mounts": Fast, a horse's hooves to borrow, a horse to strike
+        /// instead), with an Ambusher and his crossbow on foot behind. Daylight, open ground. The
+        /// outriders' Opportunity bonus is the game's own: extra movement, a horse's burst of speed.
+        /// </summary>
+        public static Encounter Outriders(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var rider = data.Adversary("Tollroad Bandit") with { OpportunityText = "Extra movement" };
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+                CombatantFactory.Mounted(CombatantFactory.FromAdversary(rider, "Mounted Tollroad Bandit", new GridPosition(15, 9))),
+                CombatantFactory.Mounted(CombatantFactory.FromAdversary(rider, "Outrider", new GridPosition(16, 5))),
+                CombatantFactory.Mounted(CombatantFactory.FromAdversary(rider, "Second outrider", new GridPosition(16, 13))),
                 CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on foot", new GridPosition(18, 9)),
             };
 
@@ -814,7 +898,8 @@ namespace WoundBound.Game.Combat
         /// Brute, Large, Heavy armour, Reach 2) and two Animated Suits of Mail (DT 14), in a ruined
         /// cloister's open yard. Constructs have no Mind or Soul for a Smite, a Mind Spike or a Control
         /// to find, and nothing in them breaks and runs: the blades have to grind them down, which is
-        /// where a held Curse on the one they're all hitting earns its Stamina.
+        /// where a held Curse on the one they're all hitting earns its Stamina. The Golem's Opportunity
+        /// bonus is the game's own: a Threshold boost, stone settling against the blows.
         /// </summary>
         public static Encounter ShrineGuardians(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {
@@ -826,7 +911,7 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
                 CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
-                CombatantFactory.FromAdversary(data.Adversary("Stoneheart Golem"), "Stoneheart Golem", new GridPosition(16, 8)),
+                CombatantFactory.FromAdversary(data.Adversary("Stoneheart Golem") with { OpportunityText = "Threshold boost" }, "Stoneheart Golem", new GridPosition(16, 8)),
                 CombatantFactory.FromAdversary(mail, "Suit of Mail by the gate", new GridPosition(14, 5)),
                 CombatantFactory.FromAdversary(mail, "Suit of Mail by the well", new GridPosition(14, 13)),
             };

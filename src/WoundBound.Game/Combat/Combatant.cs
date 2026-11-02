@@ -376,7 +376,10 @@ namespace WoundBound.Game.Combat
             inHand.Count == 2 ? inHand.LastOrDefault(w => w.Weight == WeaponWeight.Light) : null;
 
         /// <summary>The off-hand weapon's attack, rolled with its own Grip (Core Rules §9, "Two Weapons").</summary>
-        public AttackProfile? OffHandAttack => Build is { } build && OffHandWeapon is { } off ? AttackProfile.ForWeapon(build, off) : null;
+        public AttackProfile? OffHandAttack => Build is { } build && OffHandWeapon is { } off ? AttackProfile.ForWeapon(build, off) : StatblockOffHand;
+
+        /// <summary>A statblock creature's off-hand blow, where its Opportunity bonus is an off-hand attack: its attack bonus, a Light weapon's die.</summary>
+        public AttackProfile? StatblockOffHand { get; init; }
 
         /// <summary>
         /// Set once its Attack action has been made with a Two Weapons loadout: the off-hand strike
@@ -600,6 +603,18 @@ namespace WoundBound.Game.Combat
         /// the other side goes for them first from then on.
         /// </summary>
         public bool HasCastSpell { get; internal set; }
+
+        /// <summary>The statblock a foe was built from — what its phantom double is made in the likeness of. Null for a character.</summary>
+        public Rules.Catalog.StartingAdversaryInfo? Statblock { get; init; }
+
+        /// <summary>
+        /// Found out as a caster by a Sensing spell before casting anything: the other side treats them
+        /// as one from then on, as though they had cast (Core Rules §11, "Sensing").
+        /// </summary>
+        public bool IsSensedAsCaster { get; internal set; }
+
+        /// <summary>Whether the other side knows this is a caster: they have cast, or a Sensing spell found the magic in them.</summary>
+        public bool ShowsAsCaster => HasCastSpell || IsSensedAsCaster;
 
         /// <summary>The spells on a character's sheet, or on a foe's statblock under its Caster trait (Core Rules §11; GM Reference §9).</summary>
         public IReadOnlyList<SpellDefinition> Spells => Build?.Spells ?? StatblockSpells;

@@ -157,6 +157,19 @@ namespace WoundBound.Game.Combat
     }
 
     /// <summary>The ground a spell covers (Core Rules §11, "Spell Shape").</summary>
+    /// <summary>The three kinds of Utility spell a fight can see (Core Rules §11).</summary>
+    public enum UtilityKind
+    {
+        /// <summary>Moves light, weather or ground, and lasts on the ground it was put down on.</summary>
+        Lever,
+
+        /// <summary>Sees a distant place as it is now, from a viewing point that lasts the scene.</summary>
+        Scrying,
+
+        /// <summary>Reveals a present-tense truth: what carries active magic, and what is a lie.</summary>
+        Sensing,
+    }
+
     public static class SpellArea
     {
         /// <summary>How many squares across a Volume of <paramref name="size"/> is: 2, 3 or 4.</summary>
@@ -319,7 +332,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public static Lever? LeverOf(SpellDefinition spell)
         {
-            if (spell.SpellType != SpellType.Utility)
+            if (spell.SpellType != SpellType.Utility || UtilityKindOf(spell) != UtilityKind.Lever)
             {
                 return null;
             }
@@ -332,6 +345,24 @@ namespace WoundBound.Game.Combat
                     : text.Contains("light") || text.Contains("glow") || text.Contains("shine")
                         ? Lever.Light
                         : null;
+        }
+
+        /// <summary>
+        /// What a Utility spell is for (Core Rules §11, "Utility Spells"): a Scrying spell, which sees a
+        /// distant place as it is now; a Sensing spell, which reveals a present-tense truth; or one that
+        /// moves a lever of the scene. Read from its name and notes, which say "scry" or "sense".
+        /// </summary>
+        public static UtilityKind? UtilityKindOf(SpellDefinition spell)
+        {
+            if (spell.SpellType != SpellType.Utility)
+            {
+                return null;
+            }
+
+            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            return text.Contains("scry") ? UtilityKind.Scrying
+                : text.Contains("sensing") || text.Contains("senses") || text.Contains("detect") ? UtilityKind.Sensing
+                : UtilityKind.Lever;
         }
 
         /// <summary>

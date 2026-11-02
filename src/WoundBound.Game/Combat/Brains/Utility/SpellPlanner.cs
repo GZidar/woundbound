@@ -62,6 +62,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     SpellType.Bane when usesTricks => enemies.Where(e => !e.IsPhantom && !e.IsOutOfFight)
                         .SelectMany(e => BaneThresholds(spell, e).SelectMany(threshold => Held(actor, new SpellCast(spell) { Target = e, Threshold = threshold })))
                         .Select(cast => (cast, (Func<CastPlan, double>)(plan => HeldBaneWorth(actor, cast, plan, cast.Target!, cast.Threshold!.Value)))),
+                    SpellType.Utility when usesTricks && SpellArea.UtilityKindOf(spell) == UtilityKind.Sensing => SenseCorners(actor, spell, enemies)
+                        .Select(corner => (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner }, (Func<CastPlan, double>)(plan => SenseWorth(actor, plan)))),
                     SpellType.Utility when usesTricks && SpellArea.LeverOf(spell) == Lever.Light && View.IsUnlit => VolumeCorners(spell, enemies)
                         .Select(corner => (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner }, (Func<CastPlan, double>)(plan => LightWorth(actor, spell, plan)))),
                     SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Shift => enemies.Where(e => !e.IsBroken)
@@ -352,6 +354,30 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// often wouldn't have — so they are discounted (calibrated by simulation, 2026-11-02).
         /// </summary>
         private const double Denial = 0.6;
+
+        /// <summary>
+        /// Where a Sensing spell could tell its caster something: over an Illusion that takes them in, or
+        /// over an enemy with spells who hasn't shown it yet.
+        /// </summary>
+        private IEnumerable<GridPosition> SenseCorners(Combatant actor, SpellDefinition spell, IReadOnlyList<Combatant> enemies) =>
+            View.Illusions.Where(i => View.Fools(i, actor)).SelectMany(i => i.Squares)
+                .Concat(enemies.Where(e => e.Spells.Count > 0 && !e.ShowsAsCaster).SelectMany(e => e.Footprint))
+                .SelectMany(sq => SpellArea.CornersCovering(sq, spell.Size)).Distinct();
+
+        /// <summary>
+        /// What a Sensing spell is worth (Core Rules §11, "Sensing"): each Illusion taking its caster in,
+        /// at the chance the cast roll beats its Deceit — a wall that isn't there, an enemy that isn't —
+        /// and each caster found out before they cast, worth going for that much sooner. But the
+        /// Sensing caster only knows of the spells it can see, so it weighs an unshown caster lightly.
+        /// </summary>
+        private double SenseWorth(Combatant actor, CastPlan plan)
+        {
+            var area = plan.Area.ToHashSet();
+            var lies = View.Illusions.Where(i => View.Fools(i, actor) && i.Squares.Any(area.Contains))
+                .Sum(i => Odds.Of(plan.CastBonus, i.Deceit).Success * 0.8);
+            var unmasked = View.EnemiesOf(actor).Count(e => e.Spells.Count > 0 && !e.ShowsAsCaster && e.Footprint.Any(area.Contains)) * 0.3;
+            return lies + unmasked;
+        }
 
         /// <summary>
         /// Conjured light is worth the Dodge it strips from whoever stands in it, for the rest of the

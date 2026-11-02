@@ -1924,6 +1924,19 @@ namespace WoundBound.Game.Combat
                         () => TakeStep(turn, done));
                     return;
 
+                case GmStep.OffHand offHandStep:
+                    if (!turn.BonusAvailable || actor.OpportunityBonus.Kind != OpportunityBonusKind.OffHand || actor.OffHandAttack is not { } offHandLine
+                        || !turn.HasAttacked || actor.AttacksThisRound == 0 || offHandStep.Target.IsOutOfFight
+                        || !PlanAttackWith(actor, offHandLine, actor.Position, offHandStep.Target).CanAttack)
+                    {
+                        throw new InvalidOperationException($"The GM brain spent an Opportunity on an off-hand strike for {actor.Name} at {offHandStep.Target.Name}, which it can't make now.");
+                    }
+
+                    turn.BonusAvailable = false;
+                    Write($"The GM spends {SpendOpportunity()} Opportunity on {actor.Name}'s bonus: an off-hand strike.");
+                    ResolveAttack(actor, offHandStep.Target, asReaction: false, opportunityBonus: false, _ => TakeStep(turn, done), offHandLine, spendsAction: false);
+                    return;
+
                 case GmStep.BonusMove:
                     if (!turn.BonusAvailable || actor.OpportunityBonus.Kind != OpportunityBonusKind.ExtraMove || actor.HasMove || !CanMoveItself(actor))
                     {
@@ -2674,9 +2687,11 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            // Against every creature within reach of it, its own side too — one roll each, one attack.
+            // Against every creature within reach of it, its own side too — one roll each, one attack —
+            // and the horses under any riders it catches, as an area spell catches them (Core Rules §9, "Mounts").
             var rest = new Queue<Combatant>(combatants.Where(c => c != attacker && c != first && c.OccupiesSquare
-                && (!c.IsOutOfFight || c.IsDefenceless) && attacker.DistanceTo(c) <= squares));
+                    && (!c.IsOutOfFight || c.IsDefenceless) && attacker.DistanceTo(c) <= squares)
+                .Concat(Steeds.Where(m => m != attacker.Steed && m != first && attacker.DistanceTo(m) <= squares)));
             void Next()
             {
                 while (rest.TryDequeue(out var victim))
@@ -2796,7 +2811,9 @@ namespace WoundBound.Game.Combat
                     : bonus switch
                     {
                         OpportunityBonusKind.Direct => "Direct damage — armour takes none of it",
-                        OpportunityBonusKind.Precise => $"Precise — Direct, and +{AdversarySkillCalculator.Baseline(attacker.Tier)} damage",
+                        OpportunityBonusKind.Precise => AdversarySkillCalculator.Baseline(attacker.Tier) is var baseline && baseline > 0
+                            ? $"Precise — Direct, and +{baseline} damage"
+                            : "Precise — Direct damage",
                         OpportunityBonusKind.Cleave => "a Cleave without the Stamina",
                         _ => attacker.OpportunityBonus.Text,
                     };

@@ -195,6 +195,9 @@ namespace WoundBoundGame
         private OptionButton thresholdPicker = null!;
         private OptionButton tapPicker = null!;
         private OptionButton effectPicker = null!;
+
+        /// <summary>How far below its own Tier a Bind is cast: 0 its own effect, 1 a Tier lower, 2 two lower (Core Rules §11, "Motion Spells").</summary>
+        private OptionButton bindPicker = null!;
         private OptionButton shapePicker = null!;
         private readonly Dictionary<NimbleExploit, Button> exploitButtons = new();
         private readonly Dictionary<WeaponManoeuvre, Button> manoeuvreButtons = new();
@@ -252,6 +255,13 @@ namespace WoundBoundGame
             if (spell.SpellType == SpellType.Control)
             {
                 cast = cast with { Effect = (ControlEffect)Mathf.Max(0, effectPicker.Selected) };
+            }
+
+            // A Bind may produce a lower Tier's effect than its own: Stuck or Slowed from a T3, Slowed from a T2.
+            if (IsTieredBind(spell))
+            {
+                var lower = Mathf.Max((int)Tier.T1, (int)spell.SpellTier - Mathf.Max(0, bindPicker.Selected));
+                cast = cast with { BindAs = lower < (int)spell.SpellTier ? (Tier)lower : null };
             }
 
             // Elemental Fuel: the pack, the light in hand, or a fire burning within reach.
@@ -353,7 +363,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders", "glamour" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -1065,6 +1075,7 @@ namespace WoundBoundGame
                 13 => SampleEncounters.ShrineGuardians(data, Dice(), PickedGm()),
                 14 => SampleEncounters.HollowStagInTheBirchwood(data, Dice(), PickedGm()),
                 15 => SampleEncounters.Outriders(data, Dice(), PickedGm()),
+                16 => SampleEncounters.GlamouredMill(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
             // Lines written while the fight was set up came before anyone was listening.
@@ -1431,6 +1442,7 @@ namespace WoundBoundGame
             thresholdPicker.Visible = armedSpell is { SpellType: SpellType.Buff or SpellType.Bane };
             tapPicker.Visible = armedSpell is { Source: MagicSource.ElementalMagic };
             effectPicker.Visible = armedSpell is { SpellType: SpellType.Control };
+            bindPicker.Visible = armedSpell is { } bind && IsTieredBind(bind);
             shapePicker.Visible = armedSpell is { Target: SpellTarget.Many } many && many.Range != SpellRange.Touch;
         }
 
@@ -1819,12 +1831,17 @@ namespace WoundBoundGame
             effectPicker.AddItem("Confusion: attacks whoever is in reach");
             effectPicker.AddItem("Compulsion: drops its weapon and kneels");
 
+            bindPicker = new OptionButton { TooltipText = "A Bind may produce its own Tier's effect or a lower one: Frozen (T3), Stuck (T2), Slowed (T1)." };
+            bindPicker.AddItem("Bind: its own Tier's effect");
+            bindPicker.AddItem("Bind: one Tier lower");
+            bindPicker.AddItem("Bind: two Tiers lower");
+
             shapePicker = new OptionButton { TooltipText = "The Shape an area spell goes out in, named as you cast it: a block, a straight Line, or a Cone widening as it goes. A Line or a Cone starts beside you and is aimed the way of the square you click." };
             shapePicker.AddItem("Shape: Volume (a block)");
             shapePicker.AddItem("Shape: Line");
             shapePicker.AddItem("Shape: Cone");
 
-            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker, tapPicker, effectPicker, shapePicker })
+            foreach (var option in new Control[] { payInBodyBox, overclockBox, sacrificeBox, sustainBox, backlashBox, thresholdPicker, tapPicker, effectPicker, bindPicker, shapePicker })
             {
                 castOptions.AddChild(option);
             }
@@ -1890,6 +1907,7 @@ namespace WoundBoundGame
             fightPicker.AddItem("The shrine's guardians: a golem and two suits of mail");
             fightPicker.AddItem("The Hollow Stag: a Solo in the birchwood");
             fightPicker.AddItem("Outriders: bandits on horseback");
+            fightPicker.AddItem("The glamoured mill: bats and a glamourer");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 

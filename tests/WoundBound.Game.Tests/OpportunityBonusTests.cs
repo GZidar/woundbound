@@ -274,3 +274,140 @@ public class OpportunityBonusTests
         Assert.Equal(0, encounter.BankedOpportunities);
     }
 }
+
+/// <summary>Core Rules §9, "Mounts": an area attack catches the horse as well as its rider.</summary>
+public class AreaAttackMountTests
+{
+    private static readonly Game.Data.GameData Data = TestData.Load();
+
+    private sealed class Stamper : SimpleGmBrain
+    {
+        public override GmStep NextStep(BattleView view, GmTurn turn) => turn.HasAttacked
+            ? GmStep.End
+            : new GmStep.Attack(view.Characters.Single(), With: turn.Actor.Attacks.Single(a => a.AreaSquares is not null));
+
+        public override Combatant? ChooseExtraTurn(BattleView view) => null;
+    }
+
+    [Fact]
+    public void AStatblockAreaAttack_CatchesTheSteed()
+    {
+        var rider = CombatantFactory.Mounted(CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(4, 4)));
+        var encounter = new Encounter(12, 10, new[]
+        {
+            rider,
+            CombatantFactory.FromAdversary(SampleEncounters.HollowStag(Data), "Stag", new GridPosition(5, 4)),
+        }, Data.RangeBands, new RandomDiceRoller(new Random(3)), new Stamper());
+
+        encounter.EndTurn();
+        encounter.RunAdversaryTurn();
+        while (encounter.Pending is not null)
+        {
+            encounter.RespondToReaction(false);
+        }
+
+        Assert.Contains(encounter.Log, l => l.StartsWith("Stag attacks") && l.Contains(rider.Steed!.Name));
+    }
+}
+
+/// <summary>The brains price a poison carried on a blow (Core Rules §10, "Fortitude Threshold").</summary>
+public class PoisonPricingTests
+{
+    private static readonly Game.Data.GameData Data = TestData.Load();
+
+    [Fact]
+    public void APoisonedBlow_IsWorthMore_ExceptAgainstNoLivingBody()
+    {
+        var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 4));
+        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 4));
+        var encounter = new Encounter(12, 10, new[] { fighter, bandit }, Data.RangeBands, new ScriptedDice());
+        var assess = new Game.Combat.Brains.Utility.Assessor(new BattleView(encounter));
+        var plain = bandit.Attack;
+        var poisoned = plain with { Poison = new Poison(1, 4, 0, WoundType.Body) };
+
+        var without = assess.Blow(bandit, plain, fighter, plain.DamageDieSides, fighter.DodgeThreshold).ExpectedDealt;
+        var with = assess.Blow(bandit, poisoned, fighter, plain.DamageDieSides, fighter.DodgeThreshold).ExpectedDealt;
+        Assert.True(with > without, $"{with} vs {without}");
+
+        var husk = CombatantFactory.FromAdversary(Data.Adversary("Grave-Bound Husk"), "Husk", new GridPosition(6, 4));
+        Assert.Equal(assess.Blow(bandit, plain, husk, plain.DamageDieSides, husk.DodgeThreshold).ExpectedDealt,
+            assess.Blow(bandit, poisoned, husk, plain.DamageDieSides, husk.DodgeThreshold).ExpectedDealt);
+    }
+}
+
+/// <summary>The game's own Opportunity bonus: an off-hand strike after the attack, paid by the Opportunity (the user's ruling, 2026-11-03).</summary>
+public class OffHandBonusTests
+{
+    private static readonly Game.Data.GameData Data = TestData.Load();
+
+    private sealed class ScriptedGm(Func<BattleView, GmTurn, GmStep?> step) : SimpleGmBrain
+    {
+        public override GmStep NextStep(BattleView view, GmTurn turn) => step(view, turn) ?? GmStep.End;
+
+        public override Combatant? ChooseExtraTurn(BattleView view) => null;
+
+        public override bool PanicDodges(BattleView view, PendingReaction reaction) => false;
+    }
+
+    private static (Encounter Encounter, Combatant Fighter, Combatant Bandit) Fight(IGmBrain gm, params int[] dice)
+    {
+        var info = SampleEncounters.RoadsideBandit with { OpportunityText = "Off-hand attack (d4)" };
+        var encounter = new Encounter(12, 10, new[]
+        {
+            CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 4)),
+            CombatantFactory.FromAdversary(info, "Bandit", new GridPosition(5, 4)),
+        }, Data.RangeBands, new ScriptedDice(dice), gm);
+        encounter.BankedOpportunities = 1;
+        return (encounter, encounter.Combatants.Single(c => c.Side == Side.Party), encounter.Combatants.Single(c => c.Name == "Bandit"));
+    }
+
+    [Fact]
+    public void AStatblock_NamingAnOffHandAttack_HasAnOffHandBlow()
+    {
+        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit with { OpportunityText = "Off-hand attack (d4)" }, "Bandit", new GridPosition(0, 0));
+
+        Assert.Equal(OpportunityBonusKind.OffHand, bandit.OpportunityBonus.Kind);
+        Assert.Equal(4, bandit.OffHandAttack!.DamageDieSides);
+        Assert.Equal(bandit.Attack.AttackModifier, bandit.OffHandAttack.AttackModifier);
+    }
+
+    [Fact]
+    public void ARivalWithTwoWeapons_CarriesTheOffHandBonus_AndAPartyMemberDoesNot()
+    {
+        var rival = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(0, 0), Side.Adversaries);
+        var salla = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(0, 0));
+
+        Assert.Equal(OpportunityBonusKind.OffHand, rival.OpportunityBonus.Kind);
+        Assert.Equal(OpportunityBonusKind.Advantage, salla.OpportunityBonus.Kind);
+    }
+
+    [Fact]
+    public void AfterItsAttack_TheOpportunityBuysTheOffHandStrike_NoStaminaNoSecondAttack()
+    {
+        var (encounter, _, bandit) = Fight(new ScriptedGm((view, turn) => turn.Steps switch
+        {
+            0 => new GmStep.Attack(view.Characters.Single()),
+            1 => new GmStep.OffHand(view.Characters.Single()),
+            _ => null,
+        }), 2, 3, 2, 3);
+        var stamina = bandit.Stamina;
+
+        encounter.EndTurn();
+        encounter.RunAdversaryTurn();
+
+        Assert.Contains(encounter.Log, l => l.Contains("bonus: an off-hand strike"));
+        Assert.Contains(encounter.Log, l => l.StartsWith("Bandit attacks") && l.Contains("Off-hand blow"));
+        Assert.Equal(stamina, bandit.Stamina);
+        Assert.Equal(2, encounter.Log.Count(l => l.StartsWith("Bandit attacks")));
+        Assert.Equal(0, encounter.BankedOpportunities);
+    }
+
+    [Fact]
+    public void TheOffHandStrike_BeforeAnyAttack_IsRefused()
+    {
+        var (encounter, _, _) = Fight(new ScriptedGm((view, turn) => turn.Steps == 0 ? new GmStep.OffHand(view.Characters.Single()) : null));
+        encounter.EndTurn();
+
+        Assert.Throws<InvalidOperationException>(encounter.RunAdversaryTurn);
+    }
+}

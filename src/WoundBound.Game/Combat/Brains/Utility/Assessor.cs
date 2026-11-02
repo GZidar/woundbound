@@ -126,7 +126,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private double RawValue(Combatant c)
         {
             var value = 0.5 + (Threat(c) + Support(c)) * Lasts(c);
-            if (c.HasCastSpell)
+            if (c.ShowsAsCaster)
             {
                 value *= 1 + (c.HasBeenDropped ? 0.5 : 1.5) * CastingLeft(c) * Spread(c);
             }
@@ -260,6 +260,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 .SelectMany(e => c.Attacks.Select(a => Blow(c, a, e, a.DamageDieSides, e.DodgeThreshold).ExpectedDealt).Append(SpellHarm(c, e)))
                 .DefaultIfEmpty(0)
                 .Max();
+
+            // A second weapon hurts more than one: the off-hand blow a character pays Stamina for every
+            // round it can, and an adversary's only when the GM spends an Opportunity on it — about half the time.
+            if (c.OffHandAttack is { } offHand && (c.Side == Side.Party ? c.Stamina >= 2 : c.OpportunityBonus.Kind == OpportunityBonusKind.OffHand))
+            {
+                var second = view.EnemiesOf(c).Select(e => Blow(c, offHand, e, offHand.DamageDieSides, e.DodgeThreshold).ExpectedDealt).DefaultIfEmpty(0).Max();
+                best += (c.Side == Side.Party ? 1 : 0.5) * second;
+            }
+
             threat[c] = best;
             return best;
         }
@@ -307,7 +316,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             // A caster shows what they are by casting; until then they're reckoned like anybody else.
-            if (!c.HasCastSpell)
+            if (!c.ShowsAsCaster)
             {
                 support[c] = 0;
                 return 0;
@@ -369,8 +378,27 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var (critDealt, critKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: attack.DamageDieSides, absorbs, target, attack.Edge, woundsAlready);
 
             return (odds.Success,
-                plainHit * plainDealt + odds.CriticalSuccess * critDealt,
+                plainHit * plainDealt + odds.CriticalSuccess * critDealt + PoisonDealt(attack, target, dodgeThreshold + answer, absorbs, advantage, disadvantage),
                 plainHit * plainKill + odds.CriticalSuccess * critKill);
+        }
+
+        /// <summary>
+        /// What a poison carried on the blow adds, on average (Core Rules §10, "Fortitude Threshold"): it
+        /// takes hold where the same total hits and meets the target's FT, and the blow broke the skin —
+        /// its dice Direct on its track. Mind or Soul wounds count a little under Body's. Nothing for a
+        /// target with no living body.
+        /// </summary>
+        private static double PoisonDealt(AttackProfile attack, Combatant target, int dodge, int absorbs, bool advantage, bool disadvantage)
+        {
+            if (attack.Poison is not { } poison || target.FortitudeThreshold is not { } fortitude)
+            {
+                return 0;
+            }
+
+            var lands = Odds.Of(attack.AttackModifier, Math.Max(dodge, fortitude), advantage, disadvantage).Success;
+            var breaksSkin = absorbs <= 0 ? 1 : Math.Clamp((attack.DamageModifier + attack.DamageDiceCount * (attack.DamageDieSides + 1) / 2.0 - absorbs) / 2.0, 0, 1);
+            var average = Math.Max(PlayStateCalculator.DamageFloor, poison.DiceCount * (poison.DieSides + 1) / 2.0 + poison.Modifier);
+            return lands * breaksSkin * average * (poison.Track == WoundType.Body ? 1 : 0.7);
         }
 
         /// <summary>

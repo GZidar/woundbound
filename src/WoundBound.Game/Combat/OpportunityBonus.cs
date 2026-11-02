@@ -28,6 +28,12 @@ namespace WoundBound.Game.Combat
 
         /// <summary>A Solo's second attack this round, once a round, bought with the Opportunity rather than Stamina; Advantage otherwise.</summary>
         ExtraAttack,
+
+        /// <summary>
+        /// After its attack, a strike with the off-hand weapon (Core Rules §9, "Two Weapons"), bought with
+        /// the Opportunity rather than Stamina — the game's own bonus, for a creature that fights with two.
+        /// </summary>
+        OffHand,
     }
 
     /// <summary>
@@ -39,6 +45,12 @@ namespace WoundBound.Game.Combat
     public sealed record OpportunityBonus(OpportunityBonusKind Kind, string Text)
     {
         public static OpportunityBonus Default { get; } = new(OpportunityBonusKind.Advantage, "Advantage");
+
+        /// <summary>The bonus a rival who fights with two weapons carries: the off-hand strike.</summary>
+        public static OpportunityBonus OffHandStrike { get; } = new(OpportunityBonusKind.OffHand, "Off-hand attack");
+
+        /// <summary>The off-hand weapon's damage die a statblock names — "Off-hand attack (d4)" — or d4, a Light weapon's.</summary>
+        public string OffHandDie => Regex.Match(Text, @"\bd(\d+)\b") is { Success: true } die ? $"d{die.Groups[1].Value}" : "d4";
 
         /// <summary>Whether the bonus is spent on a blow — taken with the attack it sharpens.</summary>
         public bool RidesOnAttack => Kind is OpportunityBonusKind.Advantage or OpportunityBonusKind.Direct or OpportunityBonusKind.Precise
@@ -59,7 +71,8 @@ namespace WoundBound.Game.Combat
             }
 
             bool Has(string pattern) => Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase);
-            var kind = Has(@"\bextra attack\b") ? OpportunityBonusKind.ExtraAttack
+            var kind = Has(@"\boff[- ]?hand\b") ? OpportunityBonusKind.OffHand
+                : Has(@"\bextra attack\b") ? OpportunityBonusKind.ExtraAttack
                 : Has(@"\bbuff\b") ? OpportunityBonusKind.FreeBuff
                 : Has(@"\bcleave\b") ? OpportunityBonusKind.Cleave
                 : Has(@"\bprecise\b") ? OpportunityBonusKind.Precise
