@@ -52,7 +52,11 @@ namespace WoundBoundGame
                     return new RadialItem(label, null, hint + "\nThen choose which way to drive them.")
                     {
                         Children = () => ShiftDirections(caster, target)
-                            .Select(d => new RadialItem(d.Label, null, d.Hint) { Pick = () => Cast(cast with { Direction = d.Step }) })
+                            .Select(d => new RadialItem(d.Label, null, d.Hint)
+                            {
+                                Pick = () => Cast(cast with { Direction = d.Step }),
+                                Arrow = new Godot.Vector2(d.Step.X, d.Step.Y),
+                            })
                             .ToList(),
                     };
                 }
@@ -110,17 +114,14 @@ namespace WoundBoundGame
         }
 
         /// <summary>
-        /// Which ways a Shift can drive <paramref name="target"/>: straight away from the caster first —
-        /// what it does when nobody says otherwise — then each of the eight, as far as its Tier carries.
+        /// Which ways a Shift can drive <paramref name="target"/>, as far as its Tier carries them —
+        /// straight away from the caster the usual one, a step that is (1, 0) on the caster's own square.
         /// </summary>
-        private static IEnumerable<(string Label, string Hint, (int X, int Y)? Step)> ShiftDirections(Combatant caster, Combatant target)
+        private static IEnumerable<(string Label, string Hint, (int X, int Y) Step)> ShiftDirections(Combatant caster, Combatant target)
         {
-            const string hint = "As far as the spell's Tier carries them, in a straight line. Something solid in the way stops them short.";
-            yield return ("Away from you", hint, null);
-            foreach (var (name, x, y) in Compass)
-            {
-                yield return (name, hint, (x, y));
-            }
+            var away = (System.Math.Sign(target.Position.X - caster.Position.X), System.Math.Sign(target.Position.Y - caster.Position.Y));
+            return EightWays(away == (0, 0) ? (1, 0) : away, "away from you",
+                "As far as the spell's Tier carries them, in a straight line. Something solid in the way stops them short.");
         }
 
         /// <summary>
@@ -131,7 +132,7 @@ namespace WoundBoundGame
         {
             var orders = new List<RadialItem>
             {
-                new("Kneel", null, "\"Drop your weapon and kneel\": no action and no move for as long as it holds.") { Pick = () => Cast(cast with { Directed = null }) },
+                new("Kneel", null, "\"Drop your weapon and kneel\": no action and no move for as long as it holds.") { Pick = () => Cast(cast with { Directed = null }), Icon = "kneel" },
             };
 
             orders.AddRange(encounter.Combatants
@@ -166,11 +167,12 @@ namespace WoundBoundGame
             var button = controlButtons[action];
             if (encounter.Active is not { } actor || button.Disabled)
             {
-                return Mirror(button, why: "No foe beside you it would work on.");
+                return Mirror(button, why: "No foe beside you it would work on.") with { Icon = action.ToString().ToLowerInvariant() };
             }
 
             return new RadialItem(action.ToString(), null, button.TooltipText.Replace(" Then click the foe.", " Then choose who."))
             {
+                Icon = action.ToString().ToLowerInvariant(),
                 Children = () => encounter.Fighting(actor.Side == Side.Party ? Side.Adversaries : Side.Party)
                     .Where(foe => Encounter.ControlRefusal(actor, action, foe) is null)
                     .OrderBy(foe => actor.DistanceTo(foe))
@@ -188,17 +190,20 @@ namespace WoundBoundGame
             };
         }
 
+        private static string AidIcon(CombatAction action) => action == CombatAction.Shield ? "shield-ally" : action.ToString().ToLowerInvariant();
+
         /// <summary>Help, Harry, Heal, Meditate, Pray or Shield an ally: a ring of who it could be for.</summary>
         private RadialItem AidItem(CombatAction action)
         {
             var button = aidButtons[action];
             if (encounter.Active is not { } actor || button.Disabled)
             {
-                return Mirror(button, button.Text, "Nobody you could do it for is beside you.");
+                return Mirror(button, button.Text, "Nobody you could do it for is beside you.") with { Icon = AidIcon(action) };
             }
 
             return new RadialItem(button.Text, null, button.TooltipText.Replace(" Then click who it's for.", " Then choose who."))
             {
+                Icon = AidIcon(action),
                 Children = () => encounter.Combatants
                     .Where(c => c.OccupiesSquare && ArmedRefusal(actor, action, c) is null)
                     .OrderBy(c => c != actor)

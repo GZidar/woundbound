@@ -120,6 +120,7 @@ namespace WoundBoundGame
                 new($"Strike ({acting.Attack.Name})", noAction, "Choose who to strike: everyone your weapon can reach from here, allies included.")
                 {
                     Children = noAction is null ? () => Targets(acting, null) : null,
+                    Icon = "strike",
                 },
             };
 
@@ -128,6 +129,7 @@ namespace WoundBoundGame
                 .Select(m => new RadialItem(m.Key.ToString(), noAction, m.Value.TooltipText.Replace(" Then click the foe.", " Then choose who."))
                 {
                     Children = noAction is null ? () => Targets(acting, m.Key) : null,
+                    Icon = m.Key.ToString().ToLowerInvariant(),
                 }));
             if (sacrificeBox.Visible)
             {
@@ -185,7 +187,11 @@ namespace WoundBoundGame
                     WeaponManoeuvre.Hook => new RadialItem(label, null, hint + "\nThen choose which way to haul them.")
                     {
                         Children = () => HookDirections(attacker, target)
-                            .Select(d => new RadialItem(d.Label, null, d.Hint) { Pick = () => Strike(target, new Manoeuvre(WeaponManoeuvre.Hook, Direction: d.Step)) })
+                            .Select(d => new RadialItem(d.Label, null, d.Hint)
+                            {
+                                Pick = () => Strike(target, new Manoeuvre(WeaponManoeuvre.Hook, Direction: d.Step)),
+                                Arrow = new Godot.Vector2(d.Step.X, d.Step.Y),
+                            })
                             .ToList(),
                     },
                     { } other => new RadialItem(label, null, hint) { Pick = () => Strike(target, new Manoeuvre(other)) },
@@ -216,20 +222,25 @@ namespace WoundBoundGame
         ];
 
         /// <summary>
-        /// Which ways a Hook can haul <paramref name="target"/>: towards the attacker first — what it
-        /// does when nobody says otherwise — then each of the eight. A wall or a body stops them short
-        /// (Core Rules §9, "Forced Movement").
+        /// The eight ways, the one a move takes when nobody says otherwise named as such: towards the
+        /// attacker for a Hook, straight away from the caster for a Shift — each of which is one of
+        /// the eight steps, as the Encounter reckons it.
+        /// </summary>
+        private static IEnumerable<(string Label, string Hint, (int X, int Y) Step)> EightWays((int X, int Y) usual, string usualName, string hint) =>
+            Compass.Select(c => (c.X, c.Y) == usual
+                ? ($"{c.Name} — {usualName}", hint + $"\n{usualName[0].ToString().ToUpperInvariant()}{usualName[1..]}: the way it goes if you don't choose.", (c.X, c.Y))
+                : (c.Name, hint, (c.X, c.Y)));
+
+        /// <summary>
+        /// Which ways a Hook can haul <paramref name="target"/>, towards the attacker the usual one. A
+        /// wall or a body stops them short (Core Rules §9, "Forced Movement").
         /// </summary>
         private static IEnumerable<(string Label, string Hint, (int X, int Y) Step)> HookDirections(Combatant attacker, Combatant target)
         {
             var towards = (System.Math.Sign(attacker.Position.X - target.Position.X), System.Math.Sign(attacker.Position.Y - target.Position.Y));
             var squares = System.Math.Max(0, attacker.Reach - 1);
             var reach = $"Up to {squares} square{(squares == 1 ? string.Empty : "s")} — your Reach less one. Something solid in the way stops them short.";
-            yield return ("Towards you", reach, towards);
-            foreach (var (name, x, y) in Compass)
-            {
-                yield return (name, reach, (x, y));
-            }
+            return EightWays(towards, "towards you", reach);
         }
 
         private List<RadialItem> HandsOnItems() =>
@@ -249,6 +260,7 @@ namespace WoundBoundGame
                 items.Add(new RadialItem("How to pay", null, "Bleeding for Power, Overclock, Backlash: on or off for the casts that follow.")
                 {
                     Children = () => options.Select(Toggle).ToList(),
+                    Icon = "pay",
                 });
             }
 
@@ -314,6 +326,8 @@ namespace WoundBoundGame
                 var last = index == steps.Count - 1;
                 return labels.Select((label, choice) => new RadialItem(label)
                 {
+                    // Fear, Confusion and Compulsion have icons; Thresholds, Shapes and Fuel stay as words.
+                    Icon = picker == effectPicker ? label.ToLowerInvariant() : null,
                     Pick = last && !aimed
                         ? () =>
                         {
@@ -364,19 +378,55 @@ namespace WoundBoundGame
             new(label, children.Any(c => c.Why is null || c.IsBranch) ? null : "Nothing here can be done right now.", hint)
             {
                 Children = () => children,
+                Icon = label.ToLowerInvariant(),
             };
+
+        /// <summary>The icon for one of the HUD's buttons (game/assets/icons), or null to show it as words.</summary>
+        private string? IconOf(Button button)
+        {
+            var named = new (Button Button, string Icon)[]
+            {
+                (raiseShieldButton, "raise-shield"), (swapButton, "swap"), (lightButton, "light"), (dropLightButton, "drop-light"),
+                (takeUpButton, "take-up"), (standUpButton, "stand-up"), (breakFreeButton, "break-free"), (regainFootingButton, "regain-footing"),
+                (extraActionButton, "extra-action"), (endTurnButton, "end-turn"), (dragButton, "drag"), (letGoButton, "let-go"),
+            };
+
+            if (named.FirstOrDefault(n => n.Button == button).Icon is { } icon)
+            {
+                return icon;
+            }
+
+            foreach (var (action, stand) in standGroundButtons)
+            {
+                if (stand == button)
+                {
+                    return action.ToString().ToLowerInvariant();
+                }
+            }
+
+            foreach (var (exploit, held) in exploitButtons)
+            {
+                if (held == button)
+                {
+                    return exploit.ToString().ToLowerInvariant();
+                }
+            }
+
+            return null;
+        }
 
         /// <summary>
         /// An item standing for a HUD button: its label, whether it's enabled, and its tooltip. A
         /// toggle button arms its action (it isn't un-armed by choosing it again from the menu).
         /// </summary>
         /// <param name="why">The reason to show when it's disabled, where the button's tooltip describes the action rather than the refusal.</param>
-        private static RadialItem Mirror(Button button, string? label = null, string? why = null, string? hint = null)
+        private RadialItem Mirror(Button button, string? label = null, string? why = null, string? hint = null)
         {
             var tip = string.IsNullOrWhiteSpace(button.TooltipText) ? null : button.TooltipText;
             var refusal = button.Disabled ? why ?? tip ?? "Not now." : null;
             return new RadialItem(label ?? button.Text, refusal, hint ?? (refusal == tip ? null : tip))
             {
+                Icon = IconOf(button),
                 Pick = () =>
                 {
                     if (!(button.ToggleMode && button.ButtonPressed))
@@ -388,9 +438,10 @@ namespace WoundBoundGame
         }
 
         /// <summary>A casting or attack option that stays on or off: flipped from the ring, which stays open.</summary>
-        private static RadialItem Toggle(CheckBox box) =>
+        private RadialItem Toggle(CheckBox box) =>
             new(box.Text, box.Disabled ? "Not available this round." : null, box.TooltipText)
             {
+                Icon = box == sacrificeBox ? "sacrifice" : null,
                 Pick = () => box.ButtonPressed = !box.ButtonPressed,
                 IsOn = () => box.ButtonPressed,
             };
