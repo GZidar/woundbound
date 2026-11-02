@@ -1428,6 +1428,7 @@ namespace WoundBound.Game.Combat
                 combatant.HasActedThisRound = false;
                 combatant.TurnsTakenThisRound = 0;
                 combatant.AttacksThisRound = 0;
+                combatant.HasTakenBonusAttackThisRound = false;
                 combatant.HasOverclockedThisRound = false;
                 combatant.HasSacrificedThisRound = false;
                 combatant.HasShelteredThisRound = false;
@@ -1770,9 +1771,12 @@ namespace WoundBound.Game.Combat
             actor.ActionsRemaining = 1;
             actor.OffHandOwed = false;
 
-            // The Opportunity bonus goes to "an adversary yet to act this round" (Core Rules §9).
+            // The Opportunity bonus goes to "an adversary yet to act this round" (Core Rules §9). A Solo
+            // whose bonus is an extra attack — the Ashen Warden's — takes it on whichever of its own
+            // turns comes after its one attack (GM Reference §9: "for it the extra attack is the bonus").
             var turn = new GmTurn(actor, isExtraTurn: !allowOpportunityBonus,
-                bonusAvailable: allowOpportunityBonus && !actor.HasActedThisRound && GmOpportunities > 0);
+                bonusAvailable: allowOpportunityBonus && GmOpportunities > 0
+                                && (!actor.HasActedThisRound || (actor.IsSolo && actor.OpportunityBonus.Kind == OpportunityBonusKind.ExtraAttack && !actor.HasTakenBonusAttackThisRound)));
 
             OfferSustain(actor, () => TakeControlledTurn(actor, () => TakeStep(turn, done), () =>
             {
@@ -1855,12 +1859,13 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain had {actor.Name} attack {attack.Target.Name}, which it can't do now.");
                     }
 
-                    if (attack.WithAdvantage && !turn.BonusAvailable)
+                    if (attack.WithBonus && (!turn.BonusAvailable || BonusAttackRefusal(actor, attack.Manoeuvre) is not null))
                     {
-                        throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s bonus, which this turn can't take.");
+                        throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s bonus, which this turn can't take: "
+                                                            + (BonusAttackRefusal(actor, attack.Manoeuvre) ?? "no Opportunity bonus is open to it now."));
                     }
 
-                    if (attack.Manoeuvre is { } gmManoeuvre && ManoeuvreRefusal(actor, attack.Target, gmManoeuvre) is { } noManoeuvre)
+                    if (attack.Manoeuvre is { } gmManoeuvre && ManoeuvreRefusal(actor, attack.Target, gmManoeuvre, byOpportunity: attack.WithBonus) is { } noManoeuvre)
                     {
                         throw new InvalidOperationException($"The GM brain had {actor.Name} {gmManoeuvre.Kind} {attack.Target.Name}: {noManoeuvre}");
                     }
@@ -1870,18 +1875,18 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain had {actor.Name} use {attack.With.Name} two rounds running; it's every other round.");
                     }
 
-                    CountAttack(actor, turn);
+                    CountAttack(actor, turn, attack.WithBonus);
                     if (attack.With is { AreaSquares: not null })
                     {
                         actor.LastAreaAttackRound = Round;
                     }
 
                     turn.HasAttacked = true;
-                    turn.BonusAvailable &= !attack.WithAdvantage;
+                    turn.BonusAvailable &= !attack.WithBonus;
                     Declare(actor, $"{(attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack).Name} at {attack.Target.Name}"
                                    + (attack.Manoeuvre is { } declaredManoeuvre ? $", to {declaredManoeuvre.Kind}" : string.Empty), attack.Target,
                         () => CanAttack(actor, attack.Target) && (attack.With is not { } with || PlanAttackWith(actor, with, actor.Position, attack.Target).CanAttack),
-                        () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage,
+                        () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithBonus,
                             _ => FollowThrough(actor, attack.Target, attack.With, () => TakeStep(turn, done)), attack.With, manoeuvre: attack.Manoeuvre),
                         () => TakeStep(turn, done));
                     return;
@@ -1892,16 +1897,63 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain had {actor.Name} cast {cast.Spell.Spell.Name}: {PlanCast(actor, cast.Spell).Refusal}");
                     }
 
+                    if (cast.WithBonus && (!turn.BonusAvailable || FreeBuffRefusal(actor, cast.Spell) is not null))
+                    {
+                        throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s free Buff: "
+                                                            + (FreeBuffRefusal(actor, cast.Spell) ?? "this turn can't take its bonus."));
+                    }
+
                     if (cast.Spell.Spell.SpellType == SpellType.Harm)
                     {
                         CountAttack(actor, turn);
                     }
 
                     turn.HasAttacked = true;
+                    turn.BonusAvailable &= !cast.WithBonus;
                     Declare(actor, $"{cast.Spell.Spell.Name} at " + (cast.Spell.Target?.Name ?? "the ground"), cast.Spell.Target,
                         () => PlanCast(actor, cast.Spell).CanCast,
-                        () => Cast(actor, cast.Spell, PlanCast(actor, cast.Spell), () => TakeStep(turn, done)),
+                        () =>
+                        {
+                            if (cast.WithBonus)
+                            {
+                                Write($"The GM spends {SpendOpportunity()} Opportunity on {actor.Name}'s bonus: {actor.OpportunityBonus.Text}.");
+                            }
+
+                            Cast(actor, cast.Spell, PlanCast(actor, cast.Spell), () => TakeStep(turn, done), free: cast.WithBonus);
+                        },
                         () => TakeStep(turn, done));
+                    return;
+
+                case GmStep.BonusMove:
+                    if (!turn.BonusAvailable || actor.OpportunityBonus.Kind != OpportunityBonusKind.ExtraMove || actor.HasMove || !CanMoveItself(actor))
+                    {
+                        throw new InvalidOperationException($"The GM brain spent an Opportunity on another move for {actor.Name}, which it can't take now.");
+                    }
+
+                    turn.BonusAvailable = false;
+                    actor.HasMove = true;
+                    Write($"The GM spends {SpendOpportunity()} Opportunity on {actor.Name}'s bonus: {actor.OpportunityBonus.Text} — another move.");
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.BoostThreshold boostStep:
+                    if (!turn.BonusAvailable || actor.OpportunityBonus.Kind != OpportunityBonusKind.ThresholdBoost
+                        || (boostStep.Threshold == ThresholdType.Resolve && actor.ResolveThreshold is null)
+                        || (boostStep.Threshold == ThresholdType.Fortitude && actor.FortitudeThreshold is null))
+                    {
+                        throw new InvalidOperationException($"The GM brain spent an Opportunity boosting {actor.Name}'s {boostStep.Threshold}, which it can't do now.");
+                    }
+
+                    turn.BonusAvailable = false;
+                    actor.ThresholdModifiers = ThresholdModifierCalculator.Add(actor.ThresholdModifiers, new ThresholdModifier
+                    {
+                        Threshold = boostStep.Threshold,
+                        Amount = OpportunityThresholdBoost,
+                        Source = "Opportunity bonus",
+                        Duration = ThresholdModifierDuration.UntilMyTurn,
+                    });
+                    Write($"The GM spends {SpendOpportunity()} Opportunity on {actor.Name}'s bonus: +{OpportunityThresholdBoost} {boostStep.Threshold} until its next turn.");
+                    TakeStep(turn, done);
                     return;
 
                 case GmStep.Control control:
@@ -1910,16 +1962,16 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain had {actor.Name} {control.Action} {control.Target.Name}: {refused}");
                     }
 
-                    if (control.WithAdvantage && !turn.BonusAvailable)
+                    if (control.WithBonus && (!turn.BonusAvailable || !actor.OpportunityBonus.RidesOnControl))
                     {
                         throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s bonus, which this turn can't take.");
                     }
 
                     turn.HasAttacked = true;
-                    turn.BonusAvailable &= !control.WithAdvantage;
+                    turn.BonusAvailable &= !control.WithBonus;
                     Declare(actor, $"{control.Action} {control.Target.Name}", control.Target,
                         () => ControlRefusal(actor, control.Action, control.Target) is null,
-                        () => ResolveControl(actor, control.Action, control.Target, control.WithAdvantage, () => TakeStep(turn, done)),
+                        () => ResolveControl(actor, control.Action, control.Target, control.WithBonus, () => TakeStep(turn, done)),
                         () => TakeStep(turn, done));
                     return;
 
@@ -2040,15 +2092,15 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain had {actor.Name} throw at {toss.Target.Name}: {noThrow}");
                     }
 
-                    if (toss.WithAdvantage && !turn.BonusAvailable)
+                    if (toss.WithBonus && (!turn.BonusAvailable || BonusAttackRefusal(actor, manoeuvre: null) is not null))
                     {
                         throw new InvalidOperationException($"The GM brain spent an Opportunity on {actor.Name}'s bonus, which this turn can't take.");
                     }
 
-                    CountAttack(actor, turn);
+                    CountAttack(actor, turn, toss.WithBonus);
                     turn.HasAttacked = true;
-                    turn.BonusAvailable &= !toss.WithAdvantage;
-                    Throw(actor, toss.Target, sacrifice: false, toss.WithAdvantage, _ => TakeStep(turn, done));
+                    turn.BonusAvailable &= !toss.WithBonus;
+                    Throw(actor, toss.Target, sacrifice: false, toss.WithBonus, _ => TakeStep(turn, done));
                     return;
 
                 case GmStep.DrawWeapon draw:
@@ -2537,9 +2589,45 @@ namespace WoundBound.Game.Combat
                 ? null
                 : $"{actor.Name} has made its attack this round — Stamina buys it anything but a second.";
 
+        /// <summary>The +2 a Threshold-boost Opportunity bonus gives, as a bracing action does.</summary>
+        public const int OpportunityThresholdBoost = 2;
+
+        /// <summary>The Solo whose attack under way is the extra one its Opportunity bonus bought.</summary>
+        private Combatant? extraAttackBonusFor;
+
+        /// <summary>Whether <paramref name="actor"/>'s Opportunity bonus would now be an extra attack: a Solo's, once a round, after its first.</summary>
+        public static bool BonusIsExtraAttack(Combatant actor) =>
+            actor.OpportunityBonus.Kind == OpportunityBonusKind.ExtraAttack && actor.IsSolo && !actor.HasTakenBonusAttackThisRound && actor.AttacksThisRound > 0;
+
+        /// <summary>
+        /// Why <paramref name="actor"/>'s Opportunity bonus can't ride on a blow now, or null if it can
+        /// (GM Reference §9): a Cleave bonus needs the Cleave declared; a free Buff, an extra move or a
+        /// Threshold boost isn't spent on a blow at all.
+        /// </summary>
+        public static string? BonusAttackRefusal(Combatant actor, Manoeuvre? manoeuvre) =>
+            !actor.OpportunityBonus.RidesOnAttack ? $"{actor.Name}'s Opportunity bonus ({actor.OpportunityBonus.Text}) isn't spent on a blow."
+            : actor.OpportunityBonus.Kind == OpportunityBonusKind.Cleave && manoeuvre?.Kind != WeaponManoeuvre.Cleave ? $"{actor.Name}'s Cleave bonus needs a Cleave declared."
+            : null;
+
+        /// <summary>Why <paramref name="actor"/> can't spend its free-Buff bonus on <paramref name="cast"/>, or null if it can: a Buff, on an ally other than itself.</summary>
+        public static string? FreeBuffRefusal(Combatant actor, SpellCast cast) =>
+            actor.OpportunityBonus.Kind != OpportunityBonusKind.FreeBuff ? $"{actor.Name}'s Opportunity bonus isn't a free Buff."
+            : cast.Spell.SpellType != SpellType.Buff ? $"{cast.Spell.Name} isn't a Buff."
+            : cast.Target is not { } ally || ally == actor || ally.Side != actor.Side ? "The free Buff goes on an ally."
+            : null;
+
         /// <summary>Counts an adversary's attack — once a round, outside an extra turn — and pays the Stamina for a Solo's second.</summary>
-        private void CountAttack(Combatant actor, GmTurn turn)
+        private void CountAttack(Combatant actor, GmTurn turn, bool withBonus = false)
         {
+            if (withBonus && actor.IsSolo && actor.AttacksThisRound > 0 && BonusIsExtraAttack(actor))
+            {
+                // The Solo's second attack this round, bought with the Opportunity, not Stamina (GM Reference §9).
+                actor.HasTakenBonusAttackThisRound = true;
+                extraAttackBonusFor = actor;
+                actor.AttacksThisRound++;
+                return;
+            }
+
             if (!actor.IsSolo)
             {
                 if (OnceARoundRefusal(actor, turn.IsExtraTurn) is { } once)
@@ -2668,7 +2756,17 @@ namespace WoundBound.Game.Combat
                 Write($"{attacker.Name} spends what they were holding: {(patient ? "Patient — Advantage" : string.Empty)}{(patient && precise ? "; " : string.Empty)}{(precise ? "Precise — Direct, and Vitality on the damage" : string.Empty)}.");
             }
 
-            if (manoeuvre is { } declared)
+            var bonus = opportunityBonus ? attacker.OpportunityBonus.Kind : (OpportunityBonusKind?)null;
+            var bonusAttack = bonus == OpportunityBonusKind.ExtraAttack && extraAttackBonusFor == attacker;
+            extraAttackBonusFor = opportunityBonus ? null : extraAttackBonusFor;
+            if (manoeuvre is { Kind: WeaponManoeuvre.Cleave } cleaved && bonus == OpportunityBonusKind.Cleave)
+            {
+                // The Opportunity pays for the Cleave in place of the Stamina (GM Reference §9).
+                Write($"{attacker.Name} declares Cleave, sweeping on into {cleaved.Second!.Name} (paid by the Opportunity).");
+                var finishedCleave = then;
+                then = outcome => ApplyManoeuvre(attacker, target, cleaved, outcome, () => finishedCleave(outcome));
+            }
+            else if (manoeuvre is { } declared)
             {
                 PayTacticalSpend(attacker, CombatActionCatalog.ReactionStaminaCost);
                 Write($"{attacker.Name} declares {declared.Kind}" + (declared.Second is { } second ? $", sweeping on into {second.Name}" : string.Empty) + $" (1 Stamina, {attacker.Stamina} left).");
@@ -2690,9 +2788,19 @@ namespace WoundBound.Game.Combat
                 Write($"{attacker.Name} Sacrifices 1 Body for Advantage ({attacker.Body}/{attacker.BodyMax} Body).");
             }
 
+            var bonusAdvantage = bonus == OpportunityBonusKind.Advantage || (bonus == OpportunityBonusKind.ExtraAttack && !bonusAttack);
             if (opportunityBonus)
             {
-                Write($"The GM spends {SpendOpportunity()} Opportunity on {attacker.Name}'s bonus: Advantage.");
+                var what = bonusAttack ? "an extra attack this round"
+                    : bonusAdvantage ? "Advantage"
+                    : bonus switch
+                    {
+                        OpportunityBonusKind.Direct => "Direct damage — armour takes none of it",
+                        OpportunityBonusKind.Precise => $"Precise — Direct, and +{AdversarySkillCalculator.Baseline(attacker.Tier)} damage",
+                        OpportunityBonusKind.Cleave => "a Cleave without the Stamina",
+                        _ => attacker.OpportunityBonus.Text,
+                    };
+                Write($"The GM spends {SpendOpportunity()} Opportunity on {attacker.Name}'s bonus: {what}.");
             }
 
             // Standing your ground costs the blow: Disadvantage on every attack roll while it lasts,
@@ -2711,7 +2819,7 @@ namespace WoundBound.Game.Combat
                 Write($"{attacker.Name} has Pack Tactics, with {pack.Name} within reach of {target.Name} too: Advantage.");
             }
 
-            var advantage = opportunityBonus || helped || target.IsDefenceless || sacrifice || patient || pack is not null;
+            var advantage = bonusAdvantage || helped || target.IsDefenceless || sacrifice || patient || pack is not null;
             var disadvantage = AttacksAtDisadvantage(attacker) || harried;
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
@@ -3474,6 +3582,12 @@ namespace WoundBound.Game.Combat
             var precise = preciseOn == attacker;
             preciseOn = null;
 
+            // A Direct or Precise Opportunity bonus (GM Reference §9): armour takes none of it, and a
+            // Precise one adds the creature's Tier baseline, as a statblock has no Vitality to add.
+            var bonusKind = usedOpportunity ? attacker.OpportunityBonus.Kind : (OpportunityBonusKind?)null;
+            var bonusDirect = bonusKind is OpportunityBonusKind.Direct or OpportunityBonusKind.Precise;
+            var bonusDamage = bonusKind == OpportunityBonusKind.Precise ? AdversarySkillCalculator.Baseline(attacker.Tier) : 0;
+
             int rolledDamage = 0, absorbed = 0, dealt = 0;
             var attackerWounded = false;
 
@@ -3503,7 +3617,8 @@ namespace WoundBound.Game.Combat
             {
                 var swung = plan.Profile ?? attacker.Attack;
                 rolledDamage = RollDamage(swung, plan, roll.IsCritical)
-                               + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
+                               + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0)
+                               + bonusDamage;
                 if (swung.Track != WoundType.Body)
                 {
                     // Mind or Soul: armour has no part in it, and Backlash and Shelter have their say in Wound.
@@ -3515,7 +3630,7 @@ namespace WoundBound.Game.Combat
                 }
 
                 (rolledDamage, absorbed, dealt) = ByEdge(swung.Edge, target, rolledDamage,
-                    InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise || swung.IsDirect));
+                    InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise || bonusDirect || swung.IsDirect));
                 if (swung.Edge == WeaponEdge.Breaking && target.IsVulnerableToBreaking && !target.IsSwarm)
                 {
                     Write($"{target.Name} is Vulnerable to Breaking: +2 Body from the {swung.Name}.");
@@ -3819,7 +3934,7 @@ namespace WoundBound.Game.Combat
             var dropped = RollCalculator.DroppedDice(roll);
             var advantage = roll.AppliedAdvantage ? $" (Advantage, dropped {string.Join(", ", dropped)})"
                 : roll.AppliedDisadvantage ? $" (Disadvantage for {DisadvantageReason(outcome.Attacker)}, dropped {string.Join(", ", dropped)})"
-                : outcome.UsedOpportunity ? " (Advantage and Disadvantage cancel)"
+                : outcome.UsedOpportunity && outcome.Attacker.OpportunityBonus.Kind == OpportunityBonusKind.Advantage ? " (Advantage and Disadvantage cancel)"
                 : string.Empty;
             var sign = roll.Modifier >= 0 ? "+" : "−";
             var range = outcome.Plan.RangeDodgeModifier > 0 ? $" (+{outcome.Plan.RangeDodgeModifier} for range)" : string.Empty;

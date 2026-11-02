@@ -493,6 +493,12 @@ namespace WoundBound.Game.Combat
         /// <summary>Attacks made on its turns this round — a Solo's are limited to one, unless it pays.</summary>
         public int AttacksThisRound { get; internal set; }
 
+        /// <summary>What a GM Opportunity buys this creature on its next action, in place of an extra turn (GM Reference §9, "On Opportunity").</summary>
+        public OpportunityBonus OpportunityBonus { get; init; } = OpportunityBonus.Default;
+
+        /// <summary>Has had the extra attack its Opportunity bonus buys this round — a Solo's, once a round.</summary>
+        public bool HasTakenBonusAttackThisRound { get; internal set; }
+
         /// <summary>The round it last made an area attack rationed to every other round.</summary>
         public int? LastAreaAttackRound { get; internal set; }
 

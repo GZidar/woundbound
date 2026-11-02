@@ -32,7 +32,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// </summary>
     public sealed record Option(OptionKind Kind, double Score, string Why,
         GridPosition? Square = null, Combatant? Target = null, AttackProfile? With = null,
-        CombatAction? Action = null, ControlAction? Control = null, bool WithAdvantage = false, SpellCast? Cast = null,
+        CombatAction? Action = null, ControlAction? Control = null, bool WithBonus = false, SpellCast? Cast = null,
         Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null, OptionKind? Then = null, Illusion? Illusion = null,
         Rules.Models.WeaponDefinition? Weapon = null, GroundWeapon? Lying = null);
 
@@ -69,7 +69,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public List<Option> Options(Combatant actor, bool hasMove, int actions, bool real,
             bool bonusAvailable = false, bool bankFull = false, IReadOnlyCollection<Combatant>? stillToAct = null, Interruption? interrupting = null)
         {
-            var options = SoloAttacks(actor, OptionsHere(actor, hasMove, actions, real, bonusAvailable, bankFull, stillToAct), real);
+            var options = SoloAttacks(actor, OptionsHere(actor, hasMove, actions, real, bonusAvailable, bankFull, stillToAct), real, bonusAvailable, bankFull);
             return interrupting is null ? options : options.Select(o => o with { Score = o.Score + Spared(actor, o, interrupting) }).ToList();
         }
 
@@ -263,7 +263,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// A Solo's turns carry one attack a round between them (GM Reference §3): once it has made
         /// it, a blow or a Harm costs a Stamina and its one tactical spend — or can't be had.
         /// </summary>
-        private static List<Option> SoloAttacks(Combatant actor, List<Option> options, bool real)
+        private static List<Option> SoloAttacks(Combatant actor, List<Option> options, bool real, bool bonusAvailable = false, bool bankFull = false)
         {
             if (!actor.IsSolo || actor.AttacksThisRound == 0)
             {
@@ -276,6 +276,20 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             // The last Stamina is never spent on it: a creature starting a turn on 0 falls unconscious.
             var refused = Encounter.SoloAttackRefusal(actor) is not null || (actor.Side == Side.Adversaries && actor.Stamina < 2);
+
+            // A Solo whose Opportunity bonus is an extra attack (the Ashen Warden's) buys its second
+            // with the Opportunity instead, where that is cheaper than the Stamina, or the only way.
+            if (bonusAvailable && Encounter.BonusIsExtraAttack(actor))
+            {
+                var price = bankFull ? 0 : BonusPrice;
+                if (refused || price <= Assessor.SpendPrice(actor, 0) + 0.3)
+                {
+                    return options
+                        .Select(o => Attacks(o) ? o with { Score = o.Score - price, WithBonus = o.Kind == OptionKind.Attack } : o)
+                        .ToList();
+                }
+            }
+
             return options
                 .Where(o => !(Attacks(o) && refused))
                 .Select(o => Attacks(o) ? o with { Score = o.Score - Assessor.SpendPrice(actor, o.Score) - 0.3 } : o)
@@ -318,6 +332,26 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
         }
 
+        /// <summary>
+        /// What an Opportunity must buy to be spent on a bonus rather than kept for an extra turn: an
+        /// extra turn is worth about a blow, a bonus on a turn being taken anyway only what it adds
+        /// (GM Reference §9, "On Opportunity"). Nothing, when the bank is full and it would be lost.
+        /// </summary>
+        public const double BonusPrice = 1.0;
+
+        /// <summary>
+        /// The best blow <paramref name="actor"/> could land on <paramref name="target"/> with its
+        /// Opportunity bonus spent on it (GM Reference §9): Advantage, Direct damage, or Precise.
+        /// </summary>
+        private double BonusBlow(Combatant actor, GridPosition at, Combatant target) => actor.OpportunityBonus.Kind switch
+        {
+            OpportunityBonusKind.Direct => assess.BestAttack(actor, at, target, precise: true).Worth,
+            OpportunityBonusKind.Precise => assess.BestAttack(actor, at, target, precise: true,
+                extraDamage: Rules.Calculation.AdversarySkillCalculator.Baseline(actor.Tier)).Worth,
+            OpportunityBonusKind.Advantage or OpportunityBonusKind.ExtraAttack => assess.BestAttack(actor, at, target, advantage: true).Worth,
+            _ => 0,
+        };
+
         private IEnumerable<Option> Actions(Combatant actor, GridPosition at, bool checkRules, bool bonusAvailable, bool bankFull,
             IReadOnlyCollection<Combatant>? stillToAct, double care)
         {
@@ -351,17 +385,32 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
 
                 var advantage = false;
-                if (bonusAvailable)
+                if (bonusAvailable && !Encounter.BonusIsExtraAttack(actor) && Encounter.BonusAttackRefusal(actor, manoeuvre: null) is null)
                 {
-                    var boosted = assess.BestAttack(actor, at, target, advantage: true).Worth;
-                    advantage = bankFull || boosted - worth >= 1.0;
+                    var boosted = BonusBlow(actor, at, target);
+                    advantage = boosted > worth && (bankFull || boosted - worth >= BonusPrice);
                     worth = advantage ? boosted : worth;
                 }
 
                 worth += with.IsRanged
                     ? actor.Role == AdversaryRole.Skirmisher ? 0.3 : 0
                     : actor.Role == AdversaryRole.Brute ? 0.2 : 0;
-                yield return new Option(OptionKind.Attack, worth, $"{with.Name} at {target.Name}", Target: target, With: with, WithAdvantage: advantage);
+                yield return new Option(OptionKind.Attack, worth, $"{with.Name} at {target.Name}", Target: target, With: with, WithBonus: advantage);
+
+                // A Cleave the Opportunity pays for (GM Reference §9): two characters within reach of the same blade.
+                if (bonusAvailable && actor.OpportunityBonus.Kind == OpportunityBonusKind.Cleave && !with.IsRanged && !target.IsDefenceless)
+                {
+                    var second = enemies.Where(e => e != target && !e.IsOutOfFight && BattleView.CanReachFrom(actor, at, e))
+                        .Select(e => (Who: e, Worth: assess.BestAttack(actor, at, e).Worth))
+                        .OrderByDescending(x => x.Worth).FirstOrDefault();
+                    var cleave = second.Who is null ? null : new Manoeuvre(WeaponManoeuvre.Cleave, second.Who);
+                    if (cleave is not null && (!checkRules || BattleView.ManoeuvreRefusal(actor, target, cleave, byOpportunity: true) is null)
+                        && (bankFull || 0.8 * second.Worth >= BonusPrice))
+                    {
+                        yield return new Option(OptionKind.Attack, worth + 0.8 * second.Worth,
+                            $"Cleave through {target.Name} into {second.Who!.Name}, on the Opportunity", Target: target, With: with, Manoeuvre: cleave, WithBonus: true);
+                    }
+                }
 
                 if (!skill.UsesTricks || actor.Stamina < 2 || BattleView.TacticalSpendRefusal(actor) is not null || target.IsDefenceless)
                 {
@@ -517,7 +566,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
-            foreach (var cast in spells.Options(actor, at, checkRules, care, skill.Uses(Trick.SpellTricks), stillToAct))
+            foreach (var cast in spells.Options(actor, at, checkRules, care, skill.Uses(Trick.SpellTricks), stillToAct, bonusAvailable, bankFull))
             {
                 yield return cast;
             }

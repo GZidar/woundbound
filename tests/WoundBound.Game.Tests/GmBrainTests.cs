@@ -103,7 +103,7 @@ public class GmBrainTests
         var gm = new TestBrain
         {
             Step = (view, turn) => view.CanAttack(turn.Actor, view.Characters.Single()) && !turn.HasAttacked
-                ? new GmStep.Attack(view.Characters.Single(), WithAdvantage: true)
+                ? new GmStep.Attack(view.Characters.Single(), WithBonus: true)
                 : null,
         };
         var (encounter, fighter, _) = Fight(gm);

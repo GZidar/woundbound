@@ -119,14 +119,16 @@ namespace WoundBound.Game.Combat
         /// <paramref name="target"/> now, or null if they can (Core Rules §9, "Manoeuvres").
         /// </summary>
         /// <param name="offHand">Made with the off-hand weapon of a Two Weapons loadout.</param>
-        public static string? ManoeuvreRefusal(Combatant attacker, Combatant target, Manoeuvre manoeuvre, bool offHand = false)
+        /// <param name="byOpportunity">A Cleave paid for by a Cleave Opportunity bonus (GM Reference §9): the creature needs no Cleave of its own, and spends no Stamina.</param>
+        public static string? ManoeuvreRefusal(Combatant attacker, Combatant target, Manoeuvre manoeuvre, bool offHand = false, bool byOpportunity = false)
         {
+            var bought = byOpportunity && manoeuvre.Kind == WeaponManoeuvre.Cleave && attacker.OpportunityBonus.Kind == OpportunityBonusKind.Cleave;
             if (attacker.Build is not null && !attacker.IsMartial)
             {
                 return "Only a Martial character can attempt a manoeuvre.";
             }
 
-            if (!ManoeuvresOf(attacker, offHand).Contains(manoeuvre.Kind))
+            if (!bought && !ManoeuvresOf(attacker, offHand).Contains(manoeuvre.Kind))
             {
                 return $"The {(offHand ? attacker.OffHandWeapon : attacker.InHandWeapon)?.Name ?? "weapon in hand"} doesn't permit {manoeuvre.Kind}.";
             }
@@ -162,7 +164,7 @@ namespace WoundBound.Game.Combat
                 return $"{target.Name} has already been Sundered this combat.";
             }
 
-            return TacticalSpendRefusal(attacker);
+            return bought ? null : TacticalSpendRefusal(attacker);
         }
 
         /// <summary>

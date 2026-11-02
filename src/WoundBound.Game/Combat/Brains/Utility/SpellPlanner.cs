@@ -26,8 +26,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         /// <param name="checkRules">Casting from where the caster stands now: the turn's own refusals apply.</param>
         /// <param name="stillToAct">The caster's allies who'll act before the caster does again, where the brain knows (a party choosing its order); null reads it off who has acted this round.</param>
+        /// <param name="bonusAvailable">The turn may spend a GM Opportunity on the caster's bonus — a free Buff, for a creature whose bonus is one.</param>
+        /// <param name="bankFull">The GM's bank is full, so an Opportunity unspent is one wasted.</param>
         public IEnumerable<Option> Options(Combatant actor, GridPosition at, bool checkRules, double care, bool usesTricks,
-            IReadOnlyCollection<Combatant>? stillToAct = null)
+            IReadOnlyCollection<Combatant>? stillToAct = null, bool bonusAvailable = false, bool bankFull = false)
         {
             this.stillToAct = stillToAct;
             if (actor.Spells.Count == 0)
@@ -81,6 +83,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     if (score > 0)
                     {
                         yield return new Option(OptionKind.Cast, score, $"{spell.Name} {Describe(paid.Plan)}", Cast: paid.Cast);
+                    }
+
+                    // The same Buff on an ally for no wound cost, on the Opportunity (GM Reference §9): worth
+                    // it where the wounds it saves are worth more than the extra turn the Opportunity would buy.
+                    if (bonusAvailable && worth(paid.Plan) > 0 && Encounter.FreeBuffRefusal(actor, paid.Cast) is null
+                        && (bankFull || paid.Price >= TurnPlanner.BonusPrice))
+                    {
+                        yield return new Option(OptionKind.Cast, worth(paid.Plan), $"{spell.Name} {Describe(paid.Plan)}, free on the Opportunity",
+                            Cast: paid.Cast, WithBonus: true);
                     }
                 }
             }

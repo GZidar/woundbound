@@ -93,6 +93,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
+            if (BonusStep(view, planner, actor, turn, options) is { } bonusStep)
+            {
+                return bonusStep;
+            }
+
             if (options.Count == 0)
             {
                 return GmStep.End;
@@ -102,15 +107,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
             return choice.Kind switch
             {
                 OptionKind.Move => new GmStep.Move(choice.Square!.Value),
-                OptionKind.Attack => new GmStep.Attack(choice.Target!, choice.WithAdvantage && turn.BonusAvailable, choice.With, choice.Manoeuvre),
+                OptionKind.Attack => new GmStep.Attack(choice.Target!, choice.WithBonus && turn.BonusAvailable, choice.With, choice.Manoeuvre),
                 OptionKind.TakeUpWeapon => new GmStep.TakeUpWeapon(),
                 OptionKind.Mount => new GmStep.Mount(),
-                OptionKind.Throw => new GmStep.Throw(choice.Target!, choice.WithAdvantage && turn.BonusAvailable),
+                OptionKind.Throw => new GmStep.Throw(choice.Target!, choice.WithBonus && turn.BonusAvailable),
                 OptionKind.DrawWeapon => new GmStep.DrawWeapon(choice.Weapon!),
                 OptionKind.PickUpWeapon => new GmStep.PickUpWeapon(choice.Lying!),
                 OptionKind.Exploit => new GmStep.Exploit(choice.Exploit!.Value),
                 OptionKind.RaiseShield => new GmStep.RaiseShield(),
-                OptionKind.Cast => new GmStep.Cast(choice.Cast!),
+                OptionKind.Cast => new GmStep.Cast(choice.Cast!, choice.WithBonus && turn.BonusAvailable),
                 OptionKind.Search => new GmStep.Search(choice.Illusion!),
                 OptionKind.Control => new GmStep.Control(choice.Control!.Value, choice.Target!),
                 OptionKind.Aid => new GmStep.Aid(choice.Action!.Value, choice.Target!),
@@ -121,6 +126,42 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.RegainFooting => new GmStep.RegainFooting(),
                 _ => GmStep.End,
             };
+        }
+
+        /// <summary>
+        /// An Opportunity bonus that isn't spent on a blow or a spell (GM Reference §9): another move,
+        /// where the turn it opens up beats the one without it by more than an extra turn's worth; or
+        /// +2 to the Threshold the coming blows are rolled against, where the blows it turns are worth
+        /// as much — weighed once the creature has nothing better left to do with its turn.
+        /// </summary>
+        private GmStep? BonusStep(BattleView view, TurnPlanner planner, Combatant actor, GmTurn turn, List<Option> options)
+        {
+            if (!turn.BonusAvailable || !Skill.UsesTricks)
+            {
+                return null;
+            }
+
+            var price = view.BankedOpportunities >= view.MaxBankedOpportunities ? 0 : TurnPlanner.BonusPrice;
+            var now = options.Select(o => o.Score).DefaultIfEmpty(0).Max();
+            switch (actor.OpportunityBonus.Kind)
+            {
+                case OpportunityBonusKind.ExtraMove when !actor.HasMove && Encounter.CanMoveItself(actor):
+                {
+                    var moved = planner.Options(actor, hasMove: true, actor.ActionsRemaining, real: false, stillToAct: StillToAct(view, actor))
+                        .Select(o => o.Score).DefaultIfEmpty(0).Max();
+                    return moved - now >= Math.Max(price, 0.05) ? new GmStep.BonusMove() : null;
+                }
+
+                case OpportunityBonusKind.ThresholdBoost when actor.ActionsRemaining == 0 && !actor.HasMove:
+                {
+                    var assess = new Assessor(view);
+                    var turned = assess.Exposure(actor, actor.Position) - assess.Exposure(actor, actor.Position, extraDodge: Encounter.OpportunityThresholdBoost);
+                    return turned >= Math.Max(price, 0.05) ? new GmStep.BoostThreshold(ThresholdType.Dodge) : null;
+                }
+
+                default:
+                    return null;
+            }
         }
 
         /// <summary>Leaves out every blow and Harm, once the adversary has made its one attack this round.</summary>

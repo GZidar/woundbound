@@ -96,7 +96,7 @@ namespace WoundBound.Game.Combat
                 SkillBonusFor = foe.SkillBonusFor, IsMinion = foe.IsMinion, IsUnshakable = foe.IsUnshakable, StaminaEachRound = foe.StaminaEachRound, StaminaMax = foe.StaminaMax, Stamina = foe.Stamina,
                 TacticalSpendsPerRound = foe.TacticalSpendsPerRound,
                 StatblockManoeuvres = foe.StatblockManoeuvres,
-                Kind = foe.Kind, Traits = foe.Traits, IsMindImmune = foe.IsMindImmune,
+                Kind = foe.Kind, Traits = foe.Traits, IsMindImmune = foe.IsMindImmune, OpportunityBonus = foe.OpportunityBonus,
                 Tier = info.Tier,
                 Casting = casting,
                 StatblockFuel = casting.Source == MagicSource.ElementalMagic && !casting.OfItsElement ? casting.Fuel : 0,
@@ -179,6 +179,7 @@ namespace WoundBound.Game.Combat
             Tier = info.Tier,
             StatblockManoeuvres = ManoeuvresIn(info.AttackEffect),
             Kind = info.Name,
+            OpportunityBonus = OpportunityBonus.Parse(info.OpportunityText),
             Traits = (info.Traits ?? []).ToHashSet(),
             IsMindImmune = info.Traits?.Contains(AdversaryTrait.BoundNotAlive) == true || info.Features?.Any(f => f.Name == "Deathless Purpose") == true,
         };

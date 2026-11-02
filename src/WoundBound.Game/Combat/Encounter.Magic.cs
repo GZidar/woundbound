@@ -475,7 +475,8 @@ namespace WoundBound.Game.Combat
             return true;
         }
 
-        private void Cast(Combatant caster, SpellCast cast, CastPlan plan, Action then)
+        /// <param name="free">Paid by a free-Buff Opportunity bonus: no wounds (GM Reference §9).</param>
+        private void Cast(Combatant caster, SpellCast cast, CastPlan plan, Action then, bool free = false)
         {
             var spell = cast.Spell;
             caster.ActionsRemaining--;
@@ -490,7 +491,11 @@ namespace WoundBound.Game.Combat
                 paid.Add("1 Stamina (Overclock)");
             }
 
-            if (plan.WoundsPaid > 0)
+            if (free && plan.WoundsPaid > 0)
+            {
+                paid.Add("no wounds (the Opportunity pays)");
+            }
+            else if (plan.WoundsPaid > 0)
             {
                 var track = plan.Track!.Value;
                 if (track == WoundType.Body)

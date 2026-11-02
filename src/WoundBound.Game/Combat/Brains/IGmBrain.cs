@@ -93,12 +93,14 @@ namespace WoundBound.Game.Combat.Brains
         public sealed record Move(GridPosition Square) : GmStep;
 
         /// <summary>
-        /// Attack <paramref name="Target"/> with the action. <paramref name="WithAdvantage"/> spends
-        /// an Opportunity on the attack's bonus — allowed only when <see cref="GmTurn.BonusAvailable"/>.
+        /// Attack <paramref name="Target"/> with the action. <paramref name="WithBonus"/> spends
+        /// an Opportunity on the creature's Opportunity bonus (Advantage, Direct, Precise, Cleave, or a
+        /// Solo's extra attack) — allowed only when <see cref="GmTurn.BonusAvailable"/>. A Cleave
+        /// bonus rides on a declared Cleave <paramref name="Manoeuvre"/>, which it then pays for.
         /// </summary>
         /// <param name="With">Which attack line; null for whichever does most from where it stands.</param>
         /// <param name="Manoeuvre">A manoeuvre its Attack line gives it, declared with the blow (GM Reference §2).</param>
-        public sealed record Attack(Combatant Target, bool WithAdvantage = false, AttackProfile? With = null, Manoeuvre? Manoeuvre = null) : GmStep;
+        public sealed record Attack(Combatant Target, bool WithBonus = false, AttackProfile? With = null, Manoeuvre? Manoeuvre = null) : GmStep;
 
         /// <summary>
         /// Take the Dodge, Grounded or Resolute action (Core Rules §10, "Standing Your Ground"):
@@ -109,15 +111,24 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>
         /// Grab, Shove or Trip <paramref name="Target"/> with the action (Core Rules §9).
-        /// <paramref name="WithAdvantage"/> spends an Opportunity, as for an attack.
+        /// <paramref name="WithBonus"/> spends an Opportunity, as for an attack.
         /// </summary>
-        public sealed record Control(ControlAction Action, Combatant Target, bool WithAdvantage = false) : GmStep;
+        public sealed record Control(ControlAction Action, Combatant Target, bool WithBonus = false) : GmStep;
 
         /// <summary>Stand up from Prone, for a move.</summary>
         public sealed record StandUp : GmStep;
 
-        /// <summary>Cast a spell with the action (Core Rules §9, "Magic").</summary>
-        public sealed record Cast(SpellCast Spell) : GmStep;
+        /// <summary>
+        /// Cast a spell with the action (Core Rules §9, "Magic"). <paramref name="WithBonus"/> spends an
+        /// Opportunity on a free-Buff bonus: a Buff on an ally, for no wound cost (GM Reference §9).
+        /// </summary>
+        public sealed record Cast(SpellCast Spell, bool WithBonus = false) : GmStep;
+
+        /// <summary>Spend an Opportunity on an extra-movement bonus: another move this turn. Free in itself.</summary>
+        public sealed record BonusMove : GmStep;
+
+        /// <summary>Spend an Opportunity on a Threshold-boost bonus: +2 to <paramref name="Threshold"/> until the creature's next turn. Free in itself.</summary>
+        public sealed record BoostThreshold(Rules.Enums.ThresholdType Threshold) : GmStep;
 
         /// <summary>Spend the action regaining the footing a hazard took.</summary>
         public sealed record RegainFooting : GmStep;
@@ -154,7 +165,7 @@ namespace WoundBound.Game.Combat.Brains
         public sealed record Mount : GmStep;
 
         /// <summary>Throw the throwable weapon in hand at <paramref name="Target"/>: its Attack, as a shot (Core Rules §9).</summary>
-        public sealed record Throw(Combatant Target, bool WithAdvantage = false) : GmStep;
+        public sealed record Throw(Combatant Target, bool WithBonus = false) : GmStep;
 
         /// <summary>Take <paramref name="Weapon"/> from the pack into hand, for an action (Core Rules §15).</summary>
         public sealed record DrawWeapon(Rules.Models.WeaponDefinition Weapon) : GmStep;
@@ -197,8 +208,8 @@ namespace WoundBound.Game.Combat.Brains
         public bool IsExtraTurn { get; }
 
         /// <summary>
-        /// Whether an attack this turn may spend an Opportunity on Advantage: the GM holds one, and
-        /// the adversary has yet to act this round (Core Rules §9, "GM Opportunities").
+        /// Whether this turn may spend an Opportunity on the adversary's Opportunity bonus: the GM holds
+        /// one, and the adversary has yet to act this round (Core Rules §9, "GM Opportunities").
         /// </summary>
         public bool BonusAvailable { get; internal set; }
 

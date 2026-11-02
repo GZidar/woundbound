@@ -342,7 +342,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <param name="precise">As though Precise were held: Direct, and the attacker's Vitality on the damage.</param>
         /// <param name="woundsAlready">Wounds the target is reckoned to have taken already, earlier in the same exchange — a second reaction lands on what the first left.</param>
         public (double Hit, double ExpectedDealt, double Kill) Blow(Combatant attacker, AttackProfile attack, Combatant target, int? dieSides, int dodgeThreshold,
-            bool advantage = false, bool disadvantage = false, bool precise = false, int woundsAlready = 0)
+            bool advantage = false, bool disadvantage = false, bool precise = false, int woundsAlready = 0, int extraDamage = 0)
         {
             advantage |= attacker.IsHelped || target.IsDefenceless || attacker.HoldsPatient;
             precise |= attacker.HoldsPrecise;
@@ -364,7 +364,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             var absorbs = Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise);
-            var modifier = attack.DamageModifier + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
+            var modifier = attack.DamageModifier + extraDamage + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
             var (plainDealt, plainKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: null, absorbs, target, attack.Edge, woundsAlready);
             var (critDealt, critKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: attack.DamageDieSides, absorbs, target, attack.Edge, woundsAlready);
 
@@ -431,7 +431,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <paramref name="from"/>, in wounds' worth: what it deals, and above all the chance of
         /// dropping them.
         /// </summary>
-        public (double Worth, AttackProfile? With) BestAttack(Combatant attacker, GridPosition from, Combatant target, bool advantage = false, bool precise = false)
+        /// <param name="precise">Direct — and, for a character, Vitality on the damage. A statblock has no Vitality, so for one it is Direct alone.</param>
+        /// <param name="extraDamage">Added to each hit's damage: a Precise Opportunity bonus's Tier baseline.</param>
+        public (double Worth, AttackProfile? With) BestAttack(Combatant attacker, GridPosition from, Combatant target, bool advantage = false, bool precise = false, int extraDamage = 0)
         {
             var best = (Worth: 0.0, With: (AttackProfile?)null);
 
@@ -445,7 +447,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
 
                 var blow = Blow(attacker, attack, target, plan.DamageDieSides, plan.DodgeThreshold,
-                    advantage || view.PackMateOf(attacker, target) is not null, precise: precise);
+                    advantage || view.PackMateOf(attacker, target) is not null, precise: precise, extraDamage: extraDamage);
                 var worth = (attack.DealsNoDamage ? 0 : Worth(blow, target))
                             + (attack.Imposes is { } bound ? blow.Hit * BindWorth(attacker, target, bound) : 0);
                 if (worth > best.Worth)

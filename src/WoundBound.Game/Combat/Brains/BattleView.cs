@@ -276,7 +276,8 @@ namespace WoundBound.Game.Combat.Brains
         public static string? ExploitRefusal(Combatant character, Rules.Enums.NimbleExploit exploit) => Encounter.ExploitRefusal(character, exploit);
 
         /// <summary>Why <paramref name="attacker"/> can't declare <paramref name="manoeuvre"/> at <paramref name="target"/>, or null if they can.</summary>
-        public static string? ManoeuvreRefusal(Combatant attacker, Combatant target, Manoeuvre manoeuvre) => Encounter.ManoeuvreRefusal(attacker, target, manoeuvre);
+        public static string? ManoeuvreRefusal(Combatant attacker, Combatant target, Manoeuvre manoeuvre, bool byOpportunity = false) =>
+            Encounter.ManoeuvreRefusal(attacker, target, manoeuvre, byOpportunity: byOpportunity);
 
         /// <summary>Why <paramref name="combatant"/> can't Sacrifice now, or null if they can.</summary>
         public static string? SacrificeRefusal(Combatant combatant) => Encounter.SacrificeRefusal(combatant);
