@@ -2538,7 +2538,13 @@ namespace WoundBound.Game.Combat
                 Write($"{target.Name} is defenceless, lying {target.BodyStatus.ToString().ToLowerInvariant()}: Advantage.");
             }
 
-            var advantage = opportunityBonus || helped || target.IsDefenceless || sacrifice || patient;
+            var pack = PackMateOf(attacker, target);
+            if (pack is not null)
+            {
+                Write($"{attacker.Name} has Pack Tactics, with {pack.Name} within reach of {target.Name} too: Advantage.");
+            }
+
+            var advantage = opportunityBonus || helped || target.IsDefenceless || sacrifice || patient || pack is not null;
             var disadvantage = AttacksAtDisadvantage(attacker) || harried;
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
@@ -2823,6 +2829,38 @@ namespace WoundBound.Game.Combat
             Enumerable.Range(-reach, reach * 2 + 1)
                 .SelectMany(dx => Enumerable.Range(-reach, reach * 2 + 1).Select(dy => new GridPosition(centre.X + dx, centre.Y + dy)))
                 .Where(sq => sq != centre);
+
+        /// <summary>
+        /// Pack Tactics (GM Reference §9): a second creature of <paramref name="attacker"/>'s kind,
+        /// still in the fight, within its own reach of <paramref name="target"/> — the one that gives
+        /// the attack Advantage — or null.
+        /// </summary>
+        public Combatant? PackMateOf(Combatant attacker, Combatant target) =>
+            !attacker.HasPackTactics ? null
+            : Combatants.FirstOrDefault(c => c != attacker && c.Kind == attacker.Kind && c.Side == attacker.Side
+                                             && !c.IsOutOfFight && c.DistanceTo(target) <= c.Reach);
+
+        /// <summary>
+        /// The Body wounds a weapon's hit does to <paramref name="target"/> once its edge has had its
+        /// say (GM Reference §9, "On Type"): a Breaking weapon deals +2 to the Vulnerable, before armour;
+        /// a Cutting one is halved, rounding down, on the Resistant, after it.
+        /// </summary>
+        public static (int Rolled, int Absorbed, int Dealt) ByEdge(WeaponEdge? edge, Combatant target, int rolled, int armour)
+        {
+            if (edge == WeaponEdge.Breaking && target.IsVulnerableToBreaking)
+            {
+                rolled += 2;
+            }
+
+            var absorbed = Math.Min(rolled, armour);
+            var dealt = rolled - absorbed;
+            if (edge == WeaponEdge.Cutting && target.IsResistantToCutting)
+            {
+                dealt /= 2;
+            }
+
+            return (rolled, absorbed, dealt);
+        }
 
         /// <summary>Standing their ground or Off-guard: either puts Disadvantage on an attacker's roll (Core Rules §9, §10).</summary>
         private bool AttacksAtDisadvantage(Combatant attacker) =>
@@ -3251,11 +3289,19 @@ namespace WoundBound.Game.Combat
 
             if (roll.Success == true)
             {
-                rolledDamage = RollDamage(plan.Profile ?? attacker.Attack, plan, roll.IsCritical)
+                var swung = plan.Profile ?? attacker.Attack;
+                rolledDamage = RollDamage(swung, plan, roll.IsCritical)
                                + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
-                absorbed = Math.Min(rolledDamage,
+                (rolledDamage, absorbed, dealt) = ByEdge(swung.Edge, target, rolledDamage,
                     InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise));
-                dealt = rolledDamage - absorbed;
+                if (swung.Edge == WeaponEdge.Breaking && target.IsVulnerableToBreaking && !target.IsSwarm)
+                {
+                    Write($"{target.Name} is Vulnerable to Breaking: +2 Body from the {swung.Name}.");
+                }
+                else if (swung.Edge == WeaponEdge.Cutting && target.IsResistantToCutting && !target.IsSwarm)
+                {
+                    Write($"{target.Name} is Resistant to Cutting: the {swung.Name}'s wounds are halved.");
+                }
 
                 // A single attack covers one square of a Swarm: exactly 1 Body wound, whatever was
                 // rolled (GM Reference §3, "Damage Reduction").

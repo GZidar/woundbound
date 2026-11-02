@@ -94,6 +94,7 @@ namespace WoundBound.Game.Combat
                 SkillBonusFor = foe.SkillBonusFor, IsMinion = foe.IsMinion, IsUnshakable = foe.IsUnshakable, StaminaEachRound = foe.StaminaEachRound, StaminaMax = foe.StaminaMax, Stamina = foe.Stamina,
                 TacticalSpendsPerRound = foe.TacticalSpendsPerRound,
                 StatblockManoeuvres = foe.StatblockManoeuvres,
+                Kind = foe.Kind, Traits = foe.Traits, IsMindImmune = foe.IsMindImmune,
                 Tier = info.Tier,
                 Casting = casting,
                 StatblockSpells = spells,
@@ -169,6 +170,9 @@ namespace WoundBound.Game.Combat
             TacticalSpendsPerRound = CharacterCalculator.TacticalSpendsPerRound(info.Tier),
             Tier = info.Tier,
             StatblockManoeuvres = ManoeuvresIn(info.AttackEffect),
+            Kind = info.Name,
+            Traits = (info.Traits ?? []).ToHashSet(),
+            IsMindImmune = info.Traits?.Contains(AdversaryTrait.BoundNotAlive) == true || info.Features?.Any(f => f.Name == "Deathless Purpose") == true,
         };
 
         /// <summary>
@@ -224,6 +228,7 @@ namespace WoundBound.Game.Combat
             Weapon: ShotFor(name))
         {
             OwnReach = reach,
+            NamedEdge = AttackProfile.EdgeNamedIn(name),
         };
 
         /// <summary>The ranged weapon a statblock attack's name says it's made with, or null for a blow, a bite or a claw.</summary>

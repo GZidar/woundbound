@@ -61,6 +61,9 @@ namespace WoundBound.Game.Combat.Brains
         public IReadOnlyList<Objective> Objectives => encounter.Objectives;
 
         /// <summary>One of <paramref name="attacker"/>'s attacks from <paramref name="from"/>, at <paramref name="target"/> standing on <paramref name="targetAt"/>.</summary>
+        /// <summary>A second of the attacker's kind within reach of the target, for Pack Tactics; null if none.</summary>
+        public Combatant? PackMateOf(Combatant attacker, Combatant target) => encounter.PackMateOf(attacker, target);
+
         public AttackPlan PlanAttackWith(Combatant attacker, AttackProfile attack, GridPosition from, Combatant target, GridPosition? targetAt = null) =>
             Believed(attacker, from, targetAt ?? target.Position, encounter.PlanAttackWith(attacker, attack, from, target, targetAt));
 

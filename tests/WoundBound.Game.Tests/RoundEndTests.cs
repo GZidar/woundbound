@@ -40,9 +40,9 @@ public class RoundEndTests
     [Fact]
     public void AnIdleAdversaryAlreadyWithinReach_StaysWhereItIs()
     {
-        // Biter and Sneak both stand beside the fighter. Biter takes the turn (2+3, a miss); Sneak
-        // is left out, and has no need to close in.
-        var (encounter, fighter, biter, sneak, _) = Fight(2, 3);
+        // Biter and Sneak both stand beside the fighter. Biter takes the turn with Pack Tactics
+        // (2, 3 and 1: 2+3, a miss); Sneak is left out, and has no need to close in.
+        var (encounter, fighter, biter, sneak, _) = Fight(2, 3, 1);
         fighter.Position = new GridPosition(4, 4);
         biter.Position = new GridPosition(5, 4);
         sneak.Position = new GridPosition(4, 5);

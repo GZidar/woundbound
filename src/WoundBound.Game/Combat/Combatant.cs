@@ -410,6 +410,33 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public bool IsUnshakable { get; init; }
 
+        /// <summary>
+        /// What it is: the statblock it was made from — "Bramble Ratkin" — whatever this one is
+        /// called. Pack Tactics counts a second of the same kind. Null for a character.
+        /// </summary>
+        public string? Kind { get; init; }
+
+        /// <summary>The TRAITS a statblock gives it (GM Reference §9); empty for a character.</summary>
+        public IReadOnlySet<AdversaryTrait> Traits { get; init; } = new HashSet<AdversaryTrait>();
+
+        /// <summary>Pack Tactics: Advantage on its attack whenever a second of its kind is within reach of the same target.</summary>
+        public bool HasPackTactics => Traits.Contains(AdversaryTrait.PackTactics);
+
+        /// <summary>Resistant to Cutting: Body damage from a Cutting weapon halved, rounding down (Undead).</summary>
+        public bool IsResistantToCutting => Traits.Contains(AdversaryTrait.ResistantToCutting);
+
+        /// <summary>Vulnerable to Breaking: a Breaking weapon deals +2 Body damage (Undead).</summary>
+        public bool IsVulnerableToBreaking => Traits.Contains(AdversaryTrait.VulnerableToBreaking);
+
+        /// <summary>Bound, Not Alive: no Mind or Soul at all, and destroyed outright at 0 Body (Constructs).</summary>
+        public bool IsBoundNotAlive => Traits.Contains(AdversaryTrait.BoundNotAlive);
+
+        /// <summary>
+        /// Immune to Mind damage: nothing Bound, Not Alive has a mind, and a Revenant's Deathless
+        /// Purpose leaves none in it for that to mean anything (GM Reference §9).
+        /// </summary>
+        public bool IsMindImmune { get; init; }
+
         /// <summary>A statblock's Fitness: regains this much Stamina at the start of each round, up to its pool.</summary>
         public int StaminaEachRound { get; init; }
 

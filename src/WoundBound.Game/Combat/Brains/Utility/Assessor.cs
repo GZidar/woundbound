@@ -364,8 +364,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var absorbs = Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise);
             var modifier = attack.DamageModifier + (precise && attacker.Build is { } build ? ExploitCalculator.PreciseDamageBonus(build) : 0);
-            var (plainDealt, plainKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: null, absorbs, target);
-            var (critDealt, critKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: attack.DamageDieSides, absorbs, target);
+            var (plainDealt, plainKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: null, absorbs, target, attack.Edge);
+            var (critDealt, critKill) = Damage(attack.DamageDiceCount, dieSides, modifier, bonusDie: attack.DamageDieSides, absorbs, target, attack.Edge);
 
             return (odds.Success,
                 plainHit * plainDealt + odds.CriticalSuccess * critDealt,
@@ -377,7 +377,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// target. A critical rolls the maximum on its dice and adds the weapon's base die (Core
         /// Rules §10). A Minion is dropped by any wound that gets through.
         /// </summary>
-        private static (double Dealt, double Kill) Damage(int count, int? sides, int modifier, int? bonusDie, int absorbs, Combatant target)
+        private static (double Dealt, double Kill) Damage(int count, int? sides, int modifier, int? bonusDie, int absorbs, Combatant target, WeaponEdge? edge = null)
         {
             var critical = bonusDie is not null;
             var fixedDice = critical && sides is { } s ? count * s : 0;
@@ -396,7 +396,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             foreach (var sum in Sums(rolledDice))
             {
                 var rolled = Math.Max(PlayStateCalculator.DamageFloor, fixedDice + sum + modifier);
-                var through = rolled - Math.Min(rolled, absorbs);
+                var through = Encounter.ByEdge(edge, target, rolled, absorbs).Dealt;
                 dealt += through;
                 kills += Drops(target, through) ? 1 : 0;
                 outcomes++;
@@ -443,7 +443,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var blow = Blow(attacker, attack, target, plan.DamageDieSides, plan.DodgeThreshold, advantage, precise: precise);
+                var blow = Blow(attacker, attack, target, plan.DamageDieSides, plan.DodgeThreshold,
+                    advantage || view.PackMateOf(attacker, target) is not null, precise: precise);
                 var worth = Worth(blow, target);
                 if (worth > best.Worth)
                 {

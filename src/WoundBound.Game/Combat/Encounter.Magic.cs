@@ -775,6 +775,15 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            if (type != WoundType.Body && (target.IsBoundNotAlive || type == WoundType.Mind && target.IsMindImmune))
+            {
+                Write(target.IsBoundNotAlive
+                    ? $"{target.Name} is Bound, Not Alive: there is no mind or spirit in it for {type} damage to find (GM Reference §9)."
+                    : $"{target.Name} has no mind left in it for Mind damage to mean anything (Deathless Purpose).");
+                then();
+                return;
+            }
+
             var soaked = type == WoundType.Body && !direct ? Math.Min(amount, InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false)) : 0;
             Shelter(target, amount - soaked, type, left => Land(target, type, left + soaked, soaked, then));
         }

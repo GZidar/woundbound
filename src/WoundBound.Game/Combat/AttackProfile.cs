@@ -1,4 +1,5 @@
 using WoundBound.Rules.Calculation;
+using WoundBound.Rules.Enums;
 using WoundBound.Rules.Models;
 
 namespace WoundBound.Game.Combat
@@ -38,6 +39,22 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Can't strike an adjacent target at all (Core Rules §9, "Weapons").</summary>
         public bool IsUnwieldy => Weapon?.Unwieldy == true;
+
+        /// <summary>
+        /// Cutting or Breaking (Core Rules §9, "Weapons"): the weapon's own, or what a statblock line
+        /// names in its brackets — "Iron Cudgel (Heavy, Breaking)". Null for a bite or claw that says
+        /// neither. It matters against the Undead (GM Reference §9, "On Type").
+        /// </summary>
+        public WeaponEdge? Edge => Weapon?.Edge ?? NamedEdge;
+
+        /// <summary>The edge a statblock line's name gives it, where it has no weapon of its own.</summary>
+        public WeaponEdge? NamedEdge { get; init; }
+
+        /// <summary>The edge an attack line's name says it has: "Breaking" or "Cutting" written in it, or an unarmed strike's Breaking.</summary>
+        public static WeaponEdge? EdgeNamedIn(string name) =>
+            name.Contains("Breaking", StringComparison.OrdinalIgnoreCase) || name.Equals("Unarmed", StringComparison.OrdinalIgnoreCase) ? WeaponEdge.Breaking
+            : name.Contains("Cutting", StringComparison.OrdinalIgnoreCase) ? WeaponEdge.Cutting
+            : null;
 
         /// <summary>
         /// A character's attack with <paramref name="weapon"/>, or an unarmed strike without one:
