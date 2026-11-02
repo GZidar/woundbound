@@ -359,7 +359,7 @@ namespace WoundBoundGame
                 // Nobody is at the controls: only what a viewer follows stays on the panel.
                 foreach (var child in hudColumn.GetChildren().OfType<Control>())
                 {
-                    child.Visible = child == statusLabel || child == logLabel || child == reactionBox;
+                    child.Visible = child == statusLabel || child is TabContainer || child == reactionBox;
                 }
             }
         }
@@ -488,8 +488,23 @@ namespace WoundBoundGame
         /// Turns a line of the log into a bubble: what somebody did, over them — "casts Smite at the
         /// Ambusher on the ridge" — and how a roll went, over whoever it landed on.
         /// </summary>
+        private BattleLog battleLog = null!;
+
+        /// <summary>The reaction on offer, explained — shown in its ring's hover box and above the tabs.</summary>
+        private string reactionExplained = string.Empty;
+
+        /// <summary>Whether the old action buttons are shown (Options tab): the reaction box keeps its buttons only then.</summary>
+        private bool actionRowsShown;
+
+        /// <summary>Each log line as the battle log shows it, formatted as it was written — when whose turn it was is still known.</summary>
+        private readonly List<string> formattedLog = new();
+
         private void OnLogged(string line)
         {
+            var gmActing = encounter.Phase == EncounterPhase.AdversaryTurn
+                           || (encounter.Phase == EncounterPhase.AwaitingReaction && encounter.Active?.Side != Side.Party);
+            formattedLog.Add(battleLog.Format(line, encounter.Combatants, gmActing));
+
             if (line.StartsWith("—") || line.EndsWith("'s turn.") || line.StartsWith("The GM banks") || line.StartsWith("Objective"))
             {
                 return;
@@ -604,9 +619,15 @@ namespace WoundBoundGame
                 {
                     encounter.TryBeginTurn(chosen);
                     Refresh();
-                    OpenActions();
                 }
 
+                return;
+            }
+
+            // A reaction waiting on a player: clicking the one being asked brings its ring back.
+            if (encounter.Pending is { } pending && pending.Defender.Side == Side.Party && encounter.AnyAt(clicked) == pending.Defender)
+            {
+                OpenReaction(pending);
                 return;
             }
 
@@ -912,6 +933,10 @@ namespace WoundBoundGame
                 14 => SampleEncounters.HollowStagInTheBirchwood(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
+            // Lines written while the fight was set up came before anyone was listening.
+            battleLog = new BattleLog(ColourOf);
+            formattedLog.Clear();
+            formattedLog.AddRange(encounter.Log.Select(line => battleLog.Format(line, encounter.Combatants, gmActing: false)));
             encounter.Logged += OnLogged;
             bubbles.Clear();
             rosterAt.Clear();
@@ -933,26 +958,16 @@ namespace WoundBoundGame
 
         private void Refresh()
         {
-            foreach (var line in encounter.Log.Skip(linesShown))
+            foreach (var line in formattedLog.Skip(linesShown))
             {
-                logLabel.AddText(line + "\n");
+                logLabel.AppendText(line);
             }
 
-            linesShown = encounter.Log.Count;
+            linesShown = formattedLog.Count;
 
             UpdateHud();
             QueueRedraw();
-            if (radial.IsOpen)
-            {
-                if (bot is null && encounter.Phase == EncounterPhase.PartyTurn)
-                {
-                    radial.Reload();
-                }
-                else
-                {
-                    radial.CloseAll();
-                }
-            }
+            UpdatePrompts();
 
             // The GM's turns always play themselves; with Bot v Bot on, so does the party.
             var gmToAct = encounter.Phase == EncounterPhase.AdversaryTurn;
@@ -1010,7 +1025,7 @@ namespace WoundBoundGame
                 return;
             }
 
-            reactionLabel.Text = pending.Prompt +
+            reactionExplained = pending.Prompt +
                 (pending.WouldRiposte ? "\nIt's a critical, so the miss would be a Riposte: the attacker takes the wound." : string.Empty) +
                 pending.Kind switch
                 {
@@ -1018,11 +1033,13 @@ namespace WoundBoundGame
                     ReactionKind.Sustain => "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM a banked Opportunity.",
                     _ => "\nIt costs 1 Stamina and their tactical spend for the round, and hands the GM an Immediate Opportunity.",
                 };
+            reactionLabel.Text = reactionExplained + (bot is null ? $"\nThe choice is in the ring round {pending.Defender.Name} — click them to bring it back." : string.Empty);
 
-            // Somebody leaving reach: a button for each thing the character may do about it.
+            // The choice itself is made on the ring; the buttons stay only for whoever shows the action buttons.
             var isLeaver = pending.Kind == ReactionKind.LeaverReaction;
-            panicDodgeButton.Visible = !isLeaver;
-            takeHitButton.Visible = !isLeaver;
+            panicDodgeButton.Visible = !isLeaver && actionRowsShown;
+            takeHitButton.Visible = !isLeaver && actionRowsShown;
+            leaverButtons.Visible = actionRowsShown;
             var wanted = isLeaver ? string.Join("|", pending.Options ?? []) + pending.Attacker.Name : string.Empty;
             if (wanted != leaverButtonsFor)
             {
@@ -1054,18 +1071,7 @@ namespace WoundBoundGame
                 return;
             }
 
-            (panicDodgeButton.Text, takeHitButton.Text) = pending.Kind switch
-            {
-                ReactionKind.PanicDodge => ("Panic dodge (1 Stamina)", "Take the hit"),
-                ReactionKind.StandFirm => ("Stand firm (1 Stamina, +2 ST)", "Let it happen"),
-                ReactionKind.RaiseShield => ($"Raise shield (1 Stamina, +{pending.Bonus})", "Take the hit"),
-                ReactionKind.Backlash => ($"Backlash ({pending.ImpactWounds} Body)", "Drop to 0"),
-                ReactionKind.Sustain => ("Hold it (1 Stamina)", "Let it go"),
-                ReactionKind.BraceResolve => ("Steel yourself (1 Stamina, +2)", "Let it take hold"),
-                ReactionKind.Interrupt => ("Interrupt (1 Mind)", "Let it happen"),
-                ReactionKind.Shelter => ($"Shelter them ({pending.ImpactWounds} Soul)", "Let them take it"),
-                _ => ("Arrest (1 Stamina)", "Let it carry them"),
-            };
+            (panicDodgeButton.Text, takeHitButton.Text) = ReactionChoices(pending);
         }
 
         private void UpdateHud()
@@ -1350,16 +1356,8 @@ namespace WoundBoundGame
         /// <summary>What clicking the square under the mouse would do, or how to play when it's over nothing useful.</summary>
         private string DescribeHovered(Combatant? active)
         {
-            const string howToPlay =
-                "Your characters are the blue tokens. You choose who goes next — click a token with a pale ring, " +
-                "or its button — and the GM acts between your turns.\n" +
-                "• Move: click a highlighted square. Blue costs your move; amber spends your action too.\n" +
-                "• Swap: trade the loadout in hand for the one at the ready, for a move.\n" +
-                "• Dodge / Grounded / Resolute: +2 to a Threshold in place of your move — but no moving, and attacks at Disadvantage.\n" +
-                "• Attack: click a foe with a red ring — in Reach for a blade, beyond Close for a bow.\n" +
-                "• Grab / Shove / Trip: press one, then click a foe beside you. An unarmed roll against their ST.\n" +
-                "• Spells: press one on a caster's spell row, then click who it's for — or, for an area, where it goes.\n" +
-                "• End turn when you're done, and the GM takes one adversary turn.";
+            // The radial menu explains each action as it's hovered; this is only the way in.
+            const string howToPlay = "Click the acting character for their actions; click a highlighted square to move. Escape steps back.";
 
             if (hovered is not { } square)
             {
@@ -1478,7 +1476,7 @@ namespace WoundBoundGame
             hudColumn = column;
 
             statusLabel = WrappingLabel(column);
-            statusLabel.AddThemeFontSizeOverride("font_size", 20);
+            statusLabel.AddThemeFontSizeOverride("font_size", 16);
             partyLabel = WrappingLabel(column);
             chooseRow = new HFlowContainer();
             chooseRow.AddThemeConstantOverride("h_separation", 8);
@@ -1494,7 +1492,11 @@ namespace WoundBoundGame
             var actionRows = new VBoxContainer { Visible = false };
             actionRows.AddThemeConstantOverride("separation", 10);
             column.AddChild(actionRows);
-            showButtons.Toggled += on => actionRows.Visible = on;
+            showButtons.Toggled += on =>
+            {
+                actionRows.Visible = on;
+                actionRowsShown = on;
+            };
 
             var buttons = new HFlowContainer();
             buttons.AddThemeConstantOverride("h_separation", 8);
@@ -1841,8 +1843,51 @@ namespace WoundBoundGame
                 ScrollFollowing = true,
                 SizeFlagsVertical = Control.SizeFlags.ExpandFill,
                 SelectionEnabled = true,
+                BbcodeEnabled = true,
             };
+            foreach (var font in new[] { "normal_font_size", "bold_font_size" })
+            {
+                logLabel.AddThemeFontSizeOverride(font, 14);
+            }
+
             column.AddChild(logLabel);
+
+            // Above the tabs, what's needed at a glance: the round, a reaction being asked, the hover
+            // line. Below, one tab at a time, each with the whole height: the log, the character
+            // sheet, the party, and the game's options (the old action buttons among them).
+            column.MoveChild(reactionBox, statusLabel.GetIndex() + 1);
+            hoverLabel.Reparent(column);
+            column.MoveChild(hoverLabel, reactionBox.GetIndex() + 1);
+
+            var tabs = new TabContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+            column.AddChild(tabs);
+            Tab("Log", scrolls: false, logLabel);
+            Tab("Character", scrolls: true, characterLabel);
+            Tab("Party", scrolls: true, partyLabel, chooseRow);
+            Tab("Options", scrolls: true, showButtons, actionRows, botRow, gmRow);
+            tabs.CurrentTab = 0;
+
+            void Tab(string title, bool scrolls, params Control[] parts)
+            {
+                var page = new VBoxContainer { Name = title, SizeFlagsVertical = Control.SizeFlags.ExpandFill, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+                page.AddThemeConstantOverride("separation", 10);
+                if (scrolls)
+                {
+                    var scroller = new ScrollContainer { Name = title, HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+                    tabs.AddChild(scroller);
+                    page.Name = "Page";
+                    scroller.AddChild(page);
+                }
+                else
+                {
+                    tabs.AddChild(page);
+                }
+
+                foreach (var part in parts)
+                {
+                    part.Reparent(page);
+                }
+            }
 
             // Over everything else, so its rings sit on top of board and HUD alike.
             var top = new CanvasLayer { Layer = 10 };

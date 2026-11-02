@@ -51,3 +51,8 @@ The action icons are from [game-icons.net](https://game-icons.net), used under [
 | confusion | [brainstorm](https://game-icons.net/1x1/lorc/brainstorm.html) | Lorc |
 | compulsion | [puppet](https://game-icons.net/1x1/lorc/puppet.html) | Lorc |
 | kneel | [kneeling](https://game-icons.net/1x1/delapouite/kneeling.html) | Delapouite |
+| let-pass | [cancel](https://game-icons.net/1x1/sbed/cancel.html) | Sbed |
+| interrupt | [fast-arrow](https://game-icons.net/1x1/lorc/fast-arrow.html) | Lorc |
+| backlash | [return-arrow](https://game-icons.net/1x1/lorc/return-arrow.html) | Lorc |
+| sustain | [concentration-orb](https://game-icons.net/1x1/lorc/concentration-orb.html) | Lorc |
+| shelter | [heart-shield](https://game-icons.net/1x1/delapouite/heart-shield.html) | Delapouite |

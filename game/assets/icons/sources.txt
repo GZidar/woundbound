@@ -45,3 +45,8 @@ fear lorc/terror
 confusion lorc/brainstorm
 compulsion lorc/puppet
 kneel delapouite/kneeling
+let-pass sbed/cancel
+interrupt lorc/fast-arrow
+backlash lorc/return-arrow
+sustain lorc/concentration-orb
+shelter delapouite/heart-shield

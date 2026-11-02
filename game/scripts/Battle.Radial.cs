@@ -27,6 +27,7 @@ namespace WoundBoundGame
                 return;
             }
 
+            radialPurpose = RadialPurpose.Actions;
             var centre = GetGlobalTransformWithCanvas() * SquareCentreOf(acting);
             radial.Open(centre, acting.Name.Split(' ').First(w => w != "The"), () => RootItems(acting));
         }

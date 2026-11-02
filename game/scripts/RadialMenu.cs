@@ -142,7 +142,7 @@ namespace WoundBoundGame
             {
                 hover = (rings.Count - 1, at);
                 Choose(rings.Count - 1, at);
-                hover = rings[^1].Pills.Count > 0 ? (rings.Count - 1, 0) : null;
+                hover = rings.Count > 0 && rings[^1].Pills.Count > 0 ? (rings.Count - 1, 0) : null;
             }
         }
 
