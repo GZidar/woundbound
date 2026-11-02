@@ -61,7 +61,7 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>One of <paramref name="attacker"/>'s attacks from <paramref name="from"/>, at <paramref name="target"/> standing on <paramref name="targetAt"/>.</summary>
         public AttackPlan PlanAttackWith(Combatant attacker, AttackProfile attack, GridPosition from, Combatant target, GridPosition? targetAt = null) =>
-            encounter.PlanAttackWith(attacker, attack, from, target, targetAt);
+            Believed(attacker, from, targetAt ?? target.Position, encounter.PlanAttackWith(attacker, attack, from, target, targetAt));
 
         /// <summary>Where the fight happens.</summary>
         public Setting Setting => encounter.Setting;
@@ -71,6 +71,15 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>What the dark adds to <paramref name="target"/>'s Dodge Threshold, standing where they are or on <paramref name="at"/>.</summary>
         public int VisibilityDodgeModifier(Combatant target, GridPosition? at = null) => encounter.VisibilityDodgeModifier(target, at);
+
+        /// <summary>What the dark would add to <paramref name="target"/>'s Dodge Threshold were <paramref name="light"/> conjured too.</summary>
+        public int DodgeModifierWith(Combatant target, Working light) => encounter.DodgeModifierWith(target, light);
+
+        /// <summary>The lasting Utility spells at work.</summary>
+        public IReadOnlyList<Working> Workings => encounter.Workings;
+
+        /// <summary>Whether the scene is dark for want of light, which light answers.</summary>
+        public bool IsUnlit => encounter.Setting.IsUnlit;
 
         /// <summary>The most squares <paramref name="speed"/> covers for <paramref name="moves"/> moves.</summary>
         public int SquaresFor(Speed speed, int moves) => encounter.SquaresFor(speed, moves);
@@ -97,22 +106,72 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Every free square <paramref name="combatant"/> could reach for at most <paramref name="moves"/> moves, with each one's cost.</summary>
         /// <remarks>None at all for a creature that can't move itself just now — standing its ground, Held, or Frightened and already withdrawn.</remarks>
-        public IReadOnlyDictionary<GridPosition, int> SquaresWithin(Combatant combatant, int moves) =>
-            Encounter.CanMoveItself(combatant) ? encounter.SquaresWithin(combatant, moves) : new Dictionary<GridPosition, int>();
+        public IReadOnlyDictionary<GridPosition, int> SquaresWithin(Combatant combatant, int moves)
+        {
+            if (!Encounter.CanMoveItself(combatant))
+            {
+                return new Dictionary<GridPosition, int>();
+            }
+
+            var squares = encounter.SquaresWithin(combatant, moves);
+            if (!encounter.Illusions.Any(i => i.Form is IllusionForm.Wall or IllusionForm.Figure && encounter.Fools(i, combatant)))
+            {
+                return squares;
+            }
+
+            // A creature taken in by a phantom wall or figure won't walk into it, or through it — it
+            // believes the ground there is held, or solid (the user's ruling: creatures act on belief).
+            var phantoms = encounter.PhantomsSeenBy(combatant).Select(p => p.Position).ToHashSet();
+            bool Blocked(GridPosition sq) => phantoms.Contains(sq) || encounter.BelievesWall(combatant, sq);
+            return squares
+                .Where(o => !Blocked(o.Key) && (encounter.PlanMove(combatant, o.Key) is not { } plan || !plan.Path.Skip(1).Any(Blocked)))
+                .ToDictionary(o => o.Key, o => o.Value);
+        }
 
         /// <summary>Whether <paramref name="attacker"/> could attack <paramref name="target"/> right now, action and all.</summary>
-        public bool CanAttack(Combatant attacker, Combatant target) => encounter.CanAttack(attacker, target);
+        public bool CanAttack(Combatant attacker, Combatant target) =>
+            encounter.CanAttack(attacker, target) && Believed(attacker, attacker.Position, target.Position, encounter.PlanAttack(attacker, target)).CanAttack;
 
         /// <summary>What an attack at <paramref name="target"/> would face from where <paramref name="attacker"/> stands.</summary>
-        public AttackPlan PlanAttack(Combatant attacker, Combatant target) => encounter.PlanAttack(attacker, target);
+        public AttackPlan PlanAttack(Combatant attacker, Combatant target) =>
+            Believed(attacker, attacker.Position, target.Position, encounter.PlanAttack(attacker, target));
 
         /// <summary>What an attack at <paramref name="target"/> would face if <paramref name="attacker"/> stood on <paramref name="from"/> instead.</summary>
         public AttackPlan PlanAttackFrom(Combatant attacker, GridPosition from, Combatant target) =>
-            encounter.PlanAttackFrom(attacker, from, target);
+            Believed(attacker, from, target.Position, encounter.PlanAttackFrom(attacker, from, target));
 
         /// <summary>One particular attack line, as though <paramref name="attacker"/> stood on <paramref name="from"/>.</summary>
         public AttackPlan PlanAttackFrom(Combatant attacker, AttackProfile with, GridPosition from, Combatant target) =>
-            encounter.PlanAttackWith(attacker, with, from, target);
+            Believed(attacker, from, target.Position, encounter.PlanAttackWith(attacker, with, from, target));
+
+        /// <summary>
+        /// An attack as <paramref name="attacker"/> believes it would go: one with a phantom wall it
+        /// is taken in by standing between can't be made — as far as it knows, there's stone in the way.
+        /// </summary>
+        private AttackPlan Believed(Combatant attacker, GridPosition from, GridPosition to, AttackPlan plan) =>
+            plan.CanAttack && from.DistanceTo(to) > 1 && !Sight.Clear(from, to, sq => encounter.BelievesWall(attacker, sq))
+                ? plan with { Refusal = "As far as it knows, there's a wall in the way." }
+                : plan;
+
+        /// <summary>The Illusions standing, for whoever is weighing whether to test one.</summary>
+        public IReadOnlyList<Illusion> Illusions => encounter.Illusions;
+
+        /// <summary>Whether <paramref name="creature"/> is taken in by <paramref name="illusion"/>.</summary>
+        public bool Fools(Illusion illusion, Combatant creature) => encounter.Fools(illusion, creature);
+
+        /// <summary>The Body <paramref name="creature"/> believes it has, a felt wound counted.</summary>
+        public int BelievedBody(Combatant creature) => encounter.BelievedBody(creature);
+
+        /// <summary>How many of <paramref name="creature"/>'s own side are down — what its Morale counts.</summary>
+        public int AlliesDown(Combatant creature) =>
+            encounter.Combatants.Count(c => c.Side == creature.Side && c != creature && c.IsOutOfFight && !c.HasFled && !c.HasSurrendered);
+
+        /// <summary>One step from breaking: help seen coming for the other side would do it.</summary>
+        public bool IsWavering(Combatant creature) =>
+            creature.Morale is { } morale && !creature.IsBroken && morale.IsWavering(creature, AlliesDown(creature), BelievedBody(creature));
+
+        /// <summary>Why <paramref name="searcher"/> can't test <paramref name="illusion"/> now, or null.</summary>
+        public string? SearchRefusal(Combatant searcher, Illusion illusion) => encounter.SearchRefusal(searcher, illusion);
 
         /// <summary>Whether a melee blow from <paramref name="from"/> could land on <paramref name="square"/>.</summary>
         public static bool CanReachFrom(Combatant attacker, GridPosition from, GridPosition square) =>
@@ -123,8 +182,9 @@ namespace WoundBound.Game.Combat.Brains
             attacker.CanReachFrom(from, target);
 
         /// <summary>Everybody still fighting on the other side from <paramref name="combatant"/>.</summary>
+        /// <remarks>As <paramref name="combatant"/> believes it: a phantom figure it is taken in by is one of them.</remarks>
         public IEnumerable<Combatant> EnemiesOf(Combatant combatant) =>
-            encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party);
+            encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party).Concat(encounter.PhantomsSeenBy(combatant));
 
         /// <summary>Everybody still fighting on <paramref name="combatant"/>'s own side, themselves included.</summary>
         public IEnumerable<Combatant> AlliesOf(Combatant combatant) => encounter.Fighting(combatant.Side);

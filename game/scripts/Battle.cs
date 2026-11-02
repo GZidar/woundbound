@@ -258,6 +258,15 @@ namespace WoundBoundGame
                 };
             }
 
+            // An Illusion stands where it's put: a wound into the foe clicked, anything else on the
+            // square clicked, its block running from there.
+            if (spell.SpellType == SpellType.Illusion)
+            {
+                return Encounter.FormOf(spell) == IllusionForm.Wound
+                    ? encounter.AnyAt(square) is { } subject ? cast with { Target = subject } : null
+                    : cast with { Corner = square };
+            }
+
             // An area spell's Shape is named as it's cast: a Line or a Cone starts beside the caster and
             // is aimed the way of the square clicked.
             if (spell.Target == SpellTarget.Many && spell.Range != SpellRange.Touch && shapePicker.Selected is 1 or 2)
@@ -653,7 +662,7 @@ namespace WoundBoundGame
                         DrawRect(rect, Wall);
                     }
                     else if (!encounter.Setting.Water.ContainsKey(square))
-                    switch (encounter.Setting.GroundAt(square))
+                    switch (encounter.GroundAt(square))
                     {
                         case Terrain.Broken:
                             DrawRect(rect, BrokenGround);
@@ -704,6 +713,35 @@ namespace WoundBoundGame
             if (hovered is { } hover)
             {
                 DrawRect(SquareRect(hover).Grow(-2), HoverOutline, filled: false, width: 2);
+            }
+
+            // Illusions, as the party knows them: phantom walls hatched, phantom figures as ghosts.
+            foreach (var illusion in encounter.Illusions)
+            {
+                var ghost = new Color(0.75f, 0.6f, 1f, 0.35f);
+                if (illusion.Form == IllusionForm.Wall)
+                {
+                    foreach (var square in illusion.Squares)
+                    {
+                        DrawRect(SquareRect(square).Grow(-3), ghost);
+                        DrawRect(SquareRect(square).Grow(-3), ghost with { A = 0.8f }, filled: false, width: 2);
+                    }
+                }
+                else if (illusion.Phantom is { } phantom)
+                {
+                    var centre = SquareRect(phantom.Position).GetCenter();
+                    DrawCircle(centre, CellSize * 0.36f, ColourOf(illusion.Caster) with { A = 0.3f });
+                    DrawArc(centre, CellSize * 0.36f, 0, Mathf.Tau, 32, ghost with { A = 0.9f }, 2);
+                    DrawString(ThemeDB.FallbackFont, new Vector2(centre.X - CellSize / 2f, centre.Y + 6), "?", HorizontalAlignment.Center,
+                        CellSize, Mathf.Max(9, CellSize / 4), Colors.White with { A = 0.7f });
+                }
+                else if (illusion.Form == IllusionForm.Reinforcements)
+                {
+                    foreach (var square in illusion.Squares)
+                    {
+                        DrawRect(SquareRect(square).Grow(-6), ghost, filled: false, width: 2);
+                    }
+                }
             }
 
             // A Swarm first, beneath: whoever stands in the mass is drawn on top of it.
@@ -1039,7 +1077,7 @@ namespace WoundBoundGame
                 (encounter.Setting.Visibility != Visibility.Good
                     ? $"\nSeen at {encounter.VisibilityOf(character)}" + (character.CarriedLights > 0 ? ", lit by the light you carry." : ".")
                     : string.Empty) +
-                (encounter.Setting.GroundAt(character.Position) is var ground && ground != Terrain.Firm
+                (encounter.GroundAt(character.Position) is var ground && ground != Terrain.Firm
                     ? $"\nStanding on {ground} ground" + (encounter.Setting.Water.TryGetValue(character.Position, out var wet) ? $" — {wet.ToString().ToLowerInvariant()} water." : ".")
                     : string.Empty) +
                 (character.NeedsFooting ? "\nOff your footing: your action goes on regaining it." : string.Empty) +

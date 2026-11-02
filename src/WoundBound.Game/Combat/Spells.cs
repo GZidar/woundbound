@@ -112,6 +112,9 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Which of the eight ways a Line or a Cone is aimed, one square's step.</summary>
         public (int X, int Y)? Aim { get; init; }
+
+        /// <summary>A Utility spell on the ground: +1 dries or firms it a grade, −1 fouls it — "in either direction" (Core Rules §9).</summary>
+        public int GroundShift { get; init; } = 1;
     }
 
     /// <summary>
@@ -302,6 +305,27 @@ namespace WoundBound.Game.Combat
                     yield return new GridPosition(square.X - dx, square.Y - dy);
                 }
             }
+        }
+
+        /// <summary>
+        /// The lever a Utility spell moves, read from what it does: the ground, the weather (warmth or
+        /// chill), or light. Null for one that touches none — a Scrying, a Sensing, a purified flask.
+        /// </summary>
+        public static Lever? LeverOf(SpellDefinition spell)
+        {
+            if (spell.SpellType != SpellType.Utility)
+            {
+                return null;
+            }
+
+            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            return text.Contains("ground") || text.Contains("mud") || text.Contains("mire") || text.Contains("footing")
+                ? Lever.Ground
+                : text.Contains("warm") || text.Contains("chill") || text.Contains("cold") || text.Contains("heat")
+                    ? Lever.Exposure
+                    : text.Contains("light") || text.Contains("glow") || text.Contains("shine")
+                        ? Lever.Light
+                        : null;
         }
 
         /// <summary>

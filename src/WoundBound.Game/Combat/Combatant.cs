@@ -21,6 +21,12 @@ namespace WoundBound.Game.Combat
     {
         public required string Name { get; init; }
 
+        /// <summary>
+        /// A phantom figure's body — an Illusion's, never in the fight's roster: it can't act, be
+        /// hurt or hold ground, and only those taken in by it ever see it (Core Rules §11).
+        /// </summary>
+        public bool IsPhantom { get; internal set; }
+
         public required Side Side { get; init; }
 
         /// <summary>Where it stands — for a creature bigger than one square, the top-left corner of its footprint.</summary>
@@ -178,7 +184,10 @@ namespace WoundBound.Game.Combat
         internal Func<GridPosition, int>? GroundStability { get; set; }
 
         /// <summary>What the scene's Exposure does to Resolve — the same for everybody in it (Core Rules §9, "Exposure").</summary>
-        internal int SceneResolve { get; set; }
+        internal int SceneResolve => SceneResolveNow?.Invoke() ?? 0;
+
+        /// <summary>Reads the weather where the creature stands, which a Utility spell may have eased (Core Rules §9).</summary>
+        internal Func<int>? SceneResolveNow { get; set; }
 
         /// <summary>
         /// The lit lights this creature is holding — a character's from their pack, each taking a

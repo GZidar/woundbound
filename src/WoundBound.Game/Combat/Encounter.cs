@@ -198,8 +198,8 @@ namespace WoundBound.Game.Combat
             var levy = EnvironmentCalculator.ExposureStaminaModifier(tables, Setting.Exposure);
             foreach (var combatant in combatants)
             {
-                combatant.GroundStability = square => EnvironmentCalculator.StabilityThresholdModifier(tables, Setting.GroundAt(square));
-                combatant.SceneResolve = EnvironmentCalculator.ResolveThresholdModifier(tables, Setting.Exposure);
+                combatant.GroundStability = square => EnvironmentCalculator.StabilityThresholdModifier(tables, GroundAt(square));
+                combatant.SceneResolveNow = () => EnvironmentCalculator.ResolveThresholdModifier(tables, ExposureFor(combatant));
                 combatant.Stamina = EnvironmentCalculator.StartOfChallengeStamina(tables, combatant.Stamina, Setting.Exposure);
             }
 
@@ -257,6 +257,10 @@ namespace WoundBound.Game.Combat
 
             hash.Add(lightsOnTheGround.Count);
             hash.Add(spentFires.Count);
+            foreach (var working in workings.Where(w => w.Lever == Lever.Light && w.Holds))
+            {
+                hash.Add(working);
+            }
             return hash.ToHashCode();
         }
 
@@ -284,6 +288,26 @@ namespace WoundBound.Game.Combat
                 .Concat(lightsOnTheGround)
                 .ToList();
 
+            // Conjured light: a carried source or two where it was put down, lighting from the
+            // nearest square of its block. Never a built fire, so never out to Long — and only one
+            // casting counts, so it is grouped with the lights around it but not with another
+            // conjured one (Core Rules §9, "What the Levers Touch Elsewhere").
+            var conjured = workings.Where(w => w.Lever == Lever.Light && w.Holds).ToList();
+            var bestConjured = Setting.Visibility;
+            foreach (var working in conjured)
+            {
+                var nearest = working.Squares.MinBy(sq => sq.DistanceTo(square));
+                if (RangeBandCalculator.BandForSquares(bands, nearest.DistanceTo(square)) is not { } band
+                    || (Setting.Walls.Count > 0 && !Sight.Clear(nearest, square, Setting.IsWall)))
+                {
+                    continue;
+                }
+
+                var with = working.Grade + sources.Count(s => working.Squares.Any(sq => sq.DistanceTo(s) <= 1));
+                var grade = EnvironmentCalculator.VisibilityFromLight(tables, with, builtFire: false, band);
+                bestConjured = grade < bestConjured ? grade : bestConjured;
+            }
+
             // Each light lights the square by its own group — the lights carried together with it,
             // within a square of one another — at the band it is from the square. Two torches across
             // the field are two single lights, not a pair. A built fire holds its grade further.
@@ -301,6 +325,7 @@ namespace WoundBound.Game.Combat
                 best = grade < best ? grade : best;
             }
 
+            best = bestConjured < best ? bestConjured : best;
             foreach (var fire in Fires)
             {
                 if (RangeBandCalculator.BandForSquares(bands, fire.DistanceTo(square)) is { } band
@@ -331,7 +356,7 @@ namespace WoundBound.Game.Combat
         private void Slip(Combatant roller, RollResult roll)
         {
             if (environment is { } tables && roll.IsCritical && roll.Success != true && !roller.IsProne && !roller.IsOutOfFight
-                && EnvironmentCalculator.KnocksProneOnCriticalFailure(tables, Setting.GroundAt(roller.Position)))
+                && EnvironmentCalculator.KnocksProneOnCriticalFailure(tables, GroundAt(roller.Position)))
             {
                 roller.SetCondition(CharacterCondition.Prone, true);
                 Write($"{roller.Name} loses their footing on the broken ground, and goes down Prone.");
@@ -1349,6 +1374,7 @@ namespace WoundBound.Game.Combat
 
             EndSpellsOfFallenCasters(roundEnd: true);
             AgeControls();
+            AgeIllusions(roundPassed: true);
 
             // Everyone on the party's side keeps their place in the round, fighting or not: a
             // character with no turn to take still leaves the GM the adversary turn that follows it.
@@ -1689,6 +1715,43 @@ namespace WoundBound.Game.Combat
                     return;
 
 
+                case GmStep.Attack attack when attack.Target.IsPhantom:
+                    if (actor.ActionsRemaining < 1 || !PhantomsSeenBy(actor).Contains(attack.Target))
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} attack {attack.Target.Name}, which it can't do now.");
+                    }
+
+                    turn.HasAttacked = true;
+                    actor.ActionsRemaining--;
+                    PassesThroughPhantom(actor, attack.Target, (attack.With ?? actor.Attack).Name);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Control control when control.Target.IsPhantom:
+                    turn.HasAttacked = true;
+                    actor.ActionsRemaining--;
+                    PassesThroughPhantom(actor, control.Target, $"hand reaching to {control.Action}");
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Aid aid when aid.Target.IsPhantom:
+                    turn.HasAttacked = true;
+                    actor.ActionsRemaining--;
+                    PassesThroughPhantom(actor, aid.Target, $"feint to {aid.Action}");
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Search search:
+                    if (SearchRefusal(actor, search.Illusion) is { } cannotSearch)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} test {search.Illusion.Spell}: {cannotSearch}");
+                    }
+
+                    turn.HasAttacked = true;
+                    Search(actor, search.Illusion);
+                    TakeStep(turn, done);
+                    return;
+
                 case GmStep.Attack attack:
                     if (!CanAttack(actor, attack.Target)
                         || (attack.With is { } line && (!actor.Attacks.Contains(line) || !PlanAttackWith(actor, line, actor.Position, attack.Target).CanAttack)))
@@ -1935,7 +1998,12 @@ namespace WoundBound.Game.Combat
         /// position for the caller to set, along with the log line.
         /// </summary>
         private void Relocate(Combatant mover, IReadOnlyList<GridPosition> path, Action<GridPosition> then) =>
-            ReactToLeaving(mover, path.ToList(), LeavingReachOf(mover, path), caughtAt => then(caughtAt ?? path[^1]));
+            ReactToLeaving(mover, path.ToList(), LeavingReachOf(mover, path), caughtAt =>
+            {
+                var reached = caughtAt ?? path[^1];
+                TouchIllusions(mover, path, reached);
+                then(reached);
+            });
 
         /// <summary>
         /// Swimming deep water on the way (the user's ruling): Athletics against the setting's
@@ -2313,6 +2381,12 @@ namespace WoundBound.Game.Combat
             AttackProfile? with = null, bool sacrifice = false, Manoeuvre? manoeuvre = null, bool spendsAction = true)
         {
             var plan = with is null ? PlanAttack(attacker, target) : PlanAttackWith(attacker, with, attacker.Position, target);
+            if ((plan.Profile ?? attacker.Attack).IsRanged)
+            {
+                // A shot through a phantom wall calls it into question for whoever thinks it solid.
+                ShotThroughWalls(attacker, attacker.Position, target.Position);
+            }
+
             target.HasBeenAttackedSinceTurnStart = true;
             attacker.HasMovedSinceLastAttack = false;
             var patient = attacker.HoldsPatient;
@@ -3301,7 +3375,7 @@ namespace WoundBound.Game.Combat
                 isWall: corner => AnyUnder(corner, Setting.IsWall),
                 isClosed: corner => !mover.IsSwarm && AnyUnder(corner, ClosedSquare),
                 canStop: corner => mover.IsSwarm || !AnyUnder(corner, standing.ContainsKey),
-                isBroken: corner => tables is not null && AnyUnder(corner, sq => Setting.GroundAt(sq) == Terrain.Broken),
+                isBroken: corner => tables is not null && AnyUnder(corner, sq => GroundAt(sq) == Terrain.Broken),
                 isDeep: corner => AnyUnder(corner, Setting.IsDeepWater),
                 price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.IsNimble, freeStep: FreeStepFor(mover)),
                 brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken));
@@ -3391,7 +3465,7 @@ namespace WoundBound.Game.Combat
             {
                 var alliesDown = combatants.Count(c => c.Side == Side.Adversaries && c != creature
                     && c.IsOutOfFight && !c.HasFled && !c.HasSurrendered);
-                if (creature.Morale!.IsBroken(creature, alliesDown))
+                if (creature.Morale!.IsBroken(creature, alliesDown, BelievedBody(creature)))
                 {
                     creature.IsBroken = true;
                     Write($"{creature.Name} has had enough ({creature.Morale.Trait}) — it breaks, and looks for a way out.");

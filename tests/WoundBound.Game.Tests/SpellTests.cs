@@ -56,8 +56,8 @@ public class SpellTests
         Assert.Equal((7, 8, 4, 4, 13, 13, 11), (elthric.BodyMax, elthric.MindMax, elthric.SoulMax, elthric.StaminaMax,
             elthric.DodgeThreshold, elthric.ResolveThreshold!.Value, elthric.StabilityThreshold));
 
-        Assert.Equal(["Smite", "Scourging Light", "Vital Transfer", "Blessing", "Eye of Eolis"], mirella.Spells.Select(s => s.Name));
-        Assert.Equal(["Mind Spike", "Foresight", "Telekinetic Shove", "Blood Mist", "Flame Burst", "Conflagration"], elthric.Spells.Select(s => s.Name));
+        Assert.Equal(["Smite", "Scourging Light", "Vital Transfer", "Blessing", "Eye of Eolis", "Shrine Light", "False Portent"], mirella.Spells.Select(s => s.Name));
+        Assert.Equal(["Mind Spike", "Foresight", "Telekinetic Shove", "Blood Mist", "Flame Burst", "Conflagration", "Settle the Ground", "Phantom Double", "Phantom Wound", "Phantom Wall"], elthric.Spells.Select(s => s.Name));
         Assert.True(elthric.HasOverclock);
         Assert.True(mirella.HasSacrifice && elthric.HasSacrifice);
     }
@@ -429,10 +429,13 @@ public class SpellTests
         encounter.TryBeginTurn(elthric);
         elthric.HasMove = false;
 
-        // On 2 Body, a caster this valuable would sooner dash clear than stand and cast; of what he
-        // could do standing his ground, the torch's fire is the best.
+        // On 2 Body, a caster this valuable would sooner dash clear than stand and cast — or put a
+        // phantom double between himself and the blade; of the harm he could do standing his ground,
+        // the torch's fire is the best.
         var planner = new Combat.Brains.Utility.TurnPlanner(new Combat.Brains.Utility.Assessor(encounter.View), Combat.Brains.Utility.BrainSkill.Best);
-        var standing = planner.Options(elthric, false, 1, real: true).Where(o => o.Kind != Combat.Brains.Utility.OptionKind.Move).OrderByDescending(o => o.Score).ToList();
+        var standing = planner.Options(elthric, false, 1, real: true)
+            .Where(o => o.Kind != Combat.Brains.Utility.OptionKind.Move && o.Cast?.Spell.SpellType is null or SpellType.Harm)
+            .OrderByDescending(o => o.Score).ToList();
         var cast = standing[0];
         Assert.True(cast.Cast is not null, "Chose instead: " + string.Join(" | ", standing.Take(6).Select(o => $"{o.Score:0.00} {o.Why}")));
         Assert.Equal("Flame Burst", cast.Cast!.Spell.Name);

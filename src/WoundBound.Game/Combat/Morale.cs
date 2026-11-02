@@ -28,9 +28,19 @@ namespace WoundBound.Game.Combat
             }).FirstOrDefault(m => m is not null);
 
         /// <summary>Whether <paramref name="creature"/> has reached its breaking point, with <paramref name="alliesDown"/> of its side gone down.</summary>
-        public bool IsBroken(Combatant creature, int alliesDown) =>
-            (BreaksBelowHalfBody && creature.Body * 2 < creature.BodyMax)
+        /// <param name="believedBody">The Body it believes it has — a wound felt and not taken counts, while it's taken in (the user's ruling, 2026-11-02).</param>
+        public bool IsBroken(Combatant creature, int alliesDown, int? believedBody = null) =>
+            (BreaksBelowHalfBody && (believedBody ?? creature.Body) * 2 < creature.BodyMax)
             || (BreaksWhenAlliesDown > 0 && alliesDown >= BreaksWhenAlliesDown);
+
+        /// <summary>
+        /// One step from its breaking point: one more ally down, or one more wound, would do it. Help
+        /// seen coming for the other side breaks a creature in this state, and nobody steadier.
+        /// </summary>
+        public bool IsWavering(Combatant creature, int alliesDown, int believedBody) =>
+            !IsBroken(creature, alliesDown, believedBody)
+            && ((BreaksBelowHalfBody && (believedBody - 1) * 2 < creature.BodyMax)
+                || (BreaksWhenAlliesDown > 0 && alliesDown + 1 >= BreaksWhenAlliesDown));
     }
 
     /// <summary>Where a goal of the fight stands.</summary>

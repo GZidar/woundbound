@@ -47,6 +47,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     SpellType.Control when usesTricks => enemies.Where(e => e.ResolveThreshold is not null && !View.IsControlled(e))
                         .SelectMany(e => (SpellArea.FixedEffectOf(spell) is { } written ? [written] : new[] { ControlEffect.Fear, ControlEffect.Compulsion })
                             .Select(effect => (new SpellCast(spell) { Target = e, Effect = effect }, (Func<CastPlan, double>)(plan => Denial * ControlWorth(actor, effect, plan))))),
+                    SpellType.Illusion when usesTricks => IllusionCasts(actor, spell, at, enemies),
+                    SpellType.Utility when usesTricks && SpellArea.LeverOf(spell) == Lever.Light && View.IsUnlit => VolumeCorners(spell, enemies)
+                        .Select(corner => (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner }, (Func<CastPlan, double>)(plan => LightWorth(actor, spell, plan)))),
                     SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Shift => enemies.Where(e => !e.IsBroken)
                         .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => Denial * ShiftWorth(actor, plan)))),
                     _ => [],
@@ -307,6 +310,121 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// often wouldn't have — so they are discounted (calibrated by simulation, 2026-11-02).
         /// </summary>
         private const double Denial = 0.6;
+
+        /// <summary>
+        /// Conjured light is worth the Dodge it strips from whoever stands in it, for the rest of the
+        /// scene: the dark's +2 or +4 off an enemy is so much more landing from every one of ours who
+        /// can reach it, and off one of ours, so much more landing on us. It stays where it is put, so
+        /// it is reckoned over a couple of rounds, not the whole fight.
+        /// </summary>
+        private double LightWorth(Combatant actor, SpellDefinition spell, CastPlan plan)
+        {
+            var light = new Working(actor, spell.Name, Lever.Light, plan.Origin, SpellArea.Across(spell.Size), plan.Area.ToHashSet(),
+                spell.Size == SpellSize.Small ? 1 : 2);
+            const double perPointPerBlow = 0.05 * 3.5;
+            const double rounds = 2;
+            double worth = 0;
+            foreach (var creature in View.PartyOnBoard.Concat(View.Adversaries).Distinct().Where(c => !c.IsOutOfFight))
+            {
+                var stripped = View.VisibilityDodgeModifier(creature) - View.DodgeModifierWith(creature, light);
+                if (stripped <= 0)
+                {
+                    continue;
+                }
+
+                // At None nobody beyond Close can be targeted at all: lighting it opens it to every bow.
+                var opened = View.VisibilityDodgeModifier(creature) >= 4 ? 2 : 0;
+                var striking = Math.Min(3, View.EnemiesOf(creature).Count(e => e.DistanceTo(creature) <= 8));
+                var value = (stripped + opened) * perPointPerBlow * striking * rounds * assess.PerWound(creature);
+                worth += creature.Side == actor.Side ? -value : value;
+            }
+
+            return Denial * worth;
+        }
+
+        /// <summary>
+        /// The Illusions worth weighing (Core Rules §11, with the user's rulings for a fight):
+        /// <list type="bullet">
+        /// <item>a Phantom Wound into a foe whose Morale breaks below half Body, worth the chance the felt wounds break it;</item>
+        /// <item>phantom help, behind the foes, worth every wavering foe it would break;</item>
+        /// <item>a phantom figure beside the foes, worth the blows it draws off ours.</item>
+        /// </list>
+        /// A foe that mustn't get away is never broken on purpose. A phantom wall isn't weighed yet.
+        /// </summary>
+        private IEnumerable<(SpellCast Cast, Func<CastPlan, double> Worth)> IllusionCasts(
+            Combatant actor, SpellDefinition spell, GridPosition at, IReadOnlyList<Combatant> enemies)
+        {
+            var breakable = enemies.Where(e => !e.IsPhantom && !e.IsBroken && e.Morale is not null && !View.MustNotEscape(e)).ToList();
+            switch (Encounter.FormOf(spell))
+            {
+                case IllusionForm.Wound:
+                    foreach (var foe in breakable.Where(e => e.Morale!.BreaksBelowHalfBody && e.DistanceTo(at) <= 1))
+                    {
+                        yield return (new SpellCast(spell) { Target = foe }, _ => BreakWorth(foe) * FeltBreaks(actor, spell, foe));
+                    }
+
+                    break;
+
+                case IllusionForm.Reinforcements:
+                    // Put down behind the nearest foe, away from the caster.
+                    foreach (var foe in enemies.Where(e => !e.IsPhantom).OrderBy(e => e.DistanceTo(at)).Take(2))
+                    {
+                        var corner = new GridPosition(foe.Position.X + 2 * Math.Sign(foe.Position.X - at.X), foe.Position.Y + 2 * Math.Sign(foe.Position.Y - at.Y));
+                        yield return (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner },
+                            plan => enemies.Where(e => !e.IsPhantom && View.IsWavering(e) && plan.Area.Any(sq => e.DistanceTo(sq) <= 16))
+                                .Sum(e => View.MustNotEscape(e) ? -2 * assess.Value(e) : BreakWorth(e)));
+                    }
+
+                    break;
+
+                case IllusionForm.Figure:
+                    foreach (var foe in enemies.Where(e => !e.IsPhantom && !e.IsBroken).OrderBy(e => e.DistanceTo(at)).Take(2))
+                    {
+                        foreach (var square in Aims.Select(d => new GridPosition(foe.Position.X + d.X, foe.Position.Y + d.Y))
+                                     .Where(sq => View.At(sq) is null && !View.Setting.IsWall(sq)).Take(3))
+                        {
+                            yield return (new SpellCast(spell) { Corner = square }, _ => DecoyWorth(actor, square, enemies));
+                        }
+                    }
+
+                    break;
+            }
+        }
+
+        /// <summary>A foe broken is a foe that stops fighting — most of what it was worth, since it may yet be caught or turn.</summary>
+        private double BreakWorth(Combatant foe) => 0.6 * assess.Value(foe);
+
+        /// <summary>The chance the wounds a Phantom Wound makes its target feel take what it believes it has below half.</summary>
+        private double FeltBreaks(Combatant caster, SpellDefinition spell, Combatant foe)
+        {
+            var count = SpellCalculator.HealHarmDiceCount(spell.SpellTier);
+            var sides = DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target));
+            var grace = caster.Build is { } build ? SpellCalculator.GraceBonus(build, spell) : 0;
+            var believed = View.BelievedBody(foe);
+            var sums = Sums(count, sides).ToList();
+            return sums.Count(sum => (believed - sum - grace) * 2 < foe.BodyMax) / (double)sums.Count;
+        }
+
+        /// <summary>
+        /// A phantom figure is worth the blows it draws: each foe that could strike at it might as
+        /// well swing at it as at one of ours — about half the time — for the two rounds it stands.
+        /// </summary>
+        private double DecoyWorth(Combatant actor, GridPosition square, IReadOnlyList<Combatant> enemies)
+        {
+            var ours = View.AlliesOf(actor).ToList();
+            var perWound = ours.Average(c => assess.PerWound(c));
+            double worth = 0;
+            foreach (var foe in enemies.Where(e => !e.IsPhantom && !e.IsBroken))
+            {
+                var stride = View.SquaresFor(foe.Speed, 1);
+                if (foe.DistanceTo(square) <= foe.Reach + stride || (foe.HasRangedAttack && foe.DistanceTo(square) <= 16))
+                {
+                    worth += 0.5 * assess.Threat(foe) * perWound;
+                }
+            }
+
+            return Denial * 2 * worth;
+        }
 
         /// <summary>A Buff on Dodge is worth the blows it would turn before the caster's next turn.</summary>
         private double BuffWorth(CastPlan plan, double care)

@@ -125,6 +125,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Heal, Meditate or Pray over itself or an adjacent ally, with the action.</summary>
         public sealed record Tend(Rules.Enums.CombatAction Action, Combatant Target) : GmStep;
 
+        /// <summary>Spend the action testing an Illusion the creature suspects — a Search check against its Deceit (Core Rules §11).</summary>
+        public sealed record Search(Illusion Illusion) : GmStep;
+
         /// <summary>Move to <paramref name="Square"/> hauling whoever it holds — a move dearer, and rolled for.</summary>
         public sealed record Drag(GridPosition Square) : GmStep;
 

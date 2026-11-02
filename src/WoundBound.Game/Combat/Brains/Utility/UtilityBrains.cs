@@ -84,6 +84,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.Exploit => new GmStep.Exploit(choice.Exploit!.Value),
                 OptionKind.RaiseShield => new GmStep.RaiseShield(),
                 OptionKind.Cast => new GmStep.Cast(choice.Cast!),
+                OptionKind.Search => new GmStep.Search(choice.Illusion!),
                 OptionKind.Control => new GmStep.Control(choice.Control!.Value, choice.Target!),
                 OptionKind.Aid => new GmStep.Aid(choice.Action!.Value, choice.Target!),
                 OptionKind.Tend => new GmStep.Tend(choice.Action!.Value, choice.Target!),

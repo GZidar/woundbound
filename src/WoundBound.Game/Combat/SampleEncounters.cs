@@ -158,7 +158,7 @@ namespace WoundBound.Game.Combat
                 new InventoryItemDefinition { Name = "Lantern", Quantity = 1, IsLit = lantern },
                 new InventoryItemDefinition { Name = "Oil (flask)", Quantity = 1 },
             },
-            Spells = { data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Vital Transfer"), data.Spell("Blessing"), EyeOfEolis },
+            Spells = { data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Vital Transfer"), data.Spell("Blessing"), EyeOfEolis, ShrineLight, data.Spell("False Portent") },
         };
 
         /// <summary>
@@ -178,6 +178,59 @@ namespace WoundBound.Game.Combat
             Range = SpellRange.Short,
             Threshold = ThresholdType.Resolve,
             Notes = "For a moment the target sees what Mirella sees: the Eye of Eolis opening in the dark above them, and it knows their name.",
+        };
+
+        /// <summary>
+        /// The light Mirella raises in Core Rules §11's Example of Play: Utility — "the carved letters
+        /// start to shine, the way the shrine lamps do at home." Divine, a Small Volume at Close: one
+        /// carried light where it is put, for the scene, and out if she goes down.
+        /// </summary>
+        public static SpellDefinition ShrineLight => new()
+        {
+            Name = "Shrine Light",
+            Source = MagicSource.DivineMagic,
+            SpellTier = Tier.T1,
+            SpellType = SpellType.Utility,
+            Target = SpellTarget.Many,
+            Shape = SpellShape.Volume,
+            Size = SpellSize.Small,
+            Range = SpellRange.Close,
+            Notes = "Whatever she lays a hand on begins to shine, the way the shrine lamps do at home - light that stays where it was put.",
+        };
+
+        /// <summary>
+        /// A Sight Illusion built for the game from Core Rules §11: a block of fitted stone standing on
+        /// open ground — seen, not felt, so walking into it or shooting through it gives it away.
+        /// </summary>
+        public static SpellDefinition PhantomWall => new()
+        {
+            Name = "Phantom Wall",
+            Source = MagicSource.AetherMagic,
+            SpellTier = Tier.T1,
+            SpellType = SpellType.Illusion,
+            Target = SpellTarget.Many,
+            Shape = SpellShape.Volume,
+            Size = SpellSize.Small,
+            Range = SpellRange.Short,
+            Notes = "A wall of fitted stone stands where there was open ground - seen, never touched.",
+        };
+
+        /// <summary>
+        /// An Aether working on the ground, built for the game from Core Rules §9's "drying, damping,
+        /// firming or fouling ground": a Small Volume pressed flat and dry underfoot, or churned to mire —
+        /// one grade either way, for the scene.
+        /// </summary>
+        public static SpellDefinition SettleTheGround => new()
+        {
+            Name = "Settle the Ground",
+            Source = MagicSource.AetherMagic,
+            SpellTier = Tier.T1,
+            SpellType = SpellType.Utility,
+            Target = SpellTarget.Many,
+            Shape = SpellShape.Volume,
+            Size = SpellSize.Small,
+            Range = SpellRange.Short,
+            Notes = "Thought presses the ground flat and dry for a sure footing - or churns it to mire under somebody else's.",
         };
 
         /// <summary>
@@ -209,7 +262,8 @@ namespace WoundBound.Game.Combat
             Spells =
             {
                 data.Spell("Mind Spike"), data.Spell("Foresight"), data.Spell("Telekinetic Shove"), data.Spell("Blood Mist"),
-                data.Spell("Flame Burst"), data.Spell("Conflagration"),
+                data.Spell("Flame Burst"), data.Spell("Conflagration"), SettleTheGround,
+                data.Spell("Phantom Double"), data.Spell("Phantom Wound"), PhantomWall,
             },
         };
 

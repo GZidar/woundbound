@@ -18,6 +18,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         RegainFooting,
         Cast,
         Exploit,
+        Search,
         End,
     }
 
@@ -28,7 +29,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
     public sealed record Option(OptionKind Kind, double Score, string Why,
         GridPosition? Square = null, Combatant? Target = null, AttackProfile? With = null,
         CombatAction? Action = null, ControlAction? Control = null, bool WithAdvantage = false, SpellCast? Cast = null,
-        Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null, OptionKind? Then = null);
+        Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null, OptionKind? Then = null, Illusion? Illusion = null);
 
     /// <summary>
     /// Runs through everything a creature could do with what it has left of its turn — every
@@ -332,6 +333,19 @@ namespace WoundBound.Game.Combat.Brains.Utility
             if (actor.DroppedWeapon is not null && actor.DroppedAt == at && (!checkRules || BattleView.TakeUpRefusal(actor) is null))
             {
                 yield return new Option(OptionKind.TakeUpWeapon, 0.8 + 1.5 * assess.Threat(actor), $"take up the {actor.DroppedWeapon.Name}");
+            }
+
+            // Testing what it is taken in by: it can't know the thing is false, so it is worth no more
+            // than a nagging doubt — a figure that stands too still, a wall it never saw built. Rarely
+            // better than a blow; a loose chooser takes it now and then.
+            if (at == actor.Position && actor.ActionsRemaining > 0)
+            {
+                foreach (var illusion in View.Illusions.Where(i => i.Form != IllusionForm.Reinforcements && View.Fools(i, actor)
+                             && (!checkRules || View.SearchRefusal(actor, i) is null)
+                             && (i.Subject == actor || i.Squares.Any(sq => actor.DistanceTo(sq) <= 8))))
+                {
+                    yield return new Option(OptionKind.Search, 0.12, $"test {illusion.Spell}", Illusion: illusion);
+                }
             }
 
             foreach (var cast in spells.Options(actor, at, checkRules, care, skill.Uses(Trick.SpellTricks)))

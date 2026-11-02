@@ -80,10 +80,6 @@ namespace WoundBound.Game.Combat
                 return CastPlan.Refused($"{caster.Name} already has a Control spell holding somebody — only one at a time.");
             }
 
-            if (spell.SpellType is SpellType.Illusion or SpellType.Utility)
-            {
-                return CastPlan.Refused($"{spell.SpellType} spells aren't in the game yet.");
-            }
 
             // Which access pays for it, and what it rolls (Core Rules §11, "Pure Magic", "Bleeding for Power").
             if (caster.MagicAccess.FirstOrDefault(a => a.Source == spell.Source) is not { } access)
@@ -162,15 +158,30 @@ namespace WoundBound.Game.Combat
             // Where it lands (Core Rules §11, "Spell Shape", "Placing a Volume").
             var touch = spell.Range == SpellRange.Touch || spell.Shape == SpellShape.None;
             var shape = SpellArea.ShapeOf(cast);
-            if (SpellArea.ShapeRefusal(spell, shape) is { } wrongShape)
+            if (spell.SpellType != SpellType.Illusion && SpellArea.ShapeRefusal(spell, shape) is { } wrongShape)
             {
                 return CastPlan.Refused(wrongShape);
+            }
+
+            if (spell.SpellType == SpellType.Utility && UtilityRefusal(spell, shape) is { } noUtility)
+            {
+                return CastPlan.Refused(noUtility);
             }
 
             GridPosition origin;
             List<GridPosition> squares;
             List<Combatant> caught;
-            if (touch || shape == SpellShape.Ray)
+            if (spell.SpellType == SpellType.Illusion)
+            {
+                var placed = PlaceIllusion(caster, from, cast);
+                if (placed.Refusal is { } nowhere)
+                {
+                    return CastPlan.Refused(nowhere);
+                }
+
+                (origin, squares, caught, touch) = (placed.Origin, placed.Squares, placed.Caught, placed.Touch);
+            }
+            else if (touch || shape == SpellShape.Ray)
             {
                 if (cast.Target is not { } target)
                 {
@@ -280,6 +291,15 @@ namespace WoundBound.Game.Combat
 
             switch (spell.SpellType)
             {
+                case SpellType.Utility:
+                    // It works on the ground, not on whoever happens to be standing there.
+                    caught = [];
+                    break;
+
+                case SpellType.Illusion:
+                    // It works on whoever sees it, which is a matter for the moment it stands.
+                    break;
+
                 case SpellType.Heal:
                     var patient = caught[0];
                     if (patient == caster)
@@ -337,7 +357,7 @@ namespace WoundBound.Game.Combat
                 caught = caught.Where(c => c != swarmUnmoved && !(c.IsSwarm && !c.Footprint.All(squares.Contains))).ToList();
             }
 
-            if (caught.Count == 0)
+            if (caught.Count == 0 && spell.SpellType is not (SpellType.Utility or SpellType.Illusion))
             {
                 return CastPlan.Refused(swarmUnmoved is not null
                     ? $"{spell.Name} has to cover the whole of {swarmUnmoved.Name} to move it — a part of a Swarm can't be moved."
@@ -372,7 +392,7 @@ namespace WoundBound.Game.Combat
                 wounds--;
             }
 
-            var rolls = spell.SpellType is SpellType.Harm or SpellType.Control || (spell.SpellType == SpellType.Motion && motion != MotionKind.Quicken);
+            var rolls = spell.SpellType is SpellType.Harm or SpellType.Control or SpellType.Illusion || (spell.SpellType == SpellType.Motion && motion != MotionKind.Quicken);
             if (cast.Sacrifice && SacrificeRefusal(caster) is { } noSacrifice)
             {
                 return CastPlan.Refused(noSacrifice);
@@ -520,6 +540,7 @@ namespace WoundBound.Game.Combat
 
             var where = plan.Range == SpellRange.Touch ? $"with a hand on {plan.Targets[0].Name}"
                 : plan.Area.Count > 1 ? $"as a {SpellArea.ShapeOf(cast).ToString().ToLowerInvariant()} over {plan.Area.Count} squares at {plan.Range}"
+                : plan.Targets.Count == 0 ? $"on {plan.Origin}, {plan.Range}"
                 : $"at {plan.Targets[0].Name}, {plan.Range}";
             Write($"{caster.Name} casts {spell.Name} {where} — {(paid.Count == 0 ? "free" : string.Join(", ", paid))}" +
                   (cast.Sustain ? ", declared Sustained." : "."));
@@ -534,6 +555,20 @@ namespace WoundBound.Game.Combat
                 then();
             }
 
+            // A spell into a phantom goes through nothing and lands on nothing; one flying through a
+            // phantom wall calls it into question.
+            if (plan.Range != SpellRange.Touch)
+            {
+                ShotThroughWalls(caster, caster.Position, plan.Origin);
+            }
+
+            if (plan.Targets.Count == 1 && plan.Targets[0].IsPhantom)
+            {
+                PassesThroughPhantom(caster, plan.Targets[0], spell.Name);
+                Finish();
+                return;
+            }
+
             switch (spell.SpellType)
             {
                 case SpellType.Harm:
@@ -545,6 +580,14 @@ namespace WoundBound.Game.Combat
                     return;
                 case SpellType.Control:
                     CastControl(caster, cast, plan, Finish);
+                    return;
+                case SpellType.Utility:
+                    Work(caster, cast, plan);
+                    Finish();
+                    return;
+                case SpellType.Illusion:
+                    CastIllusion(caster, cast, plan);
+                    Finish();
                     return;
                 case SpellType.Buff or SpellType.Bane:
                     foreach (var target in plan.Targets)
@@ -1122,6 +1165,8 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void EndSpellsOfFallenCasters(bool roundEnd)
         {
+            EndWorkingsOfFallenCasters();
+            AgeIllusions(roundPassed: false);
             foreach (var effect in spellEffects.ToList())
             {
                 var caster = effect.Caster;
