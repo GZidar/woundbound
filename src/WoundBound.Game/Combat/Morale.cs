@@ -34,13 +34,13 @@ namespace WoundBound.Game.Combat
             || (BreaksWhenAlliesDown > 0 && alliesDown >= BreaksWhenAlliesDown);
 
         /// <summary>
-        /// One step from its breaking point: one more ally down, or one more wound, would do it. Help
-        /// seen coming for the other side breaks a creature in this state, and nobody steadier.
+        /// Shaken by hurt: one more wound, as it believes its Body, would take it below half. Help seen
+        /// coming for the other side breaks a creature in this state, and nobody steadier — an unhurt
+        /// band shrugs it off, however few allies it could lose (the user's ruling, 2026-11-02).
         /// </summary>
         public bool IsWavering(Combatant creature, int alliesDown, int believedBody) =>
             !IsBroken(creature, alliesDown, believedBody)
-            && ((BreaksBelowHalfBody && (believedBody - 1) * 2 < creature.BodyMax)
-                || (BreaksWhenAlliesDown > 0 && alliesDown + 1 >= BreaksWhenAlliesDown));
+            && BreaksBelowHalfBody && (believedBody - 1) * 2 < creature.BodyMax;
     }
 
     /// <summary>Where a goal of the fight stands.</summary>

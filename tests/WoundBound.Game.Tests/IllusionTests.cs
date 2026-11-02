@@ -153,14 +153,15 @@ public class IllusionTests
     [Fact]
     public void FalsePortent_BreaksOnlyTheWavering()
     {
-        // Two Cowardice bandits: one ally down breaks each, so with none down yet they are one step
-        // from it — wavering. A third, Not a Fanatic, needs two down and stands.
+        // Wavering is shaken by hurt: one more wound would take it below half. The bandit on 3 of 6
+        // Body is; the unhurt one isn't, however close Cowardice puts it to running.
         var build = SampleEncounters.MirellaVask(Data);
         var mirella = CombatantFactory.FromCharacter(build, new GridPosition(2, 4));
         var coward = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Coward", new GridPosition(9, 4));
         var steady = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit with { Features = [new("Not a Fanatic", "")] },
             "Steady", new GridPosition(9, 6));
         Assert.Equal("Not a Fanatic", steady.Morale?.Trait);
+        coward.Body = 3;
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [mirella, coward, steady], Data.RangeBands,
             new ScriptedDice(9, 8), environment: Data.Environment);
         encounter.TryBeginTurn(mirella);

@@ -185,13 +185,40 @@ namespace WoundBound.Game.Combat.Brains.Utility
             return new TurnPlanner(assess, Skill);
         }
 
+        /// <summary>
+        /// The order is the party's to choose afresh each round (Core Rules §9). By default the one
+        /// with the most to do goes, which puts the heavy blows in before the other side's turns come
+        /// round. But a caster whose best move is a Bane on a foe the others are about to swing at —
+        /// worth something only before their blows — goes first for it. A Help or a Trip doesn't jump
+        /// the queue the same way: simulation showed a blade spent on helping, ahead of the blades,
+        /// cost the party more than the Advantage gave it (2026-11-02).
+        /// </summary>
         public Combatant ChooseNextCharacter(BattleView view, IReadOnlyList<Combatant> stillToAct)
         {
             var planner = Planner(view, out _);
-            return Choose.Pick(stillToAct,
-                c => planner.Options(c, hasMove: true, actions: 1, real: false, stillToAct: stillToAct).Select(o => o.Score).DefaultIfEmpty(0).Max(),
-                Skill, random);
+            Option? Best(Combatant c, IReadOnlyCollection<Combatant> others) =>
+                planner.Options(c, hasMove: true, actions: 1, real: false, stillToAct: others).MaxBy(o => o.Score);
+
+            var scored = stillToAct.ToDictionary(c => c, c =>
+            {
+                var now = Best(c, stillToAct);
+                var score = now?.Score ?? 0;
+                if (stillToAct.Count < 2 || now?.Cast?.Spell.SpellType != Rules.Enums.SpellType.Bane)
+                {
+                    return score;
+                }
+
+                var urgency = score - (Best(c, [c])?.Score ?? 0);
+                return urgency > UrgencyThreshold ? Urgent + urgency : score;
+            });
+            return Choose.Pick(stillToAct, c => scored[c], Skill, random);
         }
+
+        /// <summary>How much more going now must be worth than going last before it decides the order.</summary>
+        private const double UrgencyThreshold = 0.15;
+
+        /// <summary>Puts any character whose best move is worth more going first ahead of every one whose isn't.</summary>
+        private const double Urgent = 100;
 
         public PartyStep NextStep(BattleView view, Combatant character)
         {

@@ -21,9 +21,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         private BattleView View => assess.View;
 
+        /// <summary>Who of the caster's side will act before it does again, for the Options being weighed; null when it isn't known.</summary>
+        private IReadOnlyCollection<Combatant>? stillToAct;
+
         /// <param name="checkRules">Casting from where the caster stands now: the turn's own refusals apply.</param>
-        public IEnumerable<Option> Options(Combatant actor, GridPosition at, bool checkRules, double care, bool usesTricks)
+        /// <param name="stillToAct">The caster's allies who'll act before the caster does again, where the brain knows (a party choosing its order); null reads it off who has acted this round.</param>
+        public IEnumerable<Option> Options(Combatant actor, GridPosition at, bool checkRules, double care, bool usesTricks,
+            IReadOnlyCollection<Combatant>? stillToAct = null)
         {
+            this.stillToAct = stillToAct;
             if (actor.Spells.Count == 0)
             {
                 yield break;
@@ -48,6 +54,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         .SelectMany(e => (SpellArea.FixedEffectOf(spell) is { } written ? [written] : new[] { ControlEffect.Fear, ControlEffect.Compulsion })
                             .Select(effect => (new SpellCast(spell) { Target = e, Effect = effect }, (Func<CastPlan, double>)(plan => Denial * ControlWorth(actor, effect, plan))))),
                     SpellType.Illusion when usesTricks => IllusionCasts(actor, spell, at, enemies),
+                    SpellType.Bane when usesTricks && spell.Target == SpellTarget.Many => VolumeCorners(spell, enemies.Where(e => !e.IsPhantom))
+                        .Select(corner => (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner },
+                            (Func<CastPlan, double>)(plan => plan.Targets.Sum(t => BaneWorth(actor, t, spell.Threshold ?? ThresholdType.Dodge))))),
+                    SpellType.Bane when usesTricks => enemies.Where(e => !e.IsPhantom && !e.IsOutOfFight)
+                        .SelectMany(e => BaneThresholds(spell, e).Select(threshold => (new SpellCast(spell) { Target = e, Threshold = threshold },
+                            (Func<CastPlan, double>)(plan => BaneWorth(actor, e, threshold))))),
                     SpellType.Utility when usesTricks && SpellArea.LeverOf(spell) == Lever.Light && View.IsUnlit => VolumeCorners(spell, enemies)
                         .Select(corner => (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner }, (Func<CastPlan, double>)(plan => LightWorth(actor, spell, plan)))),
                     SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Shift => enemies.Where(e => !e.IsBroken)
@@ -424,6 +436,74 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             return Denial * 2 * worth;
+        }
+
+        /// <summary>The Thresholds a Bane could be laid on: the one it is written for, or — a Curse — the caster's pick of those in the game.</summary>
+        private static IEnumerable<ThresholdType> BaneThresholds(SpellDefinition spell, Combatant target) =>
+            spell.Threshold is { } written
+                ? [written]
+                : new[] { ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve }
+                    .Where(t => t != ThresholdType.Resolve || target.ResolveThreshold is not null);
+
+        /// <summary>
+        /// A Bane is worth what its point off a Threshold lets land before the caster's next turn,
+        /// which is when it lapses (Core Rules §11, "Buff / Bane Spells"): off Dodge, the extra
+        /// wounds from every blow still to come at the target from those of ours yet to act; off
+        /// Resolve, the better odds of a Control from one of ours who has one, or of a hold already
+        /// on it staying; off Stability, of a Shove, Trip or Grab from one of ours in reach. Laid on
+        /// one of ours — a haze that caught a friend — it costs the same the other way. Nothing for
+        /// a point already lost to a Bane of the same kind. Not discounted as a denied turn is: these
+        /// are our own blows, from those of ours still to act, at their best.
+        /// </summary>
+        private double BaneWorth(Combatant actor, Combatant target, ThresholdType threshold)
+        {
+            if (target.IsOutOfFight || View.SpellsInPlay.Any(s => s.Target == target && s.Type == SpellType.Bane && s.Threshold == threshold))
+            {
+                return 0;
+            }
+
+            var amount = -ThresholdModifierCalculator.BaneAmount(Tier.T1);
+            var sign = target.Side == actor.Side ? -1.0 : 1.0;
+
+            // Those who would be glad of it: the other side from the target, still to act before the
+            // caster's next turn — the caster too, with an action to spare after this one.
+            var acting = (sign > 0 ? View.AlliesOf(actor) : View.EnemiesOf(actor))
+                .Where(a => !a.IsPhantom && !a.IsBroken && (a == actor ? actor.ActionsRemaining > 1
+                    : sign > 0 && stillToAct is not null ? stillToAct.Contains(a) : !a.HasActedThisRound))
+                .ToList();
+
+            double worth = 0;
+            switch (threshold)
+            {
+                case ThresholdType.Dodge:
+                    foreach (var attacker in acting)
+                    {
+                        if (assess.BestAttack(attacker, attacker.Position, target).With is not { } with)
+                        {
+                            continue;
+                        }
+
+                        var dodge = target.DodgeThreshold + View.VisibilityDodgeModifier(target);
+                        var now = assess.Blow(attacker, with, target, with.DamageDieSides, dodge);
+                        var then = assess.Blow(attacker, with, target, with.DamageDieSides, dodge - amount);
+                        worth += (then.ExpectedDealt - now.ExpectedDealt) * assess.PerWound(target)
+                                 + 0.3 * (then.Kill - now.Kill) * assess.Value(target);
+                    }
+
+                    break;
+
+                case ThresholdType.Resolve when target.ResolveThreshold is not null:
+                    var minds = acting.Count(a => a.Spells.Any(sp => sp.SpellType == SpellType.Control)) + (View.IsControlled(target) ? 1 : 0);
+                    worth = minds * 0.04 * amount * assess.Value(target);
+                    break;
+
+                case ThresholdType.Stability:
+                    var hands = acting.Count(a => a.DistanceTo(target) <= a.OwnReach + 1 && !a.IsSwarm);
+                    worth = hands * 0.02 * amount * assess.Value(target);
+                    break;
+            }
+
+            return sign * worth;
         }
 
         /// <summary>A Buff on Dodge is worth the blows it would turn before the caster's next turn.</summary>

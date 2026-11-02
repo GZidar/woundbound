@@ -158,7 +158,7 @@ namespace WoundBound.Game.Combat
                 new InventoryItemDefinition { Name = "Lantern", Quantity = 1, IsLit = lantern },
                 new InventoryItemDefinition { Name = "Oil (flask)", Quantity = 1 },
             },
-            Spells = { data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Vital Transfer"), data.Spell("Blessing"), EyeOfEolis, ShrineLight, data.Spell("False Portent") },
+            Spells = { data.Spell("Smite"), data.Spell("Scourging Light"), data.Spell("Vital Transfer"), data.Spell("Blessing"), EyeOfEolis, ShrineLight, data.Spell("False Portent"), data.Spell("Curse") },
         };
 
         /// <summary>
@@ -263,7 +263,7 @@ namespace WoundBound.Game.Combat
             {
                 data.Spell("Mind Spike"), data.Spell("Foresight"), data.Spell("Telekinetic Shove"), data.Spell("Blood Mist"),
                 data.Spell("Flame Burst"), data.Spell("Conflagration"), SettleTheGround,
-                data.Spell("Phantom Double"), data.Spell("Phantom Wound"), PhantomWall,
+                data.Spell("Phantom Double"), data.Spell("Phantom Wound"), PhantomWall, data.Spell("Fog of Confusion"),
             },
         };
 

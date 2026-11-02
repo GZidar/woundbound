@@ -163,7 +163,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     foreach (var act in Actions(actor, square, real && !moved, bonusAvailable, bankFull, stillToAct, care))
                     {
                         var score = standing + act.Score;
-                        options.Add(first is null ? act with { Score = score } : first with { Score = score, Why = $"{first.Why}, then {act.Why}", Target = act.Target, Then = act.Kind });
+                        options.Add(first is null ? act with { Score = score } : first with { Score = score, Why = $"{first.Why}, then {act.Why}", Target = act.Target, Then = act.Kind, Cast = act.Cast });
                     }
                 }
 
@@ -348,7 +348,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
-            foreach (var cast in spells.Options(actor, at, checkRules, care, skill.Uses(Trick.SpellTricks)))
+            foreach (var cast in spells.Options(actor, at, checkRules, care, skill.Uses(Trick.SpellTricks), stillToAct))
             {
                 yield return cast;
             }
