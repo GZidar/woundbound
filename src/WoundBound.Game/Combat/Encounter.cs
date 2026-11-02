@@ -3448,6 +3448,16 @@ namespace WoundBound.Game.Combat
         internal Dictionary<GridPosition, int> SquaresWithin(Combatant mover, int moves) =>
             MapFor(mover).All.Where(o => o.Value.Cost <= moves).ToDictionary(o => o.Key, o => o.Value.Cost);
 
+        /// <summary>
+        /// As <see cref="SquaresWithin"/>, as though <paramref name="absent"/> weren't on the board —
+        /// for a brain weighing what its standing somewhere keeps the other side from reaching.
+        /// </summary>
+        internal Dictionary<GridPosition, int> SquaresWithinIfAbsent(Combatant mover, Combatant absent, int moves)
+        {
+            var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover)), mover.IsNimble));
+            return BuildMap(mover, reach, absent).All.Where(o => o.Value.Cost <= moves).ToDictionary(o => o.Key, o => o.Value.Cost);
+        }
+
         private readonly Dictionary<Combatant, (int Stamp, MovementMap Map)> movementMaps = new();
 
         /// <summary>
@@ -3465,13 +3475,21 @@ namespace WoundBound.Game.Combat
                 return known.Map;
             }
 
+            var map = BuildMap(mover, reach, absent: null);
+            movementMaps[mover] = (stamp, map);
+            return map;
+        }
+
+        /// <summary>Every route <paramref name="mover"/> could take, out to <paramref name="reach"/> squares — with <paramref name="absent"/> taken off the board, where one is named.</summary>
+        private MovementMap BuildMap(Combatant mover, int reach, Combatant? absent)
+        {
             var tables = environment;
             var enemySide = mover.Side == Side.Party ? Side.Adversaries : Side.Party;
             // A Swarm or a Tiny thing holds no ground: its squares are open to everyone.
-            var standing = combatants.Where(c => c.OccupiesSquare && c != mover && c.HoldsGround)
+            var standing = combatants.Where(c => c.OccupiesSquare && c != mover && c != absent && c.HoldsGround)
                 .SelectMany(c => c.Footprint.Select(sq => (Square: sq, Creature: c)))
                 .GroupBy(x => x.Square).ToDictionary(g => g.Key, g => g.First().Creature);
-            var threats = Fighting(enemySide).ToList();
+            var threats = Fighting(enemySide).Where(e => e != absent).ToList();
             bool ClosedSquare(GridPosition square) => standing.TryGetValue(square, out var there)
                 && (there.Side != mover.Side || threats.Any(e => e.CanReach(square)));
 
@@ -3490,7 +3508,6 @@ namespace WoundBound.Game.Combat
                 isDeep: corner => AnyUnder(corner, Setting.IsDeepWater),
                 price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.IsNimble, freeStep: FreeStepFor(mover)),
                 brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken));
-            movementMaps[mover] = (stamp, map);
             return map;
         }
 

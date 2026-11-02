@@ -686,12 +686,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>The best Harm a caster could throw from <paramref name="square"/> next turn, for where to stand.</summary>
-        public double BestHarmFrom(Combatant actor, GridPosition square)
+        /// <param name="worthChasing">The enemies worth closing on — not a runner being let go.</param>
+        public double BestHarmFrom(Combatant actor, GridPosition square, IEnumerable<Combatant> worthChasing)
         {
             double best = 0;
+            var targets = worthChasing.Where(e => e.DistanceTo(square) <= 8).ToList();
             foreach (var spell in actor.Spells.Where(s => s.SpellType == SpellType.Harm && s.Target == SpellTarget.One))
             {
-                foreach (var enemy in View.EnemiesOf(actor).Where(e => e.DistanceTo(square) <= 8))
+                foreach (var enemy in targets)
                 {
                     var plan = View.PlanCastFrom(actor, square, new SpellCast(spell) { Target = enemy });
                     if (plan.CanCast)

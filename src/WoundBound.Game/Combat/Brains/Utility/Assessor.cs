@@ -74,6 +74,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private readonly BattleView view;
         private readonly Dictionary<Combatant, double> threat = new();
         private readonly Dictionary<Combatant, double> support = new();
+        private readonly Dictionary<Combatant, double> lasts = new();
 
         public Assessor(BattleView view)
         {
@@ -94,23 +95,103 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public double Value(Combatant c)
         {
-            // Casters first — but only for as long as they can still cast: a caster with nothing
-            // left to pay for a spell is just another body, and one already dropped once, and
-            // brought back on a wound or two, is no longer the threat that made them the target
-            // (the user's direction, 2026-11-02 — for every brain, not only a Solo's).
-            var value = 0.5 + (Threat(c) + Support(c)) * Horizon;
-            if (c.HasCastSpell)
+            if (values.TryGetValue(c, out var known))
             {
-                value *= 1 + (c.HasBeenDropped ? 0.5 : 1.5) * CastingLeft(c);
+                return known;
             }
 
+            // The harm it would do is counted in its victims' wounds, so it is converted at what a
+            // wound to them is worth against the board's average: a wound to the Solo's victims and
+            // a wound to the Solo are then the same coin, and protecting a caster from one blow is
+            // no longer worth more than several blows on the thing about to hit her.
+            var value = 0.5 + (RawValue(c) - 0.5) * Exchange(c);
             if (c.Side == Side.Adversaries && view.MustNotEscape(c))
             {
                 value += 4;
             }
 
+            values[c] = value;
             return value;
         }
+
+        private readonly Dictionary<Combatant, double> values = new();
+
+        /// <summary>
+        /// A creature's worth before any exchange: its harm and help over the rounds it would last,
+        /// in raw wounds. Casters first — but only for as long as they can still cast: a caster with
+        /// nothing left to pay for a spell is just another body, and one already dropped once, and
+        /// brought back on a wound or two, is no longer the threat that made them the target (the
+        /// user's direction, 2026-11-02 — for every brain, not only a Solo's).
+        /// </summary>
+        private double RawValue(Combatant c)
+        {
+            var value = 0.5 + (Threat(c) + Support(c)) * Lasts(c);
+            if (c.HasCastSpell)
+            {
+                value *= 1 + (c.HasBeenDropped ? 0.5 : 1.5) * CastingLeft(c) * Spread(c);
+            }
+
+            return value;
+        }
+
+        /// <summary>
+        /// How much of the other side a caster's area spells could catch at once, 0 to 1 — the reason
+        /// casters come first: a creature that can harm the whole group (the user's direction,
+        /// 2026-11-02). Facing one creature — a Solo — there is no group to harm, and the caster is
+        /// worth whatever harm they do it, like anybody; nor does a caster with only single-target
+        /// spells earn it.
+        /// </summary>
+        private double Spread(Combatant c)
+        {
+            var area = c.Spells.Any(s => s.Target == SpellTarget.Many && s.SpellType is SpellType.Harm or SpellType.Control && CastsLeft(c, s) > 0);
+            var targets = view.EnemiesOf(c).Count(e => !e.IsPhantom && !e.IsOutOfFight);
+            return area ? Math.Min(1, (targets - 1) / 3.0) : 0;
+        }
+
+        private double RawPerWound(Combatant c) => RawValue(c) / Math.Max(1, c.IsMinion ? 1 : c.Body);
+
+        /// <summary>
+        /// What a wound <paramref name="c"/> deals is worth, relative to the board: the raw worth of a
+        /// wound to its enemies over the raw worth of a wound to anybody fighting. About 1 where the
+        /// sides are matched; well under it for a party whose every blow lands on a Solo's deep Body.
+        /// </summary>
+        private double Exchange(Combatant c)
+        {
+            var everybody = view.Combatants.Where(x => !x.IsOutOfFight && !x.HasFled).ToList();
+            var enemies = view.EnemiesOf(c).Where(e => !e.IsPhantom && !e.IsOutOfFight).ToList();
+            if (enemies.Count == 0 || everybody.Count == 0)
+            {
+                return 1;
+            }
+
+            var average = everybody.Average(RawPerWound);
+            return average <= 0 ? 1 : Math.Clamp(enemies.Average(RawPerWound) / average, 0.25, 4);
+        }
+
+        /// <summary>
+        /// The rounds of a creature's harm that dropping it saves: what's left of the fight, at the
+        /// least — but a creature with Body enough to outlast that is worth its harm for as long as
+        /// it would take its enemies to wear it down, to a cap. Without it a Solo's sixty wounds are
+        /// each worth next to nothing, though every one brings the end of the whole fight nearer.
+        /// </summary>
+        public double Lasts(Combatant c)
+        {
+            if (lasts.TryGetValue(c, out var known))
+            {
+                return known;
+            }
+
+            var output = view.EnemiesOf(c).Where(e => !e.IsPhantom && !e.IsBroken)
+                .Sum(e => e.Attacks.Where(a => a.AreaSquares is null)
+                    .Select(a => Blow(e, a, c, a.DamageDieSides, c.DodgeThreshold).ExpectedDealt)
+                    .DefaultIfEmpty(0).Max());
+            var rounds = Math.Clamp(c.Body / Math.Max(1, output), Horizon, MaxHorizon);
+            lasts[c] = rounds;
+            return rounds;
+        }
+
+        /// <summary>The longest a creature's harm is reckoned over, however much Body it has.</summary>
+        public const double MaxHorizon = 8;
 
         /// <summary>
         /// How many one-wound castings of <paramref name="spell"/>'s tradition <paramref name="c"/>

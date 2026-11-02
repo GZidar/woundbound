@@ -200,13 +200,29 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
+            // Holding the ground it stands on: what its being here keeps the other side off — the
+            // softer ones behind it, out of reach because it is in the way. Everything that leaves it
+            // standing here keeps that; walking away gives it up (the user's direction, 2026-11-02).
+            var screen = Screening(actor);
+            if (screen > 0)
+            {
+                for (var i = 0; i < options.Count; i++)
+                {
+                    var stays = options[i].Kind != OptionKind.Move && (options[i].Square is null || options[i].Square == here);
+                    if (stays)
+                    {
+                        options[i] = options[i] with { Score = options[i].Score + screen };
+                    }
+                }
+            }
+
             // Standing ground: +2 DT at the price of the move, and Disadvantage on the blow.
             if (skill.Uses(Trick.Brace) && hasMove && actions > 0 && !actor.HasMovedThisTurn && View.QuietRounds == 0
                 && (!real || BattleView.StandGroundRefusal(actor, CombatAction.Dodge) is null))
             {
                 var braced = Position(actor, here) - care * assess.Exposure(actor, here, extraDodge: 2);
                 var blow = View.EnemiesOf(actor).Select(e => assess.BestAttack(actor, here, e).Worth * 0.55).DefaultIfEmpty(0).Max();
-                options.Add(new Option(OptionKind.StandGround, braced + blow, "stand my ground (Dodge)", Action: CombatAction.Dodge));
+                options.Add(new Option(OptionKind.StandGround, braced + blow + screen, "stand my ground (Dodge)", Action: CombatAction.Dodge));
             }
 
             return options;
@@ -469,7 +485,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                yield return new Option(OptionKind.Aid, 0.3 * assess.Threat(foe) * assess.PerWound(actor), $"Harry {foe.Name}", Target: foe, Action: CombatAction.Harry);
+                yield return new Option(OptionKind.Aid, HarryWorth(actor, foe), $"Harry {foe.Name}", Target: foe, Action: CombatAction.Harry);
             }
 
             // Heal: the dying first — a body back in the fight, and a death put off.
@@ -485,7 +501,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var worth = hurt.IsDefenceless ? 2 + 0.9 * assess.Value(hurt) : assess.MendWorth(hurt, 1);
+                var worth = hurt.IsDefenceless ? HealDyingWorth(hurt) : assess.MendWorth(hurt, 1);
                 yield return new Option(OptionKind.Tend, worth, $"Heal {hurt.Name}", Target: hurt, Action: CombatAction.Heal);
             }
 
@@ -502,6 +518,82 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// before the target stands, and the target's own blows at Disadvantage meanwhile. Never at
         /// a Minion — any blow drops it anyway.
         /// </summary>
+        /// <summary>
+        /// What <paramref name="actor"/>'s standing where it is keeps its enemies off: for each enemy
+        /// that fights hand to hand, the best blow it could land this turn on one of the actor's
+        /// allies were the actor not in the way, less the best it can land with the actor there, the
+        /// actor included. On open ground that is nothing — they walk round; in a corridor or a
+        /// doorway it is the whole of what is behind. Discounted, since the enemy may not come that way.
+        /// </summary>
+        internal double Screening(Combatant actor)
+        {
+            var allies = View.AlliesOf(actor).Where(a => a != actor && !a.IsPhantom).ToList();
+            if (allies.Count == 0 || !actor.HoldsGround)
+            {
+                return 0;
+            }
+
+            double denied = 0;
+            foreach (var enemy in View.EnemiesOf(actor).Where(e => !e.IsPhantom && !e.IsBroken && !e.HasRangedAttack && !e.IsSwarm))
+            {
+                var with = assess.BestAttack(enemy, enemy.Position, actor).With ?? enemy.MeleeAttack;
+                double Worth(Combatant victim) =>
+                    assess.Blow(enemy, with, victim, with.DamageDieSides, victim.DodgeThreshold + View.VisibilityDodgeModifier(victim)).ExpectedDealt
+                    * assess.PerWound(victim);
+                double BestFrom(IEnumerable<GridPosition> squares, IEnumerable<Combatant> victims)
+                {
+                    var spots = squares.Append(enemy.Position).ToList();
+                    return victims.Where(v => spots.Any(sq => enemy.CanReachFrom(sq, v))).Select(Worth).DefaultIfEmpty(0).Max();
+                }
+
+                var withMe = BestFrom(View.SquaresWithin(enemy, 1).Keys, allies.Append(actor));
+                var withoutMe = BestFrom(View.SquaresWithinIfAbsent(enemy, actor, 1).Keys, allies);
+                denied += Math.Max(0, withoutMe - withMe);
+            }
+
+            return 0.7 * denied;
+        }
+
+        /// <summary>
+        /// A Harry is worth what Disadvantage takes off the foe's next roll: its best blow at the one
+        /// of ours it is likeliest to hit — the one that blow is worth most against — with and without,
+        /// in that one's wounds. Nothing if it can reach nobody to use the roll on.
+        /// </summary>
+        private double HarryWorth(Combatant actor, Combatant foe)
+        {
+            var stride = View.SquaresFor(foe.Speed, 1);
+            double best = 0;
+            foreach (var victim in View.AlliesOf(actor).Where(a => !a.IsOutOfFight || a.IsDefenceless))
+            {
+                foreach (var attack in foe.Attacks.Where(a => a.AreaSquares is null))
+                {
+                    if (!attack.IsRanged && foe.DistanceTo(victim) > attack.Reach + stride)
+                    {
+                        continue;
+                    }
+
+                    var dodge = victim.DodgeThreshold + View.VisibilityDodgeModifier(victim);
+                    var plain = assess.Blow(foe, attack, victim, attack.DamageDieSides, dodge).ExpectedDealt;
+                    var harried = assess.Blow(foe, attack, victim, attack.DamageDieSides, dodge, disadvantage: true).ExpectedDealt;
+                    best = Math.Max(best, (plain - harried) * assess.PerWound(victim));
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// A Heal on somebody dying puts them back on 1 Body: worth a death put off, and their place
+        /// in the fight — but only as far as they're likely to keep it until they act. Brought back
+        /// beside the thing that dropped them, they go straight down again.
+        /// </summary>
+        private double HealDyingWorth(Combatant hurt)
+        {
+            var incoming = 1.5 * assess.Exposure(hurt, hurt.Position) / Math.Max(1e-6, assess.PerWound(hurt));
+            var stays = Math.Max(0.15, 1 - Math.Min(1, incoming));
+            return 1.5 + 0.9 * assess.Value(hurt) * stays;
+        }
+
         private double TripWorth(Combatant actor, Combatant target, IReadOnlyCollection<Combatant>? stillToAct)
         {
             if (target.IsProne || target.IsMinion)
@@ -509,8 +601,28 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return 0;
             }
 
-            var helpers = (stillToAct ?? []).Count(a => a != actor && (View.PlanAttack(a, target).CanAttack || View.StrikeSquare(a, target) is not null));
-            return assess.ControlChance(actor, target, topples: true) * (0.12 * assess.Value(target) * helpers + 0.15 * assess.Threat(target) * assess.PerWound(actor));
+            // Prone is Off-guard (Core Rules §9): two off its Dodge for every blow still to come at it
+            // from those of ours yet to act, and Disadvantage on its own next attack — a Harry's
+            // worth. Priced in the wounds each blow puts on it, as a blow itself is, so a target with
+            // a great deal of Body doesn't make the setting-up worth more than the hitting.
+            double gain = 0;
+            foreach (var helper in (stillToAct ?? []).Where(a => a != actor && !a.IsOutOfFight))
+            {
+                // Their blow from where they stand, or their blade if they can step in to strike.
+                var with = assess.BestAttack(helper, helper.Position, target).With
+                           ?? (View.StrikeSquare(helper, target) is not null ? helper.MeleeAttack : null);
+                if (with is null)
+                {
+                    continue;
+                }
+
+                var dodge = target.DodgeThreshold + View.VisibilityDodgeModifier(target);
+                var now = assess.Blow(helper, with, target, with.DamageDieSides, dodge);
+                var down = assess.Blow(helper, with, target, with.DamageDieSides, dodge - 2);
+                gain += (down.ExpectedDealt - now.ExpectedDealt) * assess.PerWound(target) + 0.3 * (down.Kill - now.Kill) * assess.Value(target);
+            }
+
+            return assess.ControlChance(actor, target, topples: true) * (gain + HarryWorth(actor, target));
         }
 
         /// <summary>
@@ -633,7 +745,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
             if (actor.Side == Side.Party && View.EnemiesOf(actor).All(e => e.IsBroken
                     && (!View.MustNotEscape(e) || View.QuietRounds >= GiveUpTheChaseAfter)))
             {
-                return 0.1 * Math.Min(nearest, 20);
+                // Stand and watch them go. Backing off is no better: a runner fleeing the rest of
+                // the party may be running the very way you back off, and stay within Long of you
+                // for ever.
+                return square == actor.Position ? 0.5 : 0;
             }
 
             // A caster fights like a Skirmisher: from Short, out of reach.
@@ -672,7 +787,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
-            best = Math.Max(best, spells.BestHarmFrom(actor, square));
+            best = Math.Max(best, spells.BestHarmFrom(actor, square, Pursued(actor)));
             var nearest = Pursued(actor).Select(e => actor.DistanceFrom(square, e)).DefaultIfEmpty(0).Min();
             return best - 0.05 * nearest;
         }

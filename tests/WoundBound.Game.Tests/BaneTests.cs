@@ -88,10 +88,13 @@ public class BaneTests
     [Fact]
     public void OneWithNoOtherGoodOption_GoesFirst_ToHelpTheBlades()
     {
-        // Beside Salla, with her spells set aside: her own sword stroke is worth a fraction of what the fighters'
-        // blows are; a Help — the Advantage on a blow still to come — is the best she can add.
+        // Beside Salla, with her spells set aside, and the Champion already Harried by somebody else
+        // this round: her own sword stroke is worth a fraction of what the fighters' blows are; a
+        // Help — the Advantage on a blow still to come — is the best she can add.
         var (encounter, mirella) = Ringed();
         mirella.Position = new GridPosition(4, 4);
+        var champion = encounter.Combatants.Single(c => c.Name == "Champion");
+        champion.HarriedBy.Add(encounter.Combatants.Single(c => c.Name == "The Dumb Fighter"));
         var skill = BrainSkill.Best with { Off = new HashSet<Trick> { Trick.SpellTricks } };
 
         Assert.Equal(mirella, new UtilityPartyBrain(skill).ChooseNextCharacter(encounter.View, encounter.PartyStillToAct));

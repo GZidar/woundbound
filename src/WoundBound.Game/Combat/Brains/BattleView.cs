@@ -129,6 +129,10 @@ namespace WoundBound.Game.Combat.Brains
                 .ToDictionary(o => o.Key, o => o.Value);
         }
 
+        /// <summary>Where <paramref name="mover"/> could get to for <paramref name="moves"/> moves were <paramref name="absent"/> not on the board.</summary>
+        public IReadOnlyDictionary<GridPosition, int> SquaresWithinIfAbsent(Combatant mover, Combatant absent, int moves) =>
+            Encounter.CanMoveItself(mover) ? encounter.SquaresWithinIfAbsent(mover, absent, moves) : new Dictionary<GridPosition, int>();
+
         /// <summary>Whether <paramref name="attacker"/> could attack <paramref name="target"/> right now, action and all.</summary>
         /// <remarks>A Solo that has made its attack this round can attack again only if it can buy it.</remarks>
         public bool CanAttack(Combatant attacker, Combatant target) =>
