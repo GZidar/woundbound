@@ -842,9 +842,13 @@ namespace WoundBound.Game.Combat
             return combatant.ActionsRemaining < 1 ? "Breaking free takes an action, and there's none left." : null;
         }
 
+        /// <remarks>
+        /// Nothing in the rules stops a blow at an ally (a Confused creature strikes whoever is in
+        /// reach), so the side isn't asked; the brains choose among their enemies before they ask this.
+        /// </remarks>
         public bool CanAttack(Combatant attacker, Combatant target) =>
             !attacker.NeedsFooting
-            && attacker.Side != target.Side
+            && attacker != target
             && (!target.IsOutOfFight || target.IsDefenceless)
             && attacker.ActionsRemaining > 0
             && PlanAttack(attacker, target).CanAttack;

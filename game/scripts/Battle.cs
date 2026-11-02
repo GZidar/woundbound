@@ -192,12 +192,15 @@ namespace WoundBoundGame
         private WeaponManoeuvre? armedManoeuvre;
 
         /// <summary>The manoeuvre the armed one would be, at <paramref name="target"/> — Cleave's second target the weakest other foe in reach.</summary>
-        private Manoeuvre? ManoeuvreAt(Combatant attacker, Combatant target) => armedManoeuvre switch
+        private Manoeuvre? ManoeuvreAt(Combatant attacker, Combatant target) => ManoeuvreAt(attacker, target, armedManoeuvre);
+
+        /// <summary>The manoeuvre <paramref name="kind"/> would be, at <paramref name="target"/>.</summary>
+        private Manoeuvre? ManoeuvreAt(Combatant attacker, Combatant target, WeaponManoeuvre? kind) => kind switch
         {
             null => null,
             WeaponManoeuvre.Cleave => new Manoeuvre(WeaponManoeuvre.Cleave, encounter.Fighting(Side.Adversaries)
                 .Where(e => e != target && attacker.CanReach(e)).OrderBy(e => e.Body).FirstOrDefault()),
-            { } kind => new Manoeuvre(kind),
+            { } other => new Manoeuvre(other),
         };
         private static readonly Color SpellArea = new(0.65f, 0.35f, 0.95f, 0.35f);
         private static readonly ThresholdType[] BuffThresholds = [ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve];
@@ -642,9 +645,10 @@ namespace WoundBoundGame
                         _ => encounter.TryTend(combatAction, occupant),
                     };
                 }
-                else
+                else if (encounter.Active is { } striker && occupant.Side != striker.Side)
                 {
-                    encounter.TryAttack(occupant, sacrificeBox.ButtonPressed, encounter.Active is { } striker ? ManoeuvreAt(striker, occupant) : null);
+                    // A plain click strikes foes only; an ally is struck only by choosing them from the menu.
+                    encounter.TryAttack(occupant, sacrificeBox.ButtonPressed, ManoeuvreAt(striker, occupant));
                 }
             }
             else if (armedDrag)

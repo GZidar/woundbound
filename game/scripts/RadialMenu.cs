@@ -196,6 +196,11 @@ namespace WoundBoundGame
             }
         }
 
+        /// <summary>Rings older than the last two fold down to their hub, so a deep chain of choices never buries itself.</summary>
+        private bool IsFolded(int ring) => ring < rings.Count - 2;
+
+        private static Rect2 HubBox(Ring ring) => new(ring.Centre - new Vector2(Hub, Hub), new Vector2(Hub * 2, Hub * 2));
+
         /// <summary>Everything a ring covers: its hub and its pills.</summary>
         private static Rect2 Bounds(Ring ring) =>
             ring.Pills.Aggregate(new Rect2(ring.Centre - new Vector2(Hub, Hub), new Vector2(Hub * 2, Hub * 2)), (box, pill) => box.Merge(pill));
@@ -210,7 +215,7 @@ namespace WoundBoundGame
 
         private (int Ring, int Item)? ItemAt(Vector2 point)
         {
-            for (var r = rings.Count - 1; r >= 0; r--)
+            for (var r = rings.Count - 1; r >= 0 && !IsFolded(r); r--)
             {
                 for (var i = 0; i < rings[r].Pills.Count; i++)
                 {
@@ -298,7 +303,7 @@ namespace WoundBoundGame
                 // screen and clear of every ring already open.
                 var pill = ring.Pills[i];
                 var list = children();
-                var next = new Ring(pill.GetCenter(), item.Label, list) { Source = children };
+                var next = new Ring(pill.GetCenter(), item.Label.Split(" (")[0], list) { Source = children };
                 Layout(next);
                 var size = Bounds(next).Size;
                 var half = size / 2;
@@ -318,7 +323,8 @@ namespace WoundBoundGame
                         next.Centre = at;
                         Layout(next);
                         var box = Bounds(next);
-                        var clash = rings.Sum(r => Bounds(r).Intersection(box).Area);
+                        // Once this ring opens, all but its parent fold to their hubs.
+                        var clash = rings.Select((r, k) => k < rings.Count - 1 ? HubBox(r) : Bounds(r)).Sum(b => b.Intersection(box).Area);
                         return (At: next.Centre, Score: clash + (screen.Encloses(box) ? 0 : 1e6f) + at.DistanceTo(next.Centre) * 50);
                     })
                     .OrderBy(c => c.Score)
@@ -366,6 +372,16 @@ namespace WoundBoundGame
             {
                 var ring = rings[r];
                 var faded = r < rings.Count - 1;
+                if (IsFolded(r))
+                {
+                    // A breadcrumb: just the hub and its title, joined to the ring it led to.
+                    DrawLine(ring.Centre, rings[r + 1].Centre, new Color(lit, 0.35f), 2);
+                    DrawCircle(ring.Centre, Hub, new Color(0.08f, 0.08f, 0.1f));
+                    DrawArc(ring.Centre, Hub, 0, Mathf.Tau, 40, new Color(lit, 0.3f), 2);
+                    DrawCentred(ring.Title, ring.Centre, 12, new Color(0.9f, 0.9f, 0.9f, 0.6f), 64);
+                    continue;
+                }
+
                 DrawCircle(ring.Centre, Hub, new Color(0.08f, 0.08f, 0.1f));
                 DrawArc(ring.Centre, 30, 0, Mathf.Tau, 40, new Color(lit, faded ? 0.3f : 0.7f), 2);
                 DrawCentred(ring.Title, ring.Centre, 12, new Color(0.9f, 0.9f, 0.9f, faded ? 0.5f : 1f), 64);

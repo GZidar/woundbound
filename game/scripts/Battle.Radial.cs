@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Godot;
 using WoundBound.Game.Combat;
+using WoundBound.Game.Combat.Brains.Utility;
 using WoundBound.Rules.Calculation;
 using WoundBound.Rules.Enums;
 using WoundBound.Rules.Models;
@@ -85,7 +86,7 @@ namespace WoundBoundGame
             }
 
             items.Add(Group("Hands-on", "Grab, Shove, Trip, Drag — rolled unarmed against Stability.", HandsOnItems()));
-            items.Add(Group("Aid", "Help, Harry, or tend a wound.", aidButtons.Values.Select(b => Mirror(b, b.Text, "Nobody you could do it for is beside you.")).ToList()));
+            items.Add(Group("Aid", "Help, Harry, or tend a wound.", aidButtons.Keys.Select(AidItem).ToList()));
             items.Add(Group("Defend", "Stand your ground, or raise a shield.",
                 standGroundButtons.Values.Append(raiseShieldButton).Select(b => Mirror(b)).ToList()));
 
@@ -116,13 +117,18 @@ namespace WoundBoundGame
             var noAction = acting.ActionsRemaining < 1 ? "No action left this turn." : null;
             var items = new List<RadialItem>
             {
-                new($"Strike ({acting.Attack.Name})", noAction, "Then click a foe. (Clicking a foe without the menu does the same.)")
+                new($"Strike ({acting.Attack.Name})", noAction, "Choose who to strike: everyone your weapon can reach from here, allies included.")
                 {
-                    Pick = Disarm,
+                    Children = noAction is null ? () => Targets(acting, null) : null,
                 },
             };
 
-            items.AddRange(manoeuvreButtons.Values.Where(b => b.Visible).Select(b => Mirror(b, why: noAction)));
+            items.AddRange(manoeuvreButtons
+                .Where(m => m.Value.Visible)
+                .Select(m => new RadialItem(m.Key.ToString(), noAction, m.Value.TooltipText.Replace(" Then click the foe.", " Then choose who."))
+                {
+                    Children = noAction is null ? () => Targets(acting, m.Key) : null,
+                }));
             if (sacrificeBox.Visible)
             {
                 items.Add(Toggle(sacrificeBox));
@@ -131,8 +137,103 @@ namespace WoundBoundGame
             return items;
         }
 
+        /// <summary>
+        /// Everyone <paramref name="attacker"/> could strike from where they stand, as the rules have
+        /// it — a blade whoever is in its Reach, a bow or a sling whoever is beyond Close and in sight,
+        /// allies too — foes first, nearest first. Choosing one makes the attack.
+        /// </summary>
+        private IReadOnlyList<RadialItem> Targets(Combatant attacker, WeaponManoeuvre? kind)
+        {
+            var targets = encounter.Combatants
+                .Where(c => c.OccupiesSquare && encounter.CanAttack(attacker, c))
+                .Where(c => kind is null || (kind == WeaponManoeuvre.Cleave
+                    ? CleaveSeconds(attacker, c).Count > 0
+                    : Encounter.ManoeuvreRefusal(attacker, c, new Manoeuvre(kind.Value)) is null))
+                .OrderBy(c => c.Side == attacker.Side)
+                .ThenBy(c => attacker.DistanceTo(c))
+                .ToList();
+
+            if (targets.Count == 0)
+            {
+                return [new RadialItem("Nobody", attacker.Attack.IsRanged
+                    ? "Nobody in sight beyond Close — a bow or a sling can't shoot at someone beside you."
+                    : "Nobody within your weapon's Reach.")];
+            }
+
+            return targets.Select(target =>
+            {
+                var plan = encounter.PlanAttack(attacker, target);
+                var attack = plan.Profile ?? attacker.Attack;
+                var hit = Odds.Of(attack.AttackModifier, plan.DodgeThreshold).Success;
+                var ally = target.Side == attacker.Side;
+                var hint = $"{plan.Note}\n{attack.Name}: +{attack.AttackModifier} against DT {plan.DodgeThreshold} — about {hit:P0} to hit before any Advantage or Disadvantage" +
+                           (plan.DamageDieSides is { } die ? $", {attack.DamageDiceCount}d{die}{attack.DamageModifier:+0;-0;+0}." : ".") +
+                           $"\n{target.Name}: Body {target.Body}/{target.BodyMax}." +
+                           (ally ? "\nThis is one of your own." : string.Empty);
+                var label = ally ? $"{target.Name} (ally)" : target.Name;
+                return kind switch
+                {
+                    // Cleave asks who the sweep carries on into; Hook, which way the target is hauled.
+                    WeaponManoeuvre.Cleave => new RadialItem(label, null, hint + "\nThen choose who the sweep carries on into.")
+                    {
+                        Children = () => CleaveSeconds(attacker, target).Select(second => new RadialItem(second.Name, null,
+                            $"The same damage roll lands on {second.Name} too, if it beats their DT {second.DodgeThreshold}. Armour absorbs it as normal.")
+                        {
+                            Pick = () => Strike(target, new Manoeuvre(WeaponManoeuvre.Cleave, second)),
+                        }).ToList(),
+                    },
+                    WeaponManoeuvre.Hook => new RadialItem(label, null, hint + "\nThen choose which way to haul them.")
+                    {
+                        Children = () => HookDirections(attacker, target)
+                            .Select(d => new RadialItem(d.Label, null, d.Hint) { Pick = () => Strike(target, new Manoeuvre(WeaponManoeuvre.Hook, Direction: d.Step)) })
+                            .ToList(),
+                    },
+                    { } other => new RadialItem(label, null, hint) { Pick = () => Strike(target, new Manoeuvre(other)) },
+                    null => new RadialItem(label, null, hint) { Pick = () => Strike(target, null) },
+                };
+            }).ToList();
+
+            void Strike(Combatant target, Manoeuvre? manoeuvre)
+            {
+                Disarm();
+                encounter.TryAttack(target, sacrificeBox.ButtonPressed, manoeuvre);
+                Refresh();
+            }
+        }
+
+        /// <summary>Every enemy a Cleave at <paramref name="target"/> could sweep on into, as the rules allow it, weakest first.</summary>
+        private List<Combatant> CleaveSeconds(Combatant attacker, Combatant target) =>
+            encounter.Combatants
+                .Where(c => c != target && c.OccupiesSquare
+                            && Encounter.ManoeuvreRefusal(attacker, target, new Manoeuvre(WeaponManoeuvre.Cleave, c)) is null)
+                .OrderBy(c => c.Body)
+                .ToList();
+
+        private static readonly (string Name, int X, int Y)[] Compass =
+        [
+            ("North", 0, -1), ("North-east", 1, -1), ("East", 1, 0), ("South-east", 1, 1),
+            ("South", 0, 1), ("South-west", -1, 1), ("West", -1, 0), ("North-west", -1, -1),
+        ];
+
+        /// <summary>
+        /// Which ways a Hook can haul <paramref name="target"/>: towards the attacker first — what it
+        /// does when nobody says otherwise — then each of the eight. A wall or a body stops them short
+        /// (Core Rules §9, "Forced Movement").
+        /// </summary>
+        private static IEnumerable<(string Label, string Hint, (int X, int Y) Step)> HookDirections(Combatant attacker, Combatant target)
+        {
+            var towards = (System.Math.Sign(attacker.Position.X - target.Position.X), System.Math.Sign(attacker.Position.Y - target.Position.Y));
+            var squares = System.Math.Max(0, attacker.Reach - 1);
+            var reach = $"Up to {squares} square{(squares == 1 ? string.Empty : "s")} — your Reach less one. Something solid in the way stops them short.";
+            yield return ("Towards you", reach, towards);
+            foreach (var (name, x, y) in Compass)
+            {
+                yield return (name, reach, (x, y));
+            }
+        }
+
         private List<RadialItem> HandsOnItems() =>
-            controlButtons.Values.Select(b => Mirror(b, why: "No foe beside you it would work on."))
+            controlButtons.Keys.Select(ControlItem)
                 .Append(Mirror(dragButton, why: "You aren't holding anyone."))
                 .Append(Mirror(letGoButton, why: "You aren't holding anyone."))
                 .ToList();
@@ -140,7 +241,7 @@ namespace WoundBoundGame
         private List<RadialItem> MagicItems(Combatant caster)
         {
             var noAction = caster.ActionsRemaining < 1 ? "No action left this turn." : null;
-            var items = caster.Spells.Select(spell => SpellItem(spell, noAction)).ToList();
+            var items = caster.Spells.Select(spell => SpellItem(caster, spell, noAction)).ToList();
 
             var options = new[] { payInBodyBox, overclockBox, backlashBox }.Where(b => b.Visible).ToList();
             if (options.Count > 0)
@@ -159,7 +260,7 @@ namespace WoundBoundGame
         /// Threshold a Buff or Bane moves, the Shape of an area, where Fuel comes from, and whether to
         /// hold it. The last choice arms it; the next click is where it goes.
         /// </summary>
-        private RadialItem SpellItem(SpellDefinition spell, string? noAction)
+        private RadialItem SpellItem(Combatant caster, SpellDefinition spell, string? noAction)
         {
             var steps = new List<(string Title, OptionButton? Picker, CheckBox? Box, string[] Labels)>();
             if (spell.SpellType == SpellType.Control && WoundBound.Game.Combat.SpellArea.FixedEffectOf(spell) is null)
@@ -182,7 +283,9 @@ namespace WoundBoundGame
                 steps.Add(("Fuel", tapPicker, null, ["Pack only", "Light in hand", "Fire beside me"]));
             }
 
-            if (SpellCalculator.CanBeSustained(spell.SpellType))
+            // A Shift is over the moment it lands: there's nothing to hold.
+            if (SpellCalculator.CanBeSustained(spell.SpellType)
+                && !(spell.SpellType == SpellType.Motion && WoundBound.Game.Combat.SpellArea.MotionOf(spell) == MotionKind.Shift))
             {
                 steps.Add(("Hold it?", null, sustainBox, ["Just cast", "Sustain it"]));
             }
@@ -195,31 +298,49 @@ namespace WoundBoundGame
                 armedSpell = spell;
             }
 
+            // A spell at one creature ends in a ring of who it could go to; anything else is armed,
+            // and placed on the board.
+            var aimed = IsAimedAtOne(spell);
+
+            IReadOnlyList<RadialItem> Aim()
+            {
+                Arm();
+                return SpellTargets(caster, spell);
+            }
+
             IReadOnlyList<RadialItem> Step(int index)
             {
                 var (_, picker, box, labels) = steps[index];
+                var last = index == steps.Count - 1;
                 return labels.Select((label, choice) => new RadialItem(label)
                 {
-                    Pick = index == steps.Count - 1
+                    Pick = last && !aimed
                         ? () =>
                         {
                             Choose(picker, box, choice);
                             Arm();
                         }
                         : null,
-                    Children = index < steps.Count - 1
+                    Children = !last || aimed
                         ? () =>
                         {
                             Choose(picker, box, choice);
-                            return Step(index + 1);
+                            return last ? Aim() : Step(index + 1);
                         }
                         : null,
                 }).ToList();
             }
 
-            if (steps.Count == 0 || noAction is not null)
+            if (noAction is not null)
             {
-                return new RadialItem(spell.Name, noAction, hint) { Pick = Arm };
+                return new RadialItem(spell.Name, noAction, hint);
+            }
+
+            if (steps.Count == 0)
+            {
+                return aimed
+                    ? new RadialItem(spell.Name, null, hint) { Children = Aim }
+                    : new RadialItem(spell.Name, null, hint + "\nThen click where it goes.") { Pick = Arm };
             }
 
             return new RadialItem(spell.Name, null, hint) { Children = () => Step(0) };
