@@ -188,28 +188,55 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>
         /// The order is the party's to choose afresh each round (Core Rules §9). By default the one
         /// with the most to do goes, which puts the heavy blows in before the other side's turns come
-        /// round. But a caster whose best move is a Bane on a foe the others are about to swing at —
-        /// worth something only before their blows — goes first for it. A Help or a Trip doesn't jump
-        /// the queue the same way: simulation showed a blade spent on helping, ahead of the blades,
+        /// round. Two kinds of character go earlier:
+        /// <list type="bullet">
+        /// <item>a caster whose best move is a Bane on a foe the others are about to swing at — worth
+        /// something only before their blows — goes first for it;</item>
+        /// <item>one already in place whose best is a Help or a Harry, made without moving, and who has
+        /// no other good option — nothing else worth half what the best of the others has — goes
+        /// ahead of the blades: Advantage set up for the big martial, or Disadvantage laid on the big
+        /// enemy before it acts.</item>
+        /// </list>
+        /// A blade with a good blow of its own doesn't spend it helping first: simulation showed that
         /// cost the party more than the Advantage gave it (2026-11-02).
         /// </summary>
         public Combatant ChooseNextCharacter(BattleView view, IReadOnlyList<Combatant> stillToAct)
         {
             var planner = Planner(view, out _);
-            Option? Best(Combatant c, IReadOnlyCollection<Combatant> others) =>
-                planner.Options(c, hasMove: true, actions: 1, real: false, stillToAct: others).MaxBy(o => o.Score);
+            List<Option> All(Combatant c, IReadOnlyCollection<Combatant> others) =>
+                planner.Options(c, hasMove: true, actions: 1, real: false, stillToAct: others);
+            static bool Aids(Option o) => o.Kind == OptionKind.Aid || o.Then == OptionKind.Aid;
+
+            var options = stillToAct.ToDictionary(c => c, c => All(c, stillToAct));
+            double BestOf(Combatant c) => options[c].Select(o => o.Score).DefaultIfEmpty(0).Max();
 
             var scored = stillToAct.ToDictionary(c => c, c =>
             {
-                var now = Best(c, stillToAct);
+                var now = options[c].MaxBy(o => o.Score);
                 var score = now?.Score ?? 0;
-                if (stillToAct.Count < 2 || now?.Cast?.Spell.SpellType != Rules.Enums.SpellType.Bane)
+                if (stillToAct.Count < 2 || now is null)
                 {
                     return score;
                 }
 
-                var urgency = score - (Best(c, [c])?.Score ?? 0);
-                return urgency > UrgencyThreshold ? Urgent + urgency : score;
+                if (now.Cast?.Spell.SpellType == Rules.Enums.SpellType.Bane)
+                {
+                    var urgency = score - All(c, [c]).Select(o => o.Score).DefaultIfEmpty(0).Max();
+                    return urgency > UrgencyThreshold ? Urgent + urgency : score;
+                }
+
+                // Only one already in place — with a Help or Harry to hand from where they stand, about
+                // as good as their best: a character who'd have to move to help is usually out of reach
+                // of the fight, and waiting lets it come to them (simulation, 2026-11-02).
+                var inPlace = options[c].Where(o => o.Kind == OptionKind.Aid).Select(o => o.Score).DefaultIfEmpty(double.MinValue).Max();
+                if (Aids(now) && inPlace >= score - 0.25)
+                {
+                    var otherwise = options[c].Where(o => !Aids(o)).Select(o => o.Score).DefaultIfEmpty(0).Max();
+                    var bestOfTheRest = stillToAct.Where(o => o != c).Max(BestOf);
+                    return otherwise < 0.5 * bestOfTheRest ? Urgent + score : score;
+                }
+
+                return score;
             });
             return Choose.Pick(stillToAct, c => scored[c], Skill, random);
         }
@@ -266,6 +293,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 _ => PartyStep.End,
             };
         }
+
+        /// <summary>
+        /// Pays to go on holding a spell on the terms it was cast on: never the last Stamina (that
+        /// would put the caster down at their next turn, and the spell with them), and only while
+        /// it is still on somebody in the fight.
+        /// </summary>
+        public bool Sustains(BattleView view, PendingReaction reaction) =>
+            reaction.Defender.Stamina > 1
+            && view.SpellsInPlay.Any(s => s.Caster == reaction.Defender && s.Sustained && !s.Target.IsOutOfFight);
 
         public bool PanicDodges(BattleView view, PendingReaction reaction)
         {

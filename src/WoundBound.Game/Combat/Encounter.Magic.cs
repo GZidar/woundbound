@@ -865,7 +865,7 @@ namespace WoundBound.Game.Combat
             var threshold = cast.Threshold ?? spell.Threshold ?? ThresholdType.Dodge;
             var amount = spell.SpellType == SpellType.Buff
                 ? ThresholdModifierCalculator.BuffAmount(spell.SpellTier)
-                : ThresholdModifierCalculator.BaneAmount(spell.SpellTier);
+                : RuleTrials.BaneAmount(spell.SpellTier);
             var modifier = new ThresholdModifier
             {
                 Threshold = threshold,

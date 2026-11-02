@@ -55,11 +55,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
                             .Select(effect => (new SpellCast(spell) { Target = e, Effect = effect }, (Func<CastPlan, double>)(plan => Denial * ControlWorth(actor, effect, plan))))),
                     SpellType.Illusion when usesTricks => IllusionCasts(actor, spell, at, enemies),
                     SpellType.Bane when usesTricks && spell.Target == SpellTarget.Many => VolumeCorners(spell, enemies.Where(e => !e.IsPhantom))
-                        .Select(corner => (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner },
-                            (Func<CastPlan, double>)(plan => plan.Targets.Sum(t => BaneWorth(actor, t, spell.Threshold ?? ThresholdType.Dodge))))),
+                        .SelectMany(corner => Held(actor, new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner }))
+                        .Select(cast => (cast, (Func<CastPlan, double>)(plan => plan.Targets.Sum(t => HeldBaneWorth(actor, cast, plan, t, spell.Threshold ?? ThresholdType.Dodge))))),
                     SpellType.Bane when usesTricks => enemies.Where(e => !e.IsPhantom && !e.IsOutOfFight)
-                        .SelectMany(e => BaneThresholds(spell, e).Select(threshold => (new SpellCast(spell) { Target = e, Threshold = threshold },
-                            (Func<CastPlan, double>)(plan => BaneWorth(actor, e, threshold))))),
+                        .SelectMany(e => BaneThresholds(spell, e).SelectMany(threshold => Held(actor, new SpellCast(spell) { Target = e, Threshold = threshold })))
+                        .Select(cast => (cast, (Func<CastPlan, double>)(plan => HeldBaneWorth(actor, cast, plan, cast.Target!, cast.Threshold!.Value)))),
                     SpellType.Utility when usesTricks && SpellArea.LeverOf(spell) == Lever.Light && View.IsUnlit => VolumeCorners(spell, enemies)
                         .Select(corner => (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner }, (Func<CastPlan, double>)(plan => LightWorth(actor, spell, plan)))),
                     SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Shift => enemies.Where(e => !e.IsBroken)
@@ -438,6 +438,61 @@ namespace WoundBound.Game.Combat.Brains.Utility
             return Denial * 2 * worth;
         }
 
+        /// <summary>
+        /// A casting as it stands, and — where the caster could keep it — the same declared Sustained:
+        /// held from round to round for Stamina, it is worth the blows of every round it stays.
+        /// </summary>
+        private static IEnumerable<SpellCast> Held(Combatant actor, SpellCast cast)
+        {
+            yield return cast;
+            if (actor.Sustaining is null && actor.Stamina >= 2)
+            {
+                yield return cast with { Sustain = true };
+            }
+        }
+
+        /// <summary>Rounds ahead a held Bane is reckoned over — fights here are over in four or five.</summary>
+        private const int HeldRounds = 2;
+
+        /// <summary>
+        /// A Bane's worth: this round's, and for one declared Sustained, each round after it that it
+        /// is paid for and survives its recheck — the caster's cast total against the Threshold
+        /// without the Bane, the target spending for +2 if it can (Core Rules §11, "Sustaining a
+        /// Spell"). Then every one of ours fighting near it is swinging, not only those still to act.
+        /// Each payment costs a Stamina and hands the GM an Opportunity, and is the caster's spend
+        /// for the round.
+        /// </summary>
+        private double HeldBaneWorth(Combatant actor, SpellCast cast, CastPlan plan, Combatant target, ThresholdType threshold)
+        {
+            var first = BaneWorth(actor, target, threshold, cast.Spell.SpellTier);
+            if (!cast.Sustain || target.Side == actor.Side)
+            {
+                return first;
+            }
+
+            var unlowered = threshold switch
+            {
+                ThresholdType.Dodge => target.DodgeThreshold,
+                ThresholdType.Stability => target.StabilityThreshold,
+                _ => target.ResolveThreshold ?? 99,
+            };
+            var holds = Odds.Of(plan.CastBonus, unlowered + (target.Stamina > 0 ? ThresholdModifierCalculator.ReactionBonus : 0)).Success;
+            var everyRound = BaneWorth(actor, target, threshold, cast.Spell.SpellTier, wholeRound: true);
+            const double perPayment = 1.0;
+
+            // Never paying the last Stamina: that would put the caster down at their next turn, and
+            // the spell with them.
+            double later = 0, kept = 1;
+            for (var round = 0; round < Math.Min(HeldRounds, actor.Stamina - 1); round++)
+            {
+                later -= kept * perPayment;
+                kept *= holds;
+                later += kept * everyRound;
+            }
+
+            return first + later;
+        }
+
         /// <summary>The Thresholds a Bane could be laid on: the one it is written for, or — a Curse — the caster's pick of those in the game.</summary>
         private static IEnumerable<ThresholdType> BaneThresholds(SpellDefinition spell, Combatant target) =>
             spell.Threshold is { } written
@@ -455,20 +510,22 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// a point already lost to a Bane of the same kind. Not discounted as a denied turn is: these
         /// are our own blows, from those of ours still to act, at their best.
         /// </summary>
-        private double BaneWorth(Combatant actor, Combatant target, ThresholdType threshold)
+        /// <param name="wholeRound">A round to come rather than this one: everybody of ours fighting near it swings, wherever they stand now.</param>
+        private double BaneWorth(Combatant actor, Combatant target, ThresholdType threshold, Tier tier, bool wholeRound = false)
         {
             if (target.IsOutOfFight || View.SpellsInPlay.Any(s => s.Target == target && s.Type == SpellType.Bane && s.Threshold == threshold))
             {
                 return 0;
             }
 
-            var amount = -ThresholdModifierCalculator.BaneAmount(Tier.T1);
+            var amount = -RuleTrials.BaneAmount(tier);
             var sign = target.Side == actor.Side ? -1.0 : 1.0;
 
             // Those who would be glad of it: the other side from the target, still to act before the
             // caster's next turn — the caster too, with an action to spare after this one.
             var acting = (sign > 0 ? View.AlliesOf(actor) : View.EnemiesOf(actor))
-                .Where(a => !a.IsPhantom && !a.IsBroken && (a == actor ? actor.ActionsRemaining > 1
+                .Where(a => !a.IsPhantom && !a.IsBroken && (wholeRound ? a.DistanceTo(target) <= 8
+                    : a == actor ? actor.ActionsRemaining > 1
                     : sign > 0 && stillToAct is not null ? stillToAct.Contains(a) : !a.HasActedThisRound))
                 .ToList();
 
@@ -478,7 +535,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 case ThresholdType.Dodge:
                     foreach (var attacker in acting)
                     {
-                        if (assess.BestAttack(attacker, attacker.Position, target).With is not { } with)
+                        // This round, what they can strike with from where they stand; a round to
+                        // come, their best, since they'll have closed by then.
+                        var with = wholeRound
+                            ? attacker.Attacks.MaxBy(a => a.DamageDiceCount * a.DamageDieSides + a.AttackModifier)
+                            : assess.BestAttack(attacker, attacker.Position, target).With;
+                        if (with is null)
                         {
                             continue;
                         }

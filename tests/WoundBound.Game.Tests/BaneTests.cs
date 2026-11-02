@@ -35,7 +35,7 @@ public class BaneTests
             .Where(o => o.Cast?.Spell.Name == "Curse");
 
     [Fact]
-    public void ACurse_TakesHold_WithNoRoll_APointOffTheChosenThreshold()
+    public void ACurse_TakesHold_WithNoRoll_TwoOffTheChosenThreshold()
     {
         var (encounter, mirella, _, bandit) = Setup();
         var before = bandit.DodgeThreshold;
@@ -43,7 +43,7 @@ public class BaneTests
         Assert.True(encounter.TryCast(new SpellCast(mirella.Spells.Single(s => s.Name == "Curse")) { Target = bandit, Threshold = ThresholdType.Dodge }),
             string.Join("\n", encounter.Log));
 
-        Assert.Equal(before - 1, bandit.DodgeThreshold);
+        Assert.Equal(before - 2, bandit.DodgeThreshold);
     }
 
     [Fact]
@@ -86,6 +86,19 @@ public class BaneTests
             .Options(mirella, true, 1, real: false, stillToAct: encounter.PartyStillToAct).MaxBy(o => o.Score)!.Why;
 
     [Fact]
+    public void OneWithNoOtherGoodOption_GoesFirst_ToHelpTheBlades()
+    {
+        // Beside Salla, with her spells set aside: her own sword stroke is worth a fraction of what the fighters'
+        // blows are; a Help — the Advantage on a blow still to come — is the best she can add.
+        var (encounter, mirella) = Ringed();
+        mirella.Position = new GridPosition(4, 4);
+        var skill = BrainSkill.Best with { Off = new HashSet<Trick> { Trick.SpellTricks } };
+
+        Assert.Equal(mirella, new UtilityPartyBrain(skill).ChooseNextCharacter(encounter.View, encounter.PartyStillToAct));
+        Assert.Contains("Help", FirstPlan(encounter, mirella, skill));
+    }
+
+    [Fact]
     public void WithAFoeSurrounded_TheCasterGoesFirst_SoTheCurseLandsBeforeTheBlows()
     {
         // With Help and Harry left alone, the Curse is the setup she has. Four blows to come at DT 15
@@ -98,15 +111,37 @@ public class BaneTests
     }
 
     [Fact]
-    public void ACurse_IsntWorthItsWound_WhenNobodyIsLeftToMakeUseOfIt()
+    public void ACurseHeldFromRoundToRound_IsWorthMore_OnAFoeThatCantFightIt()
     {
-        // A point off one foe's Dodge for one blow buys less than the Soul it costs.
+        // Held, the Curse goes on paying for every blow of the rounds to come, for a Stamina a round;
+        // a Champion with no Stamina left can't spend against the recheck, so it holds more often.
+        var (encounter, mirella) = Ringed();
+        var champion = encounter.Combatants.Single(c => c.Name == "Champion");
+        champion.Stamina = 0;
+        mirella.Stamina = 4;
+        var skill = BrainSkill.Best with { Off = new HashSet<Trick> { Trick.Aid } };
+
+        var curses = new TurnPlanner(new Assessor(encounter.View), skill)
+            .Options(mirella, true, 1, real: false, stillToAct: encounter.PartyStillToAct)
+            .Where(o => o.Cast?.Spell.Name == "Curse" && o.Cast.Target == champion && o.Cast.Threshold == ThresholdType.Dodge)
+            .ToList();
+
+        var held = curses.Where(o => o.Cast!.Sustain).Max(o => o.Score);
+        var once = curses.Where(o => !o.Cast!.Sustain).Max(o => o.Score);
+        Assert.True(held > once, $"held {held:0.00}, once {once:0.00}");
+    }
+
+    [Fact]
+    public void ACurseForOneRound_IsntWorthItsWound_WhenNobodyIsLeftToMakeUseOfIt()
+    {
+        // Laid for the round alone, it lapses at her next turn before anyone has swung; only one
+        // held into the rounds to come can be worth casting now.
         var (encounter, mirella, others, _) = Setup();
         foreach (var other in others)
         {
             other.HasActedThisRound = true;
         }
 
-        Assert.Empty(Curses(encounter, mirella));
+        Assert.DoesNotContain(Curses(encounter, mirella), o => !o.Cast!.Sustain);
     }
 }
