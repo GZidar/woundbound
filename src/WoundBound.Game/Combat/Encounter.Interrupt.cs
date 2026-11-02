@@ -57,10 +57,14 @@ namespace WoundBound.Game.Combat
         private IEnumerable<Combatant> InterruptersFor(Combatant actor) =>
             partyStillToAct.Where(c => c.HasInterrupt && !c.IsOutOfFight && Encounter.InterruptRefusal(c) is null);
 
-        /// <summary>Why <paramref name="character"/> can't pay an Interrupt's 1 Mind now, or null if they can — by Backlash where it's their last.</summary>
+        /// <summary>
+        /// Why <paramref name="character"/> can't pay an Interrupt's 1 Mind now, or null if they can.
+        /// Their last Mind will do: they may Backlash it, or drop to 0 once the turn is taken (Core
+        /// Rules §4, "Backlash on a spend").
+        /// </summary>
         public static string? InterruptRefusal(Combatant character) =>
             !character.HasInterrupt ? "Only a character with Mind as their Secondary Wound can Interrupt."
-            : PlayStateCalculator.CanSpendMindOrSoul(character.Mind, character.Body, 1, useMetaphysicalBacklash: character.Mind <= 1)
+            : PlayStateCalculator.CanSpendMindOrSoul(character.Mind, character.Body, 1, useMetaphysicalBacklash: false)
                 ? null
                 : "No Mind to pay for it.";
 
@@ -100,18 +104,46 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void Interrupt(Combatant interrupter, Combatant actor, Action then)
         {
-            var backlash = interrupter.Mind <= 1;
-            PlayStateCalculator.TrySpendMindOrSoul(interrupter.Mind, interrupter.Body, 1, backlash, out var mind, out var body);
-            interrupter.Mind = mind;
-            interrupter.Body = body;
+            // The last Mind: Backlash it onto Body if the Body can spare it, or let it go to 0 —
+            // the turn is taken first, and only then are they Stunned. A cost never cancels what it
+            // paid for (Core Rules §4).
+            if (interrupter.Mind == 1 && PlayStateCalculator.CanSpendMindOrSoul(1, interrupter.Body, 1, useMetaphysicalBacklash: true))
+            {
+                OfferReaction(new PendingReaction(ReactionKind.Backlash, interrupter, interrupter, null, 0,
+                        $"The Interrupt takes {interrupter.Name}'s last Mind. Backlash holds them at 1 and takes 1 Body instead; " +
+                        "or they drop to 0 and are Stunned once the turn is taken.",
+                        ImpactWounds: 1),
+                    backlash => TakeInterrupt(interrupter, actor, backlash, then));
+                return;
+            }
+
+            TakeInterrupt(interrupter, actor, backlash: false, then);
+        }
+
+        private void TakeInterrupt(Combatant interrupter, Combatant actor, bool backlash, Action then)
+        {
+            var drops = interrupter.Mind == 1 && !backlash;
+            if (!drops)
+            {
+                PlayStateCalculator.TrySpendMindOrSoul(interrupter.Mind, interrupter.Body, 1, backlash, out var mind, out var body);
+                interrupter.Mind = mind;
+                interrupter.Body = body;
+            }
+
             interrupter.TendEligible[WoundType.Mind] = true;
-            Write($"{interrupter.Name} Interrupts {actor.Name} — 1 Mind{(backlash ? ", Backlashed onto Body" : string.Empty)} — and takes their turn now.");
+            Write($"{interrupter.Name} Interrupts {actor.Name} — 1 Mind{(backlash ? ", Backlashed onto Body" : drops ? ", their last" : string.Empty)} — and takes their turn now.");
 
             var before = Snapshot(actor);
             Interrupting = new Interruption(actor, lastDeclaredTarget);
             interruptResume = () =>
             {
                 Interrupting = null;
+                if (drops && interrupter.Mind > 0)
+                {
+                    interrupter.Mind = 0;
+                    Write($"{interrupter.Name} has spent the last of their Mind, and is Stunned.");
+                }
+
                 if (!actor.IsOutOfFight && Snapshot(actor) != before)
                 {
                     if (actor.Role == AdversaryRole.Solo)

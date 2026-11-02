@@ -564,9 +564,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return -3;
             }
 
-            // Everybody left on the board is running and nobody needs catching: give them the
-            // room to go — the fight ends once they're beyond Long.
-            if (actor.Side == Side.Party && View.EnemiesOf(actor).All(e => e.IsBroken && !View.MustNotEscape(e)))
+            // Everybody left on the board is running and nobody needs catching — or the chase has
+            // gone nowhere for long enough: give them the room to go — the fight ends once they're
+            // beyond Long.
+            if (actor.Side == Side.Party && View.EnemiesOf(actor).All(e => e.IsBroken
+                    && (!View.MustNotEscape(e) || View.QuietRounds >= GiveUpTheChaseAfter)))
             {
                 return 0.1 * Math.Min(nearest, 20);
             }
@@ -617,8 +619,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// running, which is only worth the chase if the fight's objectives say it mustn't get away —
         /// let the rest go, and the fight ends when they're beyond Long.
         /// </summary>
+        /// <remarks>
+        /// A chase that goes nowhere is given up: once <see cref="GiveUpTheChaseAfter"/> rounds pass
+        /// with nobody hurt, a runner the objectives want caught is let go like any other — a quarry
+        /// as quick as its hunters, in the dark where nobody can shoot it, would otherwise be chased forever.
+        /// </remarks>
         private IEnumerable<Combatant> Pursued(Combatant actor) =>
-            View.EnemiesOf(actor).Where(e => !e.IsBroken || View.MustNotEscape(e));
+            View.EnemiesOf(actor).Where(e => !e.IsBroken || (View.MustNotEscape(e) && View.QuietRounds < GiveUpTheChaseAfter));
+
+        /// <summary>Quiet rounds of chasing after which a fleeing quarry is let go.</summary>
+        private const int GiveUpTheChaseAfter = 4;
     }
 
     /// <summary>How a brain picks from what it has scored: the best, or — further down the skill dial — loosely among the best.</summary>

@@ -797,15 +797,10 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            // A Minion's Mind and Soul are pinned at 1: a point drops it Stunned or Numbed — out of
+            // the fight, lying there to be questioned — unless it Backlashes, and the Body that
+            // costs is a hit that removes it (GM Reference §3, "Minion Rule").
             target.TendEligible[type] = true;
-            if (target.IsMinion)
-            {
-                target.Body = 0;
-                Write($"{target.Name} takes {amount} {type} and goes down.");
-                then();
-                return;
-            }
-
             var current = target.Track(type).Current;
             var excess = amount - (current - 1);
             void Apply(bool backlash)
@@ -815,7 +810,7 @@ namespace WoundBound.Game.Combat
                 if (body != target.Body)
                 {
                     target.TendEligible[WoundType.Body] = true;
-                    target.Body = body;
+                    target.Body = target.IsMinion ? 0 : body;
                 }
 
                 var (now, max) = target.Track(type);

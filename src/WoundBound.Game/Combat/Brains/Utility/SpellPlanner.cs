@@ -145,6 +145,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
             else if (cast.Spell.Source != MagicSource.BloodMagic)
             {
                 ways.Add(cast with { PayInBody = true });
+
+                // Paying the last of Mind or Soul: Backlash holds the track at 1 and takes the rest
+                // from Body, never below 1 — how a caster keeps fuelling spells when the pool runs low
+                // (Core Rules §4, "Backlash on a spend").
+                ways.Add(cast with { Backlash = true });
             }
 
             if (actor.HasOverclock && !actor.HasOverclockedThisRound && actor.Stamina >= 3)
@@ -192,9 +197,20 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var after = now - plan.WoundsPaid;
                 // A Body wound paid is one fewer between the caster and the floor: worth what the
                 // caster's own wounds are worth — and a creature that casts in blood runs out of both.
-                price += track == WoundType.Body
-                    ? plan.WoundsPaid * Math.Max(0.9, 0.6 * assess.PerWound(actor)) + (after <= 2 ? 2 : 0)
-                    : plan.WoundsPaid * 0.45 + (after <= 0 ? 0.6 * assess.Value(actor) : after == 1 ? 0.5 : 0);
+                if (track != WoundType.Body && cast.Backlash && after <= 0)
+                {
+                    // Held at 1, and the excess paid in Body, Direct — dearly, as any Body is.
+                    var excess = 1 - after;
+                    var bodyAfter = actor.Body - excess;
+                    price += (now - 1) * 0.45 + 0.5
+                             + excess * Math.Max(0.9, 0.6 * assess.PerWound(actor)) + (bodyAfter <= 2 ? 2 : 0);
+                }
+                else
+                {
+                    price += track == WoundType.Body
+                        ? plan.WoundsPaid * Math.Max(0.9, 0.6 * assess.PerWound(actor)) + (after <= 2 ? 2 : 0)
+                        : plan.WoundsPaid * 0.45 + (after <= 0 ? 0.6 * assess.Value(actor) : after == 1 ? 0.5 : 0);
+                }
             }
 
             if (cast.Overclock)

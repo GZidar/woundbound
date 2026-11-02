@@ -63,10 +63,13 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>
         /// Whether the adversary <see cref="PendingReaction.Defender"/> Backlashes Mind or Soul damage
-        /// onto Body rather than drop to 0 (Core Rules §4). "Let most of them simply go down"
-        /// (GM Reference §3), so by default none does.
+        /// onto Body rather than drop to 0 — Backlash "is still live … exactly like it is for anyone
+        /// else" (GM Reference §3). By default a creature does whenever it leaves it standing, as a
+        /// character would; but a Minion doesn't — "let most of them simply go down", Stunned or
+        /// Numbed, since for it the Body hit is a removal.
         /// </summary>
-        bool Backlashes(BattleView view, PendingReaction reaction) => false;
+        bool Backlashes(BattleView view, PendingReaction reaction) =>
+            !reaction.Defender.IsMinion && reaction.Defender.Body - reaction.ImpactWounds >= 2;
 
         /// <summary>Whether the adversary pays 1 Stamina to go on holding the spell it Sustains.</summary>
         bool Sustains(BattleView view, PendingReaction reaction) => reaction.Defender.Stamina > 1;
