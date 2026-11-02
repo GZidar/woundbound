@@ -150,6 +150,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Let go of whatever it's holding. Free.</summary>
         public sealed record LetGo : GmStep;
 
+        /// <summary>Get up into the saddle from beside its mount, for a move.</summary>
+        public sealed record Mount : GmStep;
+
         /// <summary>Throw the throwable weapon in hand at <paramref name="Target"/>: its Attack, as a shot (Core Rules §9).</summary>
         public sealed record Throw(Combatant Target, bool WithAdvantage = false) : GmStep;
 

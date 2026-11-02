@@ -1,0 +1,10 @@
+<!-- Dead: a skull. One of the condition markers drawn on a token's corners (see conditionbadge.js):
+     dark with a gold rim for a condition, rust for what the wound tracks have done. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46.5" fill="#c04a10" stroke="#ffffff" stroke-width="5" />
+  <path d="M50 22 C34 22 26 33 26 45 C26 54 31 59 36 62 L36 72 L64 72 L64 62 C69 59 74 54 74 45 C74 33 66 22 50 22 Z" fill="#f4f1ea" />
+  <circle cx="40" cy="46" r="7" fill="#c04a10" />
+  <circle cx="60" cy="46" r="7" fill="#c04a10" />
+  <path d="M50 54 L46 61 L54 61 Z" fill="#c04a10" />
+  <path d="M44 66 L44 72 M50 66 L50 72 M56 66 L56 72" stroke="#c04a10" stroke-width="3" />
+</svg>

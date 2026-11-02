@@ -96,7 +96,7 @@ namespace WoundBound.Game.Combat
             Element? element = null;
             if (spell.Source == MagicSource.ElementalMagic)
             {
-                if (SpellArea.ElementOf(spell) is not { } worked)
+                if ((SpellArea.ElementOf(spell) ?? caster.Casting?.Element) is not { } worked)
                 {
                     return CastPlan.Refused($"{spell.Name} doesn't say which element it works.");
                 }
@@ -109,6 +109,11 @@ namespace WoundBound.Game.Combat
                 if (spell.SpellType == SpellType.Heal)
                 {
                     return CastPlan.Refused("Only Blood Magic can heal — no element can close a wound.");
+                }
+
+                if (spell.SpellType is SpellType.Control or SpellType.Illusion)
+                {
+                    return CastPlan.Refused($"Elemental Magic can't make a {spell.SpellType}: it reaches into a mind, and channelled elemental force can't (Core Rules §11).");
                 }
 
                 element = worked;
@@ -127,7 +132,8 @@ namespace WoundBound.Game.Combat
                     return CastPlan.Refused("Elemental Magic is paid in Fuel — there's no blood to bleed into it.");
                 }
 
-                (track, ability) = (null, access.CastAbility);
+                // A creature made of what it casts pays a piece of itself, in Body (GM Reference §9).
+                (track, ability) = (build is null && caster.Casting is { OfItsElement: true } ? WoundType.Body : null, access.CastAbility);
             }
             else if (spell.Source == MagicSource.BloodMagic)
             {
@@ -222,6 +228,8 @@ namespace WoundBound.Game.Combat
 
                 // Aimed away from the hand that casts it: the caster isn't caught in their own Line or Cone.
                 caught = combatants.Where(c => c != caster && c.OccupiesSquare && c.Footprint.Any(covered.Contains)).ToList();
+                // An area effect catches a mount as well as its rider (Core Rules §9, "Mounts").
+                caught.AddRange(Steeds.Where(m => covered.Contains(m.Position)));
             }
             else if (shape == SpellShape.Volume)
             {
@@ -240,6 +248,7 @@ namespace WoundBound.Game.Combat
                 squares = SpellArea.Reached(corner, spell.Size, origin, Setting.IsWall);
                 var covered = squares.ToHashSet();
                 caught = combatants.Where(c => c.OccupiesSquare && c.Footprint.Any(covered.Contains)).ToList();
+                caught.AddRange(Steeds.Where(m => covered.Contains(m.Position)));
             }
             else
             {
@@ -348,8 +357,8 @@ namespace WoundBound.Game.Combat
 
                     break;
 
-                case SpellType.Motion when motion == MotionKind.Bind && spell.SpellTier != Tier.T1:
-                    return CastPlan.Refused("Only a T1 Bind — Slowed — is in the game yet.");
+                case SpellType.Motion when motion == MotionKind.Bind && cast.BindAs is { } lower && lower > spell.SpellTier:
+                    return CastPlan.Refused($"A {spell.SpellTier} Bind can't produce a {lower} effect — only its own, or a lower one.");
             }
 
             // A Swarm is moved, held or hurried only as a whole: a Motion spell must cover every square
@@ -415,19 +424,16 @@ namespace WoundBound.Game.Combat
 
             var sacrificed = cast.Sacrifice ? 1 : 0;
             FuelPayment? fuel = null;
-            if (element is { } fuelled)
+            if (element is { } fuelled && track is null)
             {
-                if (build is null)
-                {
-                    return CastPlan.Refused("A creature's Elemental casting isn't in the game yet.");
-                }
-
                 if (FuelRefusal(caster, from, fuelled, cast) is { } noSource)
                 {
                     return CastPlan.Refused(noSource);
                 }
 
-                fuel = InventoryCalculator.PlanFuelPayment(build, fuelled, cost, AmbientAt(fuelled, from), cast.Tap);
+                fuel = build is not null
+                    ? InventoryCalculator.PlanFuelPayment(build, fuelled, cost, AmbientAt(fuelled, from), cast.Tap)
+                    : StatblockFuelPayment(caster, fuelled, cost, AmbientAt(fuelled, from), cast.Tap);
                 if (!fuel.IsFullyPaid)
                 {
                     return CastPlan.Refused($"{spell.Name} needs {cost} {fuelled} Fuel, and that leaves it {fuel.Shortfall} short.");
@@ -510,7 +516,15 @@ namespace WoundBound.Game.Combat
 
             if (plan.Fuel is { } fuel)
             {
-                InventoryCalculator.PayFuelCost(caster.Build!, fuel);
+                if (caster.Build is { } payer)
+                {
+                    InventoryCalculator.PayFuelCost(payer, fuel);
+                }
+                else
+                {
+                    caster.StatblockFuel -= fuel.FromCarried;
+                }
+
                 var parts = new List<string>();
                 if (fuel.FromAmbient > 0)
                 {
@@ -780,6 +794,14 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            if (type != WoundType.Body && target.IsSteed)
+            {
+                // A mount is Body, Dodge and Stability, and nothing more (Core Rules §9, "Mounts").
+                Write($"{target.Name} is a mount — there's no {type} in it for the spell to find.");
+                then();
+                return;
+            }
+
             if (type != WoundType.Body && (target.IsBoundNotAlive || type == WoundType.Mind && target.IsMindImmune))
             {
                 Write(target.IsBoundNotAlive
@@ -897,6 +919,21 @@ namespace WoundBound.Game.Combat
             _ => $"RT {c.ResolveThreshold}",
         };
 
+        /// <summary>What a Bind does at each Tier (Core Rules §11, "Motion Spells"): Slowed, Stuck, Frozen.</summary>
+        public static CharacterCondition BindEffect(Tier tier) => tier switch
+        {
+            Tier.T1 => CharacterCondition.Slowed,
+            Tier.T2 => CharacterCondition.Stuck,
+            _ => CharacterCondition.Frozen,
+        };
+
+        private static string BindMeaning(CharacterCondition bound) => bound switch
+        {
+            CharacterCondition.Stuck => "they can't change square, but may act freely",
+            CharacterCondition.Frozen => "they may neither move nor act",
+            _ => "one Speed slower",
+        };
+
         private void Hold(Combatant caster, SpellCast cast, CastPlan plan, Combatant target, ThresholdModifier? modifier, CharacterCondition? condition)
         {
             spellEffects.Add(new SpellEffect
@@ -948,6 +985,12 @@ namespace WoundBound.Game.Combat
                 {
                     switch (kind)
                     {
+                        case MotionKind.Shift when target.IsRiding && target.Side != caster.Side:
+                            // A Shift landed on a rider unhorses them, rather than carrying horse and all (Core Rules §9, "Mounts").
+                            Write(line);
+                            Unhorse(target, $"{caster.Name}'s {spell.Name}");
+                            Next();
+                            return;
                         case MotionKind.Shift:
                             var step = cast.Direction ?? AwayFrom(caster.Position, target.Position);
                             var squares = Math.Min(cast.Squares ?? int.MaxValue, SpellArea.ShiftSquares(spell.SpellTier));
@@ -955,9 +998,10 @@ namespace WoundBound.Game.Combat
                             ForcedMove(target, step, squares, $"{caster.Name}'s {spell.Name}", caster, meetHazards: true, Next);
                             return;
                         case MotionKind.Bind:
-                            Write(line + $" {target.Name} is Slowed until the start of {caster.Name}'s next turn.");
-                            target.SetCondition(CharacterCondition.Slowed, true);
-                            Hold(caster, cast, plan, target, modifier: null, CharacterCondition.Slowed);
+                            var bound = BindEffect(cast.BindAs ?? spell.SpellTier);
+                            Write(line + $" {target.Name} is {bound} until the start of {caster.Name}'s next turn — {BindMeaning(bound)}.");
+                            target.SetCondition(bound, true);
+                            Hold(caster, cast, plan, target, modifier: null, bound);
                             Next();
                             return;
                         default:

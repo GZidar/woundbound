@@ -891,6 +891,16 @@ namespace WoundBound.Game.Combat
                 return new AttackPlan("Something solid is in the way.", 0, 0, null, "Something solid is in the way.", attack);
             }
 
+            if (attack.Against == ThresholdType.Stability)
+            {
+                // An innate Bind: against Stability, within the line's reach (Core Rules §11).
+                return distance > attack.Reach
+                    ? Refused($"Out of reach — the {attack.Name} reaches {attack.Reach} square(s) and they're {distance} away.")
+                    : !CanBeTargeted(target, targetAt ?? target.Position, distance, attacker)
+                        ? Refused("Too dark to see them.")
+                        : new AttackPlan(null, target.StabilityThreshold, 0, attack.DamageDieSides, $"Against Stability, within {attack.Reach}.", attack);
+            }
+
             if (attack.Against == ThresholdType.Fortitude)
             {
                 // Breathed or swallowed: within its reach, against Fortitude, and nothing about the
@@ -925,6 +935,11 @@ namespace WoundBound.Game.Combat
                 var dark = VisibilityDodgeModifier(target, targetAt, attacker);
                 return new AttackPlan(null, target.DodgeThreshold + dark, 0, attack.DamageDieSides,
                     $"Melee, within Reach {attack.Reach}" + (dark > 0 ? $"; +{dark} DT for the dark." : "."), attack);
+            }
+
+            if (SaddleForbids(attacker, attack))
+            {
+                return Refused($"No Heavy ranged weapon from the saddle — the {attack.Name} needs footing a moving mount doesn't give.");
             }
 
             var range = RangeBandCalculator.BandForSquares(bands, distance) switch
@@ -1002,6 +1017,11 @@ namespace WoundBound.Game.Combat
                 return $"{combatant.Name} is Ringed — no tactical spend until the start of their next turn.";
             }
 
+            if (!ConditionCatalog.CanAct(combatant.Conditions))
+            {
+                return $"{combatant.Name} is Frozen — they may neither move nor act.";
+            }
+
             return TacticalSpendCalculator.IsAtLimit(combatant.TacticalSpendsThisRound, combatant.TacticalSpendsPerRound)
                 ? $"Already made {combatant.TacticalSpendsThisRound} tactical spend(s) this round — the limit at this Tier."
                 : null;
@@ -1049,9 +1069,11 @@ namespace WoundBound.Game.Combat
 
         /// <param name="sacrifice">Pay 1 Body first for Advantage on the roll (Core Rules §3, "Sacrifice").</param>
         /// <param name="manoeuvre">A Martial manoeuvre, declared with the attack (Core Rules §9, "Manoeuvres").</param>
-        public AttackOutcome? TryAttack(Combatant target, bool sacrifice = false, Manoeuvre? manoeuvre = null)
+        /// <param name="with">One of the attacker's attacks in particular — a rider's borrowed hooves, say; null for whichever does most.</param>
+        public AttackOutcome? TryAttack(Combatant target, bool sacrifice = false, Manoeuvre? manoeuvre = null, AttackProfile? with = null)
         {
             if (Phase != EncounterPhase.PartyTurn || Active is not { } attacker || !CanAttack(attacker, target)
+                || (with is not null && (!attacker.Attacks.Contains(with) || !PlanAttackWith(attacker, with, attacker.Position, target).CanAttack))
                 || (sacrifice && SacrificeRefusal(attacker) is not null)
                 || (manoeuvre is { } m && ManoeuvreRefusal(attacker, target, m) is not null))
             {
@@ -1066,7 +1088,7 @@ namespace WoundBound.Game.Combat
                 // off-hand's Stamina (Core Rules §9, "Two Weapons").
                 attacker.OffHandOwed = attacker.OffHandWeapon is not null && Active == attacker;
                 CheckForEnd();
-            }, sacrifice: sacrifice, manoeuvre: manoeuvre);
+            }, with: with, sacrifice: sacrifice, manoeuvre: manoeuvre);
 
             return result;
         }
@@ -1506,6 +1528,14 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
+            if (!ConditionCatalog.CanAct(next.Conditions))
+            {
+                // Frozen by a T3 Bind: "may neither move nor act" (Core Rules §11). The turn passes.
+                Write($"{next.Name} is Frozen, and can do nothing with the turn.");
+                AfterPartyTurn();
+                return;
+            }
+
             Active = next;
             next.HasMove = true;
             next.ActionsRemaining = 1;
@@ -1722,6 +1752,14 @@ namespace WoundBound.Game.Combat
                 // the user's ruling, 2026-11-02).
                 actor.IsUnconscious = true;
                 Write($"{actor.Name} starts its turn with no Stamina and falls unconscious.");
+                FinishTurn(actor);
+                done();
+                return;
+            }
+
+            if (!ConditionCatalog.CanAct(actor.Conditions))
+            {
+                Write($"{actor.Name} is Frozen, and can do nothing with its turn.");
                 FinishTurn(actor);
                 done();
                 return;
@@ -1985,6 +2023,16 @@ namespace WoundBound.Game.Combat
 
                 case GmStep.LetGo:
                     throw new InvalidOperationException($"The GM brain had {actor.Name} let go, but it's holding nobody.");
+
+                case GmStep.Mount:
+                    if (MountRefusal(actor) is { } noMount)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} mount: {noMount}");
+                    }
+
+                    Mount(actor);
+                    TakeStep(turn, done);
+                    return;
 
                 case GmStep.Throw toss:
                     if (ThrowRefusal(actor, toss.Target) is { } noThrow)
@@ -2684,6 +2732,22 @@ namespace WoundBound.Game.Combat
                 : 0;
             var riposte = roll.IsCritical ? " — a critical, so turning it would Riposte it" : string.Empty;
 
+            // Against Stability, the answer is standing firm: +2 ST for 1 Stamina (Core Rules §9).
+            if (attack.Against == ThresholdType.Stability)
+            {
+                if (!BoostWouldTurn(roll, plan.DodgeThreshold))
+                {
+                    FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, boost: 0, boostedBy: null, then);
+                    return;
+                }
+
+                OfferReaction(new PendingReaction(ReactionKind.StandFirm, target, attacker, roll, plan.DodgeThreshold,
+                        $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s ST {plan.DodgeThreshold}. Standing firm (1 Stamina, +2 ST) would stop it."),
+                    firm => FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
+                        firm ? ThresholdModifierCalculator.ReactionBonus : 0, firm ? "stood firm" : null, then));
+                return;
+            }
+
             // Fortitude can't be braced: no shield and no panic dodge turns a lungful aside (Core Rules §10).
             if (attack.Against == ThresholdType.Fortitude)
             {
@@ -3135,7 +3199,7 @@ namespace WoundBound.Game.Combat
 
                 case ControlAction.Trip:
                     Write(line + (critical ? $" — critical! {target.Name} goes down, and is shoved too." : $" — {target.Name} goes down, Prone."));
-                    target.SetCondition(CharacterCondition.Prone, true);
+                    KnockDown(target, $"{actor.Name}'s Trip");
                     if (critical)
                     {
                         Shove(actor, target, then);
@@ -3151,7 +3215,7 @@ namespace WoundBound.Game.Combat
                     {
                         if (critical && !target.IsOutOfFight)
                         {
-                            target.SetCondition(CharacterCondition.Prone, true);
+                            KnockDown(target, $"{actor.Name}'s shove");
                             Write($"{target.Name} ends the push on the ground, Prone.");
                         }
 
@@ -3413,6 +3477,28 @@ namespace WoundBound.Game.Combat
             int rolledDamage = 0, absorbed = 0, dealt = 0;
             var attackerWounded = false;
 
+            if (roll.Success == true && (plan.Profile ?? attacker.Attack) is { Imposes: { } imposed } binding)
+            {
+                // An innate Bind lands: its effect until the start of the attacker's next turn, never held.
+                target.SetCondition(imposed, true);
+                spellEffects.Add(new SpellEffect
+                {
+                    Caster = attacker,
+                    Target = target,
+                    Spell = new SpellDefinition { Name = binding.Name, SpellType = SpellType.Motion, SpellTier = attacker.Tier },
+                    Condition = imposed,
+                    Sustained = false,
+                    CastBonus = binding.AttackModifier,
+                });
+                Write($"{attacker.Name}'s {binding.Name}: {DescribeRoll(roll)} vs ST {roll.Threshold} — {target.Name} is {imposed} until the start of {attacker.Name}'s next turn.");
+                if (binding.DealsNoDamage)
+                {
+                    var bound = new AttackOutcome(attacker, target, roll, plan, 0, 0, 0, false, usedOpportunity, asReaction, dodged, boost, boostedBy);
+                    then(bound);
+                    return;
+                }
+            }
+
             if (roll.Success == true)
             {
                 var swung = plan.Profile ?? attacker.Attack;
@@ -3575,7 +3661,9 @@ namespace WoundBound.Game.Combat
                 return true;
             }
 
-            // Whoever just went down lets go, or is let go of; a shield's cover ends out of Reach.
+            // A mount at 0 Body goes down, its rider with it; whoever just went down lets go, or is let
+            // go of; a shield's cover ends out of Reach.
+            CheckSteeds();
             CheckHolds();
             CheckCover();
             EndSpellsOfFallenCasters(roundEnd: false);
@@ -3636,7 +3724,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         internal Dictionary<GridPosition, int> SquaresWithinIfAbsent(Combatant mover, Combatant absent, int moves)
         {
-            var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover)), mover.IsNimble));
+            var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover)), mover.HasFootwork));
             return BuildMap(mover, reach, absent).All.Where(o => o.Value.Cost <= moves).ToDictionary(o => o.Key, o => o.Value.Cost);
         }
 
@@ -3650,7 +3738,7 @@ namespace WoundBound.Game.Combat
         {
             // As far as the moves it could have would carry it: two for a fresh turn, more with
             // actions bought.
-            var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover)), mover.IsNimble));
+            var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover)), mover.HasFootwork));
             var stamp = HashCode.Combine(BoardStamp(mover), reach);
             if (movementMaps.TryGetValue(mover, out var known) && known.Stamp == stamp)
             {
@@ -3690,7 +3778,7 @@ namespace WoundBound.Game.Combat
                 canStop: corner => groundless || !AnyUnder(corner, standing.ContainsKey),
                 isBroken: corner => tables is not null && AnyUnder(corner, sq => GroundAt(sq) == Terrain.Broken),
                 isDeep: corner => AnyUnder(corner, Setting.IsDeepWater),
-                price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.IsNimble, freeStep: FreeStepFor(mover)),
+                price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.HasFootwork, freeStep: FreeStepFor(mover)),
                 brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken));
             return map;
         }

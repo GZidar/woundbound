@@ -185,6 +185,12 @@ namespace WoundBound.Game.Combat.Brains
 
         public string? ThrowRefusal(Combatant thrower, Combatant target) => encounter.ThrowRefusal(thrower, target);
 
+        /// <summary>The mounts of <paramref name="combatant"/>'s enemies: something more to hit, and a way to bring a rider down.</summary>
+        public IEnumerable<Combatant> EnemySteeds(Combatant combatant) =>
+            encounter.Steeds.Where(s => s.Side != combatant.Side && s.Rider is { IsOutOfFight: false });
+
+        public string? MountRefusal(Combatant rider) => encounter.MountRefusal(rider);
+
         public string? PickUpRefusal(Combatant who, GroundWeapon lying) => encounter.PickUpRefusal(who, lying);
 
         public IReadOnlyList<GroundWeapon> GroundWeapons => encounter.GroundWeapons;

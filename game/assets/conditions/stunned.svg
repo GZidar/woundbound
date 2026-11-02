@@ -1,0 +1,7 @@
+<!-- Stunned: a burst of stars. One of the condition markers drawn on a token's corners (see conditionbadge.js):
+     dark with a gold rim for a condition, rust for what the wound tracks have done. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46.5" fill="#c04a10" stroke="#ffffff" stroke-width="5" />
+  <path d="M50 18 L56 40 L78 34 L62 50 L78 66 L56 60 L50 82 L44 60 L22 66 L38 50 L22 34 L44 40 Z" fill="#f4f1ea" />
+  <circle cx="50" cy="50" r="7" fill="#c04a10" />
+</svg>

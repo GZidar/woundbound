@@ -96,6 +96,12 @@ namespace WoundBound.Game.Combat.Brains
         /// <param name="Manoeuvre">A Martial manoeuvre declared with it (Core Rules §9).</param>
         public sealed record Attack(Combatant Target, bool Sacrifice = false, Manoeuvre? Manoeuvre = null) : PartyStep;
 
+        /// <summary>Get up into the saddle from beside its mount, for a move.</summary>
+        public sealed record Mount : PartyStep;
+
+        /// <summary>Get down from the saddle, for a move.</summary>
+        public sealed record Dismount : PartyStep;
+
         /// <summary>Throw the throwable weapon in hand: the Attack action, as a shot.</summary>
         public sealed record Throw(Combatant Target) : PartyStep;
 

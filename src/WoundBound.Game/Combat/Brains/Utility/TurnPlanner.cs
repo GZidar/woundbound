@@ -15,6 +15,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         BreakFree,
         TakeUpWeapon,
         Throw,
+        Mount,
         DrawWeapon,
         PickUpWeapon,
         BuyExtraAction,
@@ -140,6 +141,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 options.Add(new Option(OptionKind.StandUp, 5, "Up off the ground"));
                 return options;
+            }
+
+            // Back in the saddle: the mount's Speed and its hooves again, for the move.
+            if (actor.Steed is { Body: > 0 } && !actor.IsRiding && hasMove && (!real || View.MountRefusal(actor) is null)
+                && actor.DistanceTo(actor.Steed.Position) <= 1)
+            {
+                options.Add(new Option(OptionKind.Mount, 1.0 + 0.5 * assess.Threat(actor), "back into the saddle"));
             }
 
             var canMove = hasMove && Encounter.CanMoveItself(actor);
@@ -462,6 +470,31 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 if (View.GroundWeapons.FirstOrDefault(g => actor.Covers(g.At) && (!checkRules || View.PickUpRefusal(actor, g) is null)) is { } lying)
                 {
                     yield return new Option(OptionKind.PickUpWeapon, 0.8 + 1.5 * assess.Threat(actor), $"pick up the {lying.Weapon.Name}", Lying: lying);
+                }
+            }
+
+            // An enemy's mount: the blow it takes, and the chance of bringing its rider down with it —
+            // Prone in the next square, and on foot from then on (Core Rules §9, "Mounts").
+            foreach (var steed in View.EnemySteeds(actor))
+            {
+                if (checkRules && !View.CanAttack(actor, steed))
+                {
+                    continue;
+                }
+
+                foreach (var line in actor.Attacks.Where(a => a.AreaSquares is null))
+                {
+                    var plan = View.PlanAttackWith(actor, line, at, steed);
+                    if (!plan.CanAttack)
+                    {
+                        continue;
+                    }
+
+                    var blow = assess.Blow(actor, line, steed, plan.DamageDieSides, plan.DodgeThreshold);
+                    var unhorsed = steed.Rider is { IsRiding: true } rider ? 0.4 * assess.Value(rider) : 0.2;
+                    yield return new Option(OptionKind.Attack, blow.ExpectedDealt * 0.2 + blow.Kill * unhorsed,
+                        $"{line.Name} at {steed.Name}", Target: steed, With: line);
+                    break;
                 }
             }
 

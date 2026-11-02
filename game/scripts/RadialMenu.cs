@@ -516,7 +516,7 @@ namespace WoundBoundGame
             var radius = Disc / 2;
             DrawCircle(at, radius, fill);
             var on = item.IsOn?.Invoke() == true;
-            DrawArc(at, radius, 0, Mathf.Tau, 40, on ? new Color(0.4f, 0.9f, 0.5f) : edge, isHover || on ? 2.5f : 1.5f);
+            DrawArc(at, radius, 0, Mathf.Tau, 40, on ? Color.FromHtml("#56b4e9") : edge, isHover || on ? 2.5f : 1.5f);
 
             if (item.Arrow is { } way && way != Vector2.Zero)
             {

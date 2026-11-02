@@ -58,3 +58,6 @@ The action icons are from [game-icons.net](https://game-icons.net), used under [
 | backlash | [return-arrow](https://game-icons.net/1x1/lorc/return-arrow.html) | Lorc |
 | sustain | [concentration-orb](https://game-icons.net/1x1/lorc/concentration-orb.html) | Lorc |
 | shelter | [heart-shield](https://game-icons.net/1x1/delapouite/heart-shield.html) | Delapouite |
+| mount | [horse-head](https://game-icons.net/1x1/delapouite/horse-head.html) | Delapouite |
+| dismount | [walk](https://game-icons.net/1x1/delapouite/walk.html) | Delapouite |
+| hooves | [horseshoe](https://game-icons.net/1x1/delapouite/horseshoe.html) | Delapouite |

@@ -1,0 +1,8 @@
+<!-- Stuck: a stake driven into the ground. One of the condition markers drawn on a token's corners (see conditionbadge.js):
+     dark with a gold rim for a condition, rust for what the wound tracks have done. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46.0" fill="#1c1f26" stroke="#f2d36b" stroke-width="6" />
+  <path d="M44 22 L56 22 L56 52 L64 52 L50 68 L36 52 L44 52 Z" fill="#f4f1ea" />
+  <rect x="22" y="70" width="56" height="6" rx="3" fill="#f4f1ea" />
+  <path d="M30 76 L26 82 M44 76 L40 82 M58 76 L54 82 M72 76 L68 82" stroke="#f4f1ea" stroke-width="3" stroke-linecap="round" />
+</svg>

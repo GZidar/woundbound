@@ -64,6 +64,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         .Select(corner => (new SpellCast(spell) { Shape = SpellShape.Volume, Corner = corner }, (Func<CastPlan, double>)(plan => LightWorth(actor, spell, plan)))),
                     SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Shift => enemies.Where(e => !e.IsBroken)
                         .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => Denial * ShiftWorth(actor, plan)))),
+                    SpellType.Motion when usesTricks && SpellArea.MotionOf(spell) == MotionKind.Bind && spell.Target == SpellTarget.One => enemies
+                        .Where(e => !e.IsBroken && !e.IsPhantom)
+                        .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => Denial * BindChance(plan) * assess.BindWorth(actor, e, Encounter.BindEffect(spell.SpellTier))))),
                     _ => [],
                 };
 
@@ -657,6 +660,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// A Shove is worth what it takes away: an enemy toe to toe with one of ours carried out of
         /// reach, and whatever it is driven into.
         /// </summary>
+        /// <summary>The chance a Bind takes: the cast against Stability, which the target may raise by standing firm.</summary>
+        private static double BindChance(CastPlan plan)
+        {
+            var target = plan.Targets[0];
+            var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
+            return Odds.Of(plan.CastBonus, target.StabilityThreshold + answer).Success;
+        }
+
         private double ShiftWorth(Combatant actor, CastPlan plan)
         {
             var target = plan.Targets[0];

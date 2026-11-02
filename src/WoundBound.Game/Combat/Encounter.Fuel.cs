@@ -36,6 +36,33 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
+        /// A Caster - Elemental creature's Fuel, by the standard formula (GM Reference §9): what the
+        /// scene's presence of its element covers, then a tapped source, spent whole, then the Fuel
+        /// it carries — the same order a character pays in, with its statblock's N for a pack.
+        /// </summary>
+        private static FuelPayment StatblockFuelPayment(Combatant caster, Element element, int cost, AmbientPresence ambient, FuelSource source)
+        {
+            cost = Math.Max(0, cost);
+            if (InventoryCalculator.ElementOf(source) != element)
+            {
+                source = FuelSource.None;
+            }
+
+            var fromAmbient = Math.Min(InventoryCalculator.AmbientDiscount(ambient), cost);
+            var afterAmbient = cost - fromAmbient;
+            if (afterAmbient == 0)
+            {
+                source = FuelSource.None;
+            }
+
+            var sourceSpent = InventoryCalculator.FuelValueOf(source);
+            var fromSource = Math.Min(sourceSpent, afterAmbient);
+            var afterSource = afterAmbient - fromSource;
+            var fromCarried = Math.Min(afterSource, caster.StatblockFuel);
+            return new FuelPayment(cost, element, fromAmbient, source, fromSource, sourceSpent, fromCarried, afterSource - fromCarried);
+        }
+
+        /// <summary>
         /// Why the source <paramref name="cast"/> taps isn't there to be tapped, or null if it is: a
         /// lit torch or lantern in the caster's hand, a torch burning on the ground beside them, or a
         /// built fire within reach of a hand. An unlit light is not fire (Core Rules §14).

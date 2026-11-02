@@ -786,6 +786,30 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
+        /// Outriders on the road — staged for the game: three Tollroad Bandits on
+        /// riding horses (Core Rules §9, "Mounts": Fast, a horse's hooves to borrow, a horse to strike
+        /// instead), with an Ambusher and his crossbow on foot behind. Daylight, open ground.
+        /// </summary>
+        public static Encounter Outriders(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+                CombatantFactory.Mounted(CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Mounted Tollroad Bandit", new GridPosition(15, 9))),
+                CombatantFactory.Mounted(CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Outrider", new GridPosition(16, 5))),
+                CombatantFactory.Mounted(CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Second outrider", new GridPosition(16, 13))),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on foot", new GridPosition(18, 9)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "The open road" }, environment: data.Environment);
+        }
+
+        /// <summary>
         /// A shrine's guardians — staged for the game, not taken from a book: a Stoneheart Golem (T2
         /// Brute, Large, Heavy armour, Reach 2) and two Animated Suits of Mail (DT 14), in a ruined
         /// cloister's open yard. Constructs have no Mind or Soul for a Smite, a Mind Spike or a Control

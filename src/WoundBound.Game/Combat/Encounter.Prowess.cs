@@ -23,7 +23,7 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Whether <paramref name="mover"/>'s free step is still theirs: Nimble, once a round, and not while Slowed.</summary>
         private static bool FreeStepFor(Combatant mover) =>
-            mover.IsNimble && !mover.HasUsedFreeStep && !mover.Conditions.Contains(CharacterCondition.Slowed);
+            mover.HasFootwork && !mover.HasUsedFreeStep && !mover.Conditions.Contains(CharacterCondition.Slowed);
 
         /// <summary>
         /// Why <paramref name="character"/> can't buy <paramref name="exploit"/> now, or null if they can:
@@ -236,8 +236,8 @@ namespace WoundBound.Game.Combat
                         then();
                         return;
                     case WeaponManoeuvre.Topple:
-                        target.SetCondition(CharacterCondition.Prone, true);
                         Write($"{manoeuvre.Kind}: {total} against {label} {against} — {target.Name} goes down, Prone.");
+                        KnockDown(target, $"{attacker.Name}'s Topple");
                         then();
                         return;
                     case WeaponManoeuvre.Ring:

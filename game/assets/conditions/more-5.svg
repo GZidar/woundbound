@@ -1,0 +1,6 @@
+<!-- 5 more markers than there are places for: the last of the eight places on a token
+     (see conditionbadge.js). Its icons' own colours, so it reads as one of them. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46" fill="#1c1f26" stroke="#f2d36b" stroke-width="6" />
+  <text x="50" y="51" text-anchor="middle" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="46" fill="#f2d36b">+5</text>
+</svg>

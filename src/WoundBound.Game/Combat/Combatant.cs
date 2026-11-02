@@ -30,7 +30,44 @@ namespace WoundBound.Game.Combat
         public required Side Side { get; init; }
 
         /// <summary>Where it stands — for a creature bigger than one square, the top-left corner of its footprint.</summary>
-        public GridPosition Position { get; internal set; }
+        public GridPosition Position
+        {
+            get => position;
+            internal set
+            {
+                position = value;
+
+                // A mount goes where it's ridden (Core Rules §9, "Mounts").
+                if (IsRiding && Steed is { } steed)
+                {
+                    steed.position = value;
+                }
+            }
+        }
+
+        private GridPosition position;
+
+        /// <summary>
+        /// The mount this creature owns — ridden or standing riderless (Core Rules §9, "Mounts"). It
+        /// takes no turns and counts toward nobody's cap; it has its own Body, Dodge and Stability
+        /// Thresholds, Speed and attack. Null for anyone without one.
+        /// </summary>
+        public Combatant? Steed { get; internal set; }
+
+        /// <summary>In the saddle: its moves use the mount's Speed, and its feet stay out of it.</summary>
+        public bool IsRiding { get; internal set; }
+
+        /// <summary>A mount, not a creature that fights on its own: never on the board's list, never given a turn.</summary>
+        public bool IsSteed { get; init; }
+
+        /// <summary>For a mount, whose it is.</summary>
+        public Combatant? Rider { get; internal set; }
+
+        /// <summary>
+        /// A Nimble character's footwork — the free step and the cheaper Long move — which belongs to
+        /// their legs, not the horse's (Core Rules §9, "Mounts").
+        /// </summary>
+        public bool HasFootwork => IsNimble && !IsRiding;
 
         /// <summary>
         /// How many squares across it stands: 1 for Tiny, Small and Medium, 2 for Large (4
@@ -284,7 +321,17 @@ namespace WoundBound.Game.Combat
             : (StatblockLinesNow.Count > 0 ? StatblockLinesNow[0] : null) ?? throw new InvalidOperationException($"{Name} has neither a character sheet nor a statblock attack.");
 
         /// <summary>Every attack it could make: a character's weapon in hand, or each of a foe's attack lines.</summary>
-        public IReadOnlyList<AttackProfile> Attacks => Build is not null ? [Attack] : StatblockLinesNow;
+        public IReadOnlyList<AttackProfile> Attacks => (Build is not null ? [Attack] : StatblockLinesNow) is var own && SteedAttack is { } hooves
+            ? [.. own, hooves]
+            : own;
+
+        /// <summary>
+        /// The mount's attack, which a rider may make in place of their own, "at the mount's bonus and
+        /// damage" (Core Rules §9, "Mounts"). Null on foot, or with no mount.
+        /// </summary>
+        public AttackProfile? SteedAttack => IsRiding && Steed is { Body: > 0 } steed && steed.StatblockAttacks.Count > 0
+            ? steed.StatblockAttacks[0] with { Name = $"{steed.StatblockAttacks[0].Name} ({steed.Name})" }
+            : null;
 
         /// <summary>A foe's attack lines as it stands: a Disarmed foe has lost its weapon lines, and punches with its own Attack bonus.</summary>
         private IReadOnlyList<AttackProfile> StatblockLinesNow
@@ -384,7 +431,7 @@ namespace WoundBound.Game.Combat
         public Speed InnateSpeed { get; init; } = Speed.Normal;
 
         /// <summary>What a move is priced at right now: Crawling while Prone (Core Rules §9, "Prone and crawling").</summary>
-        public Speed Speed => ConditionCatalog.Speed(conditions, InnateSpeed);
+        public Speed Speed => IsRiding && Steed is { } steed ? steed.Speed : ConditionCatalog.Speed(conditions, InnateSpeed);
 
         /// <summary>
         /// A Swarm: no body in it to take hold of, and no ground it holds to be moved off, so it
@@ -574,11 +621,26 @@ namespace WoundBound.Game.Combat
         /// and, for Aether or Divine, Body instead at its Tier's baseline, which is also how such a
         /// creature reaches a Blood Magic Heal.
         /// </summary>
+        /// <summary>
+        /// The Fuel a Caster - Elemental creature carries — the N its trait names (GM Reference §9,
+        /// "On Casters") — spent as it casts, after whatever the place and a tapped source cover.
+        /// </summary>
+        public int StatblockFuel { get; internal set; }
+
         private IReadOnlyList<MagicAccessEntry> StatblockAccess()
         {
             if (Casting is not { } casting)
             {
                 return [];
+            }
+
+            if (casting.Source == MagicSource.ElementalMagic)
+            {
+                // Fuel by the standard formula — or, made of what it casts, its own Body, exactly as
+                // Blood Magic is paid (GM Reference §9, "Caster - Elemental, of its element").
+                return [new MagicAccessEntry(MagicSource.ElementalMagic, Ability.Intellect, casting.OfItsElement ? WoundType.Body : null,
+                    CanBleedForPower: false, MaxSpellTier: Tier, Notes: "Caster trait",
+                    Elements: casting.Element is { } element ? [element] : null)];
             }
 
             var bleeds = casting.Source is MagicSource.AetherMagic or MagicSource.DivineMagic;

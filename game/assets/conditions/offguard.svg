@@ -1,0 +1,7 @@
+<!-- Off-guard: a shield split down the middle. One of the condition markers drawn on a token's corners (see conditionbadge.js):
+     dark with a gold rim for a condition, rust for what the wound tracks have done. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46.0" fill="#1c1f26" stroke="#f2d36b" stroke-width="6" />
+  <path d="M48 24 L28 31 L28 52 C28 65 36 72 46 76 L46 60 L40 52 L47 43 L42 34 Z" fill="#f4f1ea" />
+  <path d="M54 24 L74 31 L74 52 C74 65 66 72 56 76 L56 60 L62 52 L55 43 L60 34 Z" fill="#f4f1ea" />
+</svg>

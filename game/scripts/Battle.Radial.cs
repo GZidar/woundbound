@@ -96,6 +96,11 @@ namespace WoundBoundGame
                 items.Add(Group("Exploits", "A Nimble character's held edges: 1 Stamina each.", exploitButtons.Values.Select(b => Mirror(b)).ToList()));
             }
 
+            if (acting.Steed is { Body: > 0 } steed)
+            {
+                items.Add(Group("Mount", $"{steed.Name}: into or out of the saddle, and its hooves to borrow.", MountItems(acting, steed)));
+            }
+
             items.Add(Group("Gear", "Weapons and lights: the swap, the pack, and the ground.", new[] { swapButton, lightButton, dropLightButton, takeUpButton }
                 .Where(b => b.Visible).Select(b => Mirror(b)).Concat(PackItems(acting)).ToList()));
 
@@ -209,6 +214,72 @@ namespace WoundBoundGame
             }).ToList();
         }
 
+        /// <summary>
+        /// The mount's own ring (Core Rules §9, "Mounts"): getting up or down — a move, not movement —
+        /// and, in the saddle, the horse's attack in place of the rider's own.
+        /// </summary>
+        private List<RadialItem> MountItems(Combatant acting, Combatant steed)
+        {
+            var items = new List<RadialItem>
+            {
+                acting.IsRiding
+                    ? new RadialItem("Dismount", Encounter.DismountRefusal(acting), $"Get down from {steed.Name}: a move, but not movement — nobody's reach is left.")
+                    {
+                        Icon = "dismount",
+                        Pick = () =>
+                        {
+                            encounter.TryDismount();
+                            Refresh();
+                        },
+                    }
+                    : new RadialItem("Mount", encounter.MountRefusal(acting), $"Get up onto {steed.Name}, standing beside it: a move, but not movement.")
+                    {
+                        Icon = "mount",
+                        Pick = () =>
+                        {
+                            encounter.TryMount();
+                            Refresh();
+                        },
+                    },
+            };
+
+            if (acting.SteedAttack is { } hooves)
+            {
+                var noAction = acting.ActionsRemaining < 1 ? "No action left this turn." : null;
+                items.Add(new RadialItem($"Strike ({hooves.Name})", noAction,
+                    $"Give up your own attack to use the horse's: +{hooves.AttackModifier}, {hooves.DamageDiceCount}d{hooves.DamageDieSides}{hooves.DamageModifier:+0;-0;+0}.")
+                {
+                    Children = noAction is null ? () => HoovesTargets(acting, hooves) : null,
+                    Icon = "hooves",
+                });
+            }
+
+            return items;
+        }
+
+        /// <summary>Everyone the horse's hooves could reach from here.</summary>
+        private IReadOnlyList<RadialItem> HoovesTargets(Combatant rider, AttackProfile hooves)
+        {
+            var targets = encounter.Combatants.Where(c => c.OccupiesSquare && c != rider && encounter.CanAttack(rider, c))
+                .Where(c => encounter.PlanAttack(rider, c) is { CanAttack: true } && rider.DistanceTo(c) <= hooves.Reach)
+                .OrderBy(c => c.Side == rider.Side).ThenBy(c => rider.DistanceTo(c)).ToList();
+            if (targets.Count == 0)
+            {
+                return [new RadialItem("Nobody", "Nobody within the horse's reach.")];
+            }
+
+            return targets.Select(target => new RadialItem(target.Side == rider.Side ? $"{target.Name} (ally)" : target.Name, null,
+                $"{hooves.Name}: +{hooves.AttackModifier} against DT {target.DodgeThreshold}.")
+            {
+                Pick = () =>
+                {
+                    Disarm();
+                    encounter.TryAttack(target, sacrificeBox.ButtonPressed, with: hooves);
+                    Refresh();
+                },
+            }).ToList();
+        }
+
         /// <summary>The pack and the ground: drawing a weapon, stowing or dropping the one in hand, picking one up.</summary>
         private IEnumerable<RadialItem> PackItems(Combatant acting)
         {
@@ -274,8 +345,9 @@ namespace WoundBoundGame
         /// <param name="offHand">The off-hand strike of a Two Weapons loadout, rather than the Attack action.</param>
         private IReadOnlyList<RadialItem> Targets(Combatant attacker, WeaponManoeuvre? kind, bool offHand = false)
         {
-            var targets = encounter.Combatants
-                .Where(c => c.OccupiesSquare && (offHand ? encounter.OffHandRefusal(attacker, c) is null : encounter.CanAttack(attacker, c)))
+            // A rider's mount may be struck instead of the rider (Core Rules §9, "Mounts").
+            var targets = encounter.Combatants.Where(c => c.OccupiesSquare).Concat(encounter.Steeds.Where(s => s.Side != attacker.Side))
+                .Where(c => offHand ? encounter.OffHandRefusal(attacker, c) is null : encounter.CanAttack(attacker, c))
                 .Where(c => kind is null || (kind == WeaponManoeuvre.Cleave
                     ? CleaveSeconds(attacker, c, offHand).Count > 0
                     : Encounter.ManoeuvreRefusal(attacker, c, new Manoeuvre(kind.Value), offHand) is null))

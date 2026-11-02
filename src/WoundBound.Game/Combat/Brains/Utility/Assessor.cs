@@ -446,7 +446,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
                 var blow = Blow(attacker, attack, target, plan.DamageDieSides, plan.DodgeThreshold,
                     advantage || view.PackMateOf(attacker, target) is not null, precise: precise);
-                var worth = Worth(blow, target);
+                var worth = (attack.DealsNoDamage ? 0 : Worth(blow, target))
+                            + (attack.Imposes is { } bound ? blow.Hit * BindWorth(attacker, target, bound) : 0);
                 if (worth > best.Worth)
                 {
                     best = (worth, attack);
@@ -454,6 +455,31 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             return best;
+        }
+
+        /// <summary>
+        /// What laying <paramref name="bound"/> on <paramref name="target"/> until the attacker's next
+        /// turn is worth, before the chance it lands: the turn it denies, in wounds' worth (Core Rules
+        /// §11, "Motion Spells"). Frozen denies the whole of it; Stuck, nearly all of it to a creature
+        /// that has to move to reach anybody and little to one already in reach; Slowed, a part.
+        /// </summary>
+        public double BindWorth(Combatant actor, Combatant target, CharacterCondition bound)
+        {
+            if (target.IsOutOfFight || target.Conditions.Contains(bound) || target.Conditions.Contains(CharacterCondition.Frozen))
+            {
+                return 0;
+            }
+
+            var victims = view.EnemiesOf(target).Where(e => !e.IsOutOfFight).ToList();
+            var perWound = victims.Count == 0 ? 0 : victims.Average(PerWound);
+            var turn = Threat(target) * perWound;
+            var mustMove = !target.HasRangedAttack && !victims.Any(v => target.CanReach(v));
+            return bound switch
+            {
+                CharacterCondition.Frozen => turn,
+                CharacterCondition.Stuck => (mustMove ? 0.8 : 0.1) * turn,
+                _ => mustMove ? 0.3 * turn : 0,
+            };
         }
 
         /// <summary>

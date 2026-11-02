@@ -43,6 +43,12 @@ namespace WoundBound.Game.Combat
         public Combatant? Target { get; init; }
 
         /// <summary>
+        /// For a Bind: the Tier of effect to produce — "a caster may always produce a lower-Tier
+        /// effect of either kind instead of their own" (Core Rules §11). Null for the spell's own.
+        /// </summary>
+        public Tier? BindAs { get; init; }
+
+        /// <summary>
         /// For a Volume: the block's corner with the least X and Y. The block is always a block
         /// (Core Rules §11, "Placing a Volume"), and the point of origin is taken as the square of it
         /// nearest the caster — the cheapest place the origin could be, and anywhere in the block will do.

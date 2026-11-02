@@ -99,6 +99,7 @@ namespace WoundBound.Game.Combat
                 Kind = foe.Kind, Traits = foe.Traits, IsMindImmune = foe.IsMindImmune,
                 Tier = info.Tier,
                 Casting = casting,
+                StatblockFuel = casting.Source == MagicSource.ElementalMagic && !casting.OfItsElement ? casting.Fuel : 0,
                 StatblockSpells = spells,
                 StatblockCastBonus = AdversaryTraitCatalog.CastBonus(info.ToTemplate()),
                 StatblockBleedBonus = AdversarySkillCalculator.Baseline(info.Tier),
@@ -156,9 +157,9 @@ namespace WoundBound.Game.Combat
             BaseResolveThreshold = info.ResolveThreshold,
             BaseFortitudeThreshold = FortitudeOf(info),
             StatblockAttacks = new[] { Area(Rolled(StatblockLine(info.AttackName, info.AttackModifier, info.DamageDiceCount, info.DamageDie, info.DamageModifier, info.Reach),
-                    info.AttackVsThreshold, info.DamageType, info.DamageIsDirect), info.AttackEffect) }
+                    info.AttackVsThreshold, info.DamageType, info.DamageIsDirect, info.AttackDealsDamage), info.AttackEffect) }
                 .Concat((info.MoreAttacks ?? []).Select(a => Area(Rolled(StatblockLine(a.Name, a.Modifier, a.DamageDiceCount, a.DamageDie, a.DamageModifier, info.Reach),
-                    a.VsThreshold, a.DamageType, a.DamageIsDirect), a.Effect)))
+                    a.VsThreshold, a.DamageType, a.DamageIsDirect, a.DealsDamage), a.Effect)))
                 .ToList(),
             Armour = info.Armour,
             InnateSpeed = info.Speed,
@@ -250,13 +251,23 @@ namespace WoundBound.Game.Combat
         /// it (Core Rules §10, "Fortitude Threshold"); Mind or Soul for what strikes at those. A line
         /// against Resolve or Stability that isn't a spell is read against Dodge, as before.
         /// </summary>
-        private static AttackProfile Rolled(AttackProfile line, ThresholdType against, WoundType track, bool direct) =>
-            line with
+        private static AttackProfile Rolled(AttackProfile line, ThresholdType against, WoundType track, bool direct, bool dealsDamage = true)
+        {
+            // An innate Bind: "Petrifying Gaze (Motion - Bind, Stuck) - +3 v ST" — against Stability,
+            // laying the Bind's effect on a hit (Core Rules §11, "Motion Spells").
+            var bind = against == ThresholdType.Stability && line.Name.Contains("Bind", StringComparison.OrdinalIgnoreCase);
+            return line with
             {
-                Against = against == ThresholdType.Fortitude ? ThresholdType.Fortitude : ThresholdType.Dodge,
+                Against = against == ThresholdType.Fortitude || bind ? against : ThresholdType.Dodge,
                 Track = track,
                 IsDirect = direct,
+                Imposes = !bind ? null
+                    : line.Name.Contains("Frozen", StringComparison.OrdinalIgnoreCase) ? CharacterCondition.Frozen
+                    : line.Name.Contains("Stuck", StringComparison.OrdinalIgnoreCase) ? CharacterCondition.Stuck
+                    : CharacterCondition.Slowed,
+                DealsNoDamage = !dealsDamage,
             };
+        }
 
         /// <summary>The poison an Attack line's effect carries — "poison vs FT, 1d4 Body (Direct)" — or null.</summary>
         public static Poison? PoisonIn(string? effect)
@@ -329,6 +340,37 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>A catalogue weapon in the loadout at the ready — on the body, a swap away.</summary>
+        /// <summary>
+        /// The riding horse the rules assume (Core Rules §9, "Mounts"): Body 8, DT 12, ST 14, Fast,
+        /// Hooves +2 v DT / 1d6 Body — in the saddle, with <paramref name="rider"/> on it.
+        /// </summary>
+        public static Combatant Mounted(Combatant rider, string? name = null)
+        {
+            var horse = new Combatant
+            {
+                Name = name ?? (rider.Side == Side.Party ? $"{rider.Name.Split(' ').First(w => w != "The")}'s horse" : $"{rider.Name}'s horse"),
+                Side = rider.Side,
+                Position = rider.Position,
+                BodyMax = 8,
+                Body = 8,
+                BaseDodgeThreshold = 12,
+                BaseStabilityThreshold = 14,
+                Armour = ArmourWeight.None,
+                InnateSpeed = Speed.Fast,
+                StatblockAttacks = [StatblockLine("Hooves", 2, 1, "d6", 0, 1)],
+                StaminaMax = 0,
+                Stamina = 0,
+                TacticalSpendsPerRound = 0,
+                Tier = Tier.T1,
+                IsSteed = true,
+                Kind = "Riding horse",
+            };
+            horse.Rider = rider;
+            rider.Steed = horse;
+            rider.IsRiding = true;
+            return rider;
+        }
+
         /// <summary>A weapon carried in the pack: neither in hand nor at the ready, an action to take out (Core Rules §15).</summary>
         public static WeaponDefinition InPack(StartingWeaponInfo info) => FromCatalogue(info);
 

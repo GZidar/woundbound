@@ -24,11 +24,12 @@ namespace WoundBoundGame
         public BattleLog(Func<Combatant, Color> colourOf) => this.colourOf = colourOf;
 
         private static readonly Color Gold = new(0.95f, 0.78f, 0.35f);
-        private static readonly Color Hit = new(0.45f, 0.85f, 0.5f);
+        // The extension's colour-blind-safe palette: blue for what goes right, rust for what hurts.
+        private static readonly Color Hit = Color.FromHtml("#56b4e9");
         private static readonly Color Miss = new(0.6f, 0.6f, 0.65f);
-        private static readonly Color Hurt = new(0.95f, 0.45f, 0.4f);
+        private static readonly Color Hurt = Color.FromHtml("#e8733a");
         private static readonly Color Muted = new(0.62f, 0.62f, 0.68f);
-        private static readonly Color GmRed = new(0.85f, 0.35f, 0.3f);
+        private static readonly Color GmRed = Color.FromHtml("#e8733a");
 
         /// <summary>
         /// One line as BBCode for a RichTextLabel, with any round or turn header it opens.

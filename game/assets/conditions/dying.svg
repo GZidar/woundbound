@@ -1,0 +1,7 @@
+<!-- Dying: a falling drop of blood. One of the condition markers drawn on a token's corners (see conditionbadge.js):
+     dark with a gold rim for a condition, rust for what the wound tracks have done. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46.5" fill="#c04a10" stroke="#ffffff" stroke-width="5" />
+  <path d="M50 20 C44 32 32 44 32 56 C32 67 40 76 50 76 C60 76 68 67 68 56 C68 44 56 32 50 20 Z" fill="#f4f1ea" />
+  <path d="M43 56 C43 62 46 66 51 67" fill="none" stroke="#c04a10" stroke-width="4" stroke-linecap="round" />
+</svg>

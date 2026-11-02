@@ -183,6 +183,8 @@ namespace WoundBound.Game.Combat.Brains
                     Tally.Sacrifices += attack.Sacrifice ? 1 : 0;
                     Tally.Manoeuvres += attack.Manoeuvre is null ? 0 : 1;
                 }),
+                PartyStep.Mount => encounter.TryMount(),
+                PartyStep.Dismount => encounter.TryDismount(),
                 PartyStep.Throw toss => Count(encounter.TryThrow(toss.Target) is not null, () => Tally.Attacks++),
                 PartyStep.DrawWeapon draw => encounter.TryDrawWeapon(draw.Weapon),
                 PartyStep.PickUpWeapon pick => encounter.TryPickUpWeapon(pick.Lying),
@@ -233,6 +235,8 @@ namespace WoundBound.Game.Combat.Brains
                     PartyStep.Attack attack => encounter.PlanAttack(character, attack.Target).Refusal
                         ?? (attack.Sacrifice ? Encounter.SacrificeRefusal(character) : null)
                         ?? (attack.Manoeuvre is { } m ? Encounter.ManoeuvreRefusal(character, attack.Target, m) : null) ?? "no action left",
+                    PartyStep.Mount => encounter.MountRefusal(character),
+                    PartyStep.Dismount => Encounter.DismountRefusal(character),
                     PartyStep.Throw toss => encounter.ThrowRefusal(character, toss.Target),
                     PartyStep.DrawWeapon draw => Encounter.DrawRefusal(character, draw.Weapon),
                     PartyStep.PickUpWeapon pick => encounter.PickUpRefusal(character, pick.Lying),

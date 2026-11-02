@@ -1,0 +1,8 @@
+<!-- Numbed: a flame snuffed out. One of the condition markers drawn on a token's corners (see conditionbadge.js):
+     dark with a gold rim for a condition, rust for what the wound tracks have done. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46.5" fill="#c04a10" stroke="#ffffff" stroke-width="5" />
+  <path d="M50 18 C52 30 66 38 66 56 C66 68 59 76 50 76 C41 76 34 68 34 57 C34 49 38 43 43 38 C43 46 46 50 49 51 C47 40 45 28 50 18 Z" fill="#f4f1ea" />
+  <path d="M24 76 L76 24" stroke="#c04a10" stroke-width="12" stroke-linecap="round" />
+  <path d="M24 76 L76 24" stroke="#f4f1ea" stroke-width="5" stroke-linecap="round" />
+</svg>

@@ -32,11 +32,18 @@ namespace WoundBoundGame
         private static readonly Color LightSquare = new(0.20f, 0.21f, 0.24f);
         private static readonly Color DarkSquare = new(0.17f, 0.18f, 0.21f);
         private static readonly Color GridLine = new(0.28f, 0.29f, 0.33f);
-        private static readonly Color OneMove = new(0.25f, 0.45f, 0.75f, 0.45f);
-        private static readonly Color TwoMoves = new(0.80f, 0.60f, 0.20f, 0.35f);
+        // The palette is the Owlbear extension's (the rules repo, OwlbearFrontend), picked so that it
+        // stays apart for a red/green colour-blind player: party blue, hostile rust — the danger colour
+        // throughout — neutral yellow, gold for the accent, bone for plain. Moves are priced as its map
+        // overlay prices them: bone for one move, blue for two.
+        private static readonly Color Bone = Color.FromHtml("#e8e6e3");
+        private static readonly Color PartyBlue = Color.FromHtml("#56b4e9");
+        private static readonly Color Rust = Color.FromHtml("#c04a10");
+        private static readonly Color OneMove = Bone with { A = 0.22f };
+        private static readonly Color TwoMoves = PartyBlue with { A = 0.35f };
         private static readonly Color HoverOutline = new(1f, 1f, 1f, 0.8f);
-        private static readonly Color PartyToken = new(0.25f, 0.55f, 0.90f);
-        private static readonly Color AdversaryToken = new(0.75f, 0.25f, 0.22f);
+        private static readonly Color PartyToken = PartyBlue;
+        private static readonly Color AdversaryToken = Rust;
         private static readonly Color ActiveRing = new(1f, 0.85f, 0.3f);
         private static readonly Color TargetRing = new(1f, 0.35f, 0.3f);
         private static readonly Color ChoosableRing = new(0.6f, 0.85f, 1f);
@@ -80,11 +87,15 @@ namespace WoundBoundGame
         private readonly List<Combatant> actedThisRound = new();
         private int rosterRound;
 
-        /// <summary>A colour for each character, so the roster, their token and their bubbles agree.</summary>
+        /// <summary>
+        /// A colour for each character, so the roster, their token and their bubbles agree: the
+        /// Okabe-Ito set the extension's palette is drawn from, which a colour-blind player can tell
+        /// apart — and never the rust that marks the other side.
+        /// </summary>
         private static readonly Color[] PartyColours =
         [
-            new(0.25f, 0.55f, 0.90f), new(0.30f, 0.72f, 0.45f), new(0.85f, 0.62f, 0.20f),
-            new(0.68f, 0.42f, 0.88f), new(0.22f, 0.72f, 0.75f), new(0.85f, 0.45f, 0.60f),
+            Color.FromHtml("#56b4e9"), Color.FromHtml("#e69f00"), Color.FromHtml("#009e73"),
+            Color.FromHtml("#cc79a7"), Color.FromHtml("#f0e442"), Color.FromHtml("#0072b2"),
         ];
 
         private Color ColourOf(Combatant c)
@@ -203,6 +214,8 @@ namespace WoundBoundGame
             { } other => new Manoeuvre(other),
         };
         private static readonly Color SpellArea = new(0.65f, 0.35f, 0.95f, 0.35f);
+        private static readonly Color Saddle = new(0.45f, 0.3f, 0.18f);
+
         private static readonly ThresholdType[] BuffThresholds = [ThresholdType.Dodge, ThresholdType.Stability, ThresholdType.Resolve, ThresholdType.Fortitude];
 
         private void Disarm()
@@ -340,7 +353,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -750,6 +763,15 @@ namespace WoundBoundGame
                 DrawCircle(SquareRect(light).GetCenter(), CellSize * 0.12f, new Color(1f, 0.7f, 0.25f));
             }
 
+            // Mounts standing riderless, where their riders left them.
+            foreach (var steed in encounter.Steeds.Where(s => s.Rider is { IsRiding: false }))
+            {
+                var at = SquareRect(steed.Position).GetCenter();
+                DrawCircle(at, CellSize * 0.3f, Saddle with { A = 0.7f });
+                DrawString(ThemeDB.FallbackFont, at + new Vector2(-CellSize / 2f, CellSize * 0.12f), "H", HorizontalAlignment.Center, CellSize,
+                    Mathf.Max(10, CellSize * 2 / 5), new Color(1, 1, 1, 0.8f));
+            }
+
             // Weapons lying on the ground — dropped, thrown, or knocked from a hand: a short grey blade.
             var lying = encounter.GroundWeapons.Select(g => g.At)
                 .Concat(encounter.Combatants.Where(c => c.DroppedWeapon is not null && c.DroppedAt is not null).Select(c => c.DroppedAt!.Value));
@@ -814,6 +836,109 @@ namespace WoundBoundGame
             DrawBubbles();
         }
 
+        /// <summary>
+        /// The places a token's markers take, as fractions of its square: the four corners — bottom
+        /// right, then anticlockwise — then the middles of the four sides, as the Owlbear extension
+        /// draws them, so a table that uses both learns one place to look.
+        /// </summary>
+        private static readonly Vector2[] MarkerSlots =
+        [
+            new(1, 1), new(1, 0), new(0, 0), new(0, 1),
+            new(1, 0.5f), new(0.5f, 0), new(0, 0.5f), new(0.5f, 1),
+        ];
+
+        private static readonly Dictionary<string, Texture2D?> MarkerTextures = new();
+
+        /// <summary>
+        /// What a creature is marked with, in the order drawn: first what its wound tracks have done
+        /// to it (rust discs), then its conditions in the order they went on, then a mount (gold-rimmed).
+        /// </summary>
+        private static List<string> MarkersOf(Combatant c)
+        {
+            var markers = new List<string>();
+            if (c.BodyStatus == BodyStatus.Dead)
+            {
+                markers.Add("dead");
+            }
+            else if (c.BodyStatus == BodyStatus.Dying)
+            {
+                markers.Add("dying");
+            }
+            else if (c.BodyStatus == BodyStatus.Stable)
+            {
+                markers.Add("stable");
+            }
+
+            if (c.IsStunned)
+            {
+                markers.Add("stunned");
+            }
+
+            if (c.IsNumbed)
+            {
+                markers.Add("numbed");
+            }
+
+            markers.AddRange(c.Conditions.Select(k => k.ToString().ToLowerInvariant()));
+            if (c.IsRiding)
+            {
+                markers.Add("mounted");
+            }
+
+            return markers;
+        }
+
+        /// <summary>Draws a token's markers on its corners and sides — a ninth and more folded into a "+N" disc.</summary>
+        private void DrawMarkers(Combatant combatant, Rect2 square)
+        {
+            var markers = MarkersOf(combatant);
+            if (markers.Count == 0)
+            {
+                return;
+            }
+
+            if (markers.Count > MarkerSlots.Length)
+            {
+                var folded = markers.Count - MarkerSlots.Length + 1;
+                markers = markers.Take(MarkerSlots.Length - 1).Append($"more-{Mathf.Min(9, folded)}").ToList();
+            }
+
+            var size = Mathf.Max(10, CellSize * 0.32f * Mathf.Max(1, combatant.Across * 0.75f));
+            for (var i = 0; i < markers.Count; i++)
+            {
+                if (MarkerTexture(markers[i]) is not { } texture)
+                {
+                    continue;
+                }
+
+                var at = square.Position + square.Size * MarkerSlots[i] - Vector2.One * size / 2;
+                DrawTextureRect(texture, new Rect2(at, new Vector2(size, size)), tile: false);
+            }
+        }
+
+        /// <summary>A condition marker (game/assets/conditions, from the Owlbear extension), or null if there's no such file.</summary>
+        private static Texture2D? MarkerTexture(string key)
+        {
+            if (MarkerTextures.TryGetValue(key, out var known))
+            {
+                return known;
+            }
+
+            Texture2D? texture = null;
+            var path = $"res://assets/conditions/{key}.svg";
+            if (FileAccess.FileExists(path))
+            {
+                var image = new Image();
+                if (image.LoadSvgFromString(FileAccess.GetFileAsString(path), 0.64f) == Error.Ok)
+                {
+                    texture = ImageTexture.CreateFromImage(image);
+                }
+            }
+
+            MarkerTextures[key] = texture;
+            return texture;
+        }
+
         private void DrawToken(Combatant combatant, Combatant? active)
         {
             var font = ThemeDB.FallbackFont;
@@ -840,9 +965,17 @@ namespace WoundBoundGame
                 return;
             }
 
+            // In the saddle: the horse under them, a brown disc a little wider than the rider.
+            if (combatant.IsRiding)
+            {
+                DrawCircle(centre, radius + 6, Saddle);
+            }
+
             // A character dying or stable lies there, faded, still to be reached.
             var colour = ColourOf(combatant);
             DrawCircle(centre, radius, combatant.IsDefenceless ? colour with { A = 0.35f } : combatant.IsSwarm ? colour with { A = 0.5f } : colour);
+
+            DrawMarkers(combatant, rect);
 
             if (combatant == encounter.Active)
             {
@@ -888,24 +1021,14 @@ namespace WoundBoundGame
             // What's been done to it, across the top of the square.
             var marks = string.Join(" ", new[]
             {
-                combatant.IsProne ? "prone" : null,
-                combatant.HeldBy is not null ? "held" : null,
+                // Conditions and what the wound tracks have done are markers on the corners now (DrawMarkers).
                 combatant.Holding is not null ? "holding" : null,
                 combatant.IsBroken ? "running" : null,
-                combatant.BodyStatus == BodyStatus.Dying && combatant.Side == Side.Party ? "dying" : null,
-                combatant.BodyStatus == BodyStatus.Stable && combatant.Side == Side.Party ? "stable" : null,
                 combatant.ShieldBonus > 0 ? "shield" : null,
                 combatant.IsHelped ? "helped" : null,
                 combatant.IsHarried ? "harried" : null,
                 combatant.CarriedLights > 0 ? "light" : null,
                 combatant.NeedsFooting ? "off footing" : null,
-                combatant.IsStunned ? "stunned" : null,
-                combatant.IsNumbed ? "numbed" : null,
-                combatant.Conditions.Contains(CharacterCondition.Slowed) ? "slowed" : null,
-                combatant.Conditions.Contains(CharacterCondition.Frightened) ? "frightened" : null,
-                combatant.Conditions.Contains(CharacterCondition.Confused) ? "confused" : null,
-                combatant.Conditions.Contains(CharacterCondition.Compelled) ? "compelled" : null,
-                combatant.Conditions.Contains(CharacterCondition.Hastened) ? "hastened" : null,
                 encounter.SpellsInPlay.Any(e => e.Target == combatant && e.Type == SpellType.Buff) ? "blessed" : null,
                 encounter.SpellsInPlay.Any(e => e.Target == combatant && e.Type == SpellType.Bane) ? "cursed" : null,
             }.Where(m => m is not null));
@@ -920,7 +1043,7 @@ namespace WoundBoundGame
             var bar = new Rect2(rect.Position.X + inset, rect.End.Y - inset - 2, across - inset * 2, Mathf.Max(2, CellSize / 14));
             DrawRect(bar, new Color(0, 0, 0, 0.6f));
             var fraction = Mathf.Clamp((float)combatant.Body / combatant.BodyMax, 0, 1);
-            DrawRect(new Rect2(bar.Position, new Vector2(bar.Size.X * fraction, bar.Size.Y)), new Color(0.35f, 0.85f, 0.4f));
+            DrawRect(new Rect2(bar.Position, new Vector2(bar.Size.X * fraction, bar.Size.Y)), fraction <= 1f / 3 ? Rust.Lightened(0.15f) : Bone);
         }
 
         private void StartEncounter()
@@ -941,6 +1064,7 @@ namespace WoundBoundGame
                 12 => SampleEncounters.ChampionOnTheGreen(data, Dice(), PickedGm()),
                 13 => SampleEncounters.ShrineGuardians(data, Dice(), PickedGm()),
                 14 => SampleEncounters.HollowStagInTheBirchwood(data, Dice(), PickedGm()),
+                15 => SampleEncounters.Outriders(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
             // Lines written while the fight was set up came before anyone was listening.
@@ -1765,6 +1889,7 @@ namespace WoundBoundGame
             fightPicker.AddItem("A Noble Champion on the village green");
             fightPicker.AddItem("The shrine's guardians: a golem and two suits of mail");
             fightPicker.AddItem("The Hollow Stag: a Solo in the birchwood");
+            fightPicker.AddItem("Outriders: bandits on horseback");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 

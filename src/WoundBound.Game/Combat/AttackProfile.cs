@@ -54,6 +54,16 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public ThresholdType Against { get; init; } = ThresholdType.Dodge;
 
+        /// <summary>
+        /// A condition a hit lays on the target until the start of the attacker's next turn — an
+        /// innate Bind such as the Weeping Sentinel's gaze, "Motion - Bind, Stuck", rolled against
+        /// Stability; uncosted, so never held past its turn (GM Reference §9, "On Casters").
+        /// </summary>
+        public CharacterCondition? Imposes { get; init; }
+
+        /// <summary>A line that deals no damage — its effect is the whole of it.</summary>
+        public bool DealsNoDamage { get; init; }
+
         /// <summary>The track it wounds: Body for any weapon (Core Rules §9, "Damage Types"); Mind or Soul for what a statblock says strikes there.</summary>
         public WoundType Track { get; init; } = WoundType.Body;
 
