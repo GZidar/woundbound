@@ -17,6 +17,7 @@ The action icons are from [game-icons.net](https://game-icons.net), used under [
 | extra-action | [fast-forward-button](https://game-icons.net/1x1/delapouite/fast-forward-button.html) | Delapouite |
 | end-turn | [hourglass](https://game-icons.net/1x1/lorc/hourglass.html) | Lorc |
 | strike | [broadsword](https://game-icons.net/1x1/lorc/broadsword.html) | Lorc |
+| shoot | [pocket-bow](https://game-icons.net/1x1/lorc/pocket-bow.html) | Lorc |
 | cleave | [axe-swing](https://game-icons.net/1x1/lorc/axe-swing.html) | Lorc |
 | topple | [groundbreaker](https://game-icons.net/1x1/lorc/groundbreaker.html) | Lorc |
 | ring | [ringing-bell](https://game-icons.net/1x1/lorc/ringing-bell.html) | Lorc |

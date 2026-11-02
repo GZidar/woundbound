@@ -78,7 +78,7 @@ namespace WoundBoundGame
         {
             var items = new List<RadialItem>
             {
-                Group("Attack", "Strike a foe, with a manoeuvre if your weapon allows one.", AttackItems(acting)),
+                Group("Attack", "Strike a foe, with a manoeuvre if your weapon allows one.", AttackItems(acting)) with { Icon = AttackIcon(acting) },
             };
 
             if (acting.Spells.Count > 0)
@@ -121,12 +121,15 @@ namespace WoundBoundGame
                 new($"Strike ({acting.Attack.Name})", noAction, "Choose who to strike: everyone your weapon can reach from here, allies included.")
                 {
                     Children = noAction is null ? () => Targets(acting, null) : null,
-                    Icon = "strike",
+                    Icon = AttackIcon(acting),
                 },
             };
 
+            // Only what the weapon in hand permits — read from the rules, not the HUD buttons, which
+            // may not have caught up with whoever's turn just began.
+            var permitted = Encounter.ManoeuvresOf(acting);
             items.AddRange(manoeuvreButtons
-                .Where(m => m.Value.Visible)
+                .Where(m => permitted.Contains(m.Key))
                 .Select(m => new RadialItem(m.Key.ToString(), noAction, m.Value.TooltipText.Replace(" Then click the foe.", " Then choose who."))
                 {
                     Children = noAction is null ? () => Targets(acting, m.Key) : null,
@@ -139,6 +142,9 @@ namespace WoundBoundGame
 
             return items;
         }
+
+        /// <summary>A sword for a blade (or fists) in hand, a bow for a bow, crossbow or sling.</summary>
+        private static string AttackIcon(Combatant acting) => acting.Attack.IsRanged ? "shoot" : "strike";
 
         /// <summary>
         /// Everyone <paramref name="attacker"/> could strike from where they stand, as the rules have
