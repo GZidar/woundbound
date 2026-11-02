@@ -319,6 +319,10 @@ namespace WoundBoundGame
             BuildHud();
             ReadDemoArguments();
             StartEncounter();
+            if (OS.GetCmdlineUserArgs() is var args && System.Array.IndexOf(args, "--radial") is var at and >= 0 && at + 1 < args.Length)
+            {
+                OpenRadialPath(args[at + 1]);
+            }
         }
 
         /// <summary>Reads <c>--demo</c>, <c>--fight</c>, <c>--seed</c> and <c>--gm</c> from the user arguments, after Godot's own <c>--</c>.</summary>
@@ -558,6 +562,14 @@ namespace WoundBoundGame
 
         public override void _UnhandledInput(InputEvent @event)
         {
+            // Escape with no ring open lets go of whatever action was armed.
+            if (@event is InputEventKey { Pressed: true, Keycode: Key.Escape })
+            {
+                Disarm();
+                Refresh();
+                return;
+            }
+
             if (@event is InputEventMouseMotion)
             {
                 var square = SquareAt(GetLocalMousePosition());
@@ -585,6 +597,7 @@ namespace WoundBoundGame
                 {
                     encounter.TryBeginTurn(chosen);
                     Refresh();
+                    OpenActions();
                 }
 
                 return;
@@ -592,6 +605,14 @@ namespace WoundBoundGame
 
             if (encounter.Phase != EncounterPhase.PartyTurn)
             {
+                return;
+            }
+
+            // Clicking the one acting, with nothing armed, opens their actions around them.
+            if (armedSpell is null && armed is null && armedAction is null && !armedDrag && armedManoeuvre is null
+                && encounter.Active is { } self && encounter.AnyAt(clicked) == self)
+            {
+                OpenActions();
                 return;
             }
 
@@ -913,6 +934,17 @@ namespace WoundBoundGame
 
             UpdateHud();
             QueueRedraw();
+            if (radial.IsOpen)
+            {
+                if (bot is null && encounter.Phase == EncounterPhase.PartyTurn)
+                {
+                    radial.Reload();
+                }
+                else
+                {
+                    radial.CloseAll();
+                }
+            }
 
             // The GM's turns always play themselves; with Bot v Bot on, so does the party.
             var gmToAct = encounter.Phase == EncounterPhase.AdversaryTurn;
@@ -1447,10 +1479,19 @@ namespace WoundBoundGame
             hoverLabel = WrappingLabel(column);
             hoverLabel.AddThemeColorOverride("font_color", new Color(0.75f, 0.75f, 0.8f));
 
+            // The actions live on the radial menu round the acting token; these rows are the same
+            // actions as buttons, kept out of sight unless asked for.
+            var showButtons = new CheckButton { Text = "Show action buttons", TooltipText = "Click the acting character's token for their actions. These are the same, as buttons." };
+            column.AddChild(showButtons);
+            var actionRows = new VBoxContainer { Visible = false };
+            actionRows.AddThemeConstantOverride("separation", 10);
+            column.AddChild(actionRows);
+            showButtons.Toggled += on => actionRows.Visible = on;
+
             var buttons = new HFlowContainer();
             buttons.AddThemeConstantOverride("h_separation", 8);
             buttons.AddThemeConstantOverride("v_separation", 8);
-            column.AddChild(buttons);
+            actionRows.AddChild(buttons);
 
             swapButton = new Button();
             swapButton.Pressed += () =>
@@ -1607,10 +1648,10 @@ namespace WoundBoundGame
             // Magic: a button per spell, and the choices made in the same breath as the cast.
             spellButtons = new HFlowContainer();
             spellButtons.AddThemeConstantOverride("h_separation", 8);
-            column.AddChild(spellButtons);
+            actionRows.AddChild(spellButtons);
             var castOptions = new HFlowContainer();
             castOptions.AddThemeConstantOverride("h_separation", 8);
-            column.AddChild(castOptions);
+            actionRows.AddChild(castOptions);
             payInBodyBox = new CheckBox { Text = "Pay in Body", TooltipText = "Bleeding for Power: pay an Aether or Divine spell's cost from Body instead. Never below 1 Body." };
             overclockBox = new CheckBox { Text = "Overclock", TooltipText = "Once a round: 1 Stamina pays 1 wound of the cost. Not a tactical spend." };
             sacrificeBox = new CheckBox { Text = "Sacrifice", TooltipText = "Once a round: 1 Body before an attack or a cast, for Advantage on its roll." };
@@ -1675,14 +1716,14 @@ namespace WoundBoundGame
                 manoeuvreButtons[kind] = button;
             }
 
-            var restartButton = new Button { Text = "Restart" };
-            restartButton.Pressed += StartEncounter;
-            buttons.AddChild(restartButton);
-
             // Bot v Bot: a party brain takes the player's seat, and the fight plays itself.
             var botRow = new HBoxContainer();
             botRow.AddThemeConstantOverride("separation", 8);
             column.AddChild(botRow);
+
+            var restartButton = new Button { Text = "Restart" };
+            restartButton.Pressed += StartEncounter;
+            botRow.AddChild(restartButton);
 
             fightPicker = new OptionButton();
             fightPicker.FitToLongestItem = false;
@@ -1794,6 +1835,13 @@ namespace WoundBoundGame
                 SelectionEnabled = true,
             };
             column.AddChild(logLabel);
+
+            // Over everything else, so its rings sit on top of board and HUD alike.
+            var top = new CanvasLayer { Layer = 10 };
+            AddChild(top);
+            radial = new RadialMenu();
+            radial.Changed += Refresh;
+            top.AddChild(radial);
         }
 
         private static Label WrappingLabel(Container parent)
