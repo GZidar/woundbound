@@ -379,6 +379,9 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public bool IsMinion { get; init; }
 
+        /// <summary>Has been at 0 Body or below at some point this fight — dropped, if not kept down.</summary>
+        public bool HasBeenDropped { get; internal set; }
+
         /// <summary>A Solo: one creature run against the whole party (GM Reference §3).</summary>
         public bool IsSolo => Role == Rules.Enums.AdversaryRole.Solo;
 

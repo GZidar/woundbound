@@ -90,21 +90,51 @@ public class UtilityBrainTests
     [Fact]
     public void OnceSomebodyCasts_TheyAreTheOneToPutDown()
     {
-        // The lantern-bearer stands beside all three characters. Whichever it would have gone for,
-        // it goes for another once that one has given themselves away by casting.
-        var encounter = SampleEncounters.SignpostAmbush(Data, new ScriptedDice(), new UtilityGmBrain());
+        // The lantern-bearer stands between Mirella and Elthric. Whichever it would have gone for,
+        // it goes for the other once that one gives themselves away by casting — with the pool still
+        // in them to cast again.
+        var encounter = SampleEncounters.SignpostWithCasters(Data, new ScriptedDice(), new UtilityGmBrain());
         var bearer = Named(encounter, "Lantern-bearer");
-        bearer.Position = new GridPosition(2, 4);
+        var mirella = Named(encounter, "Mirella Vask");
+        var elthric = Named(encounter, "Elthric Dane");
+        foreach (var c in encounter.Combatants.Where(c => c.Side == Side.Party && c != mirella && c != elthric))
+        {
+            c.Position = new GridPosition(c.Position.X, c.Position.Y + 20);
+        }
+
+        bearer.Position = new GridPosition(10, 10);
+        mirella.Position = new GridPosition(9, 10);
+        elthric.Position = new GridPosition(11, 10);
         bearer.ActionsRemaining = 1;
         var turn = new GmTurn(bearer, isExtraTurn: false, bonusAvailable: false);
 
         var before = TargetOf(new UtilityGmBrain().NextStep(encounter.View, turn));
-        var other = encounter.Combatants.First(c => c.Side == Side.Party && c != before && c.Position.DistanceTo(bearer.Position) <= 1);
+        var other = before == mirella ? elthric : mirella;
         other.HasCastSpell = true;
-
         var after = TargetOf(new UtilityGmBrain().NextStep(encounter.View, turn));
 
         Assert.Same(other, after);
+    }
+
+    [Fact]
+    public void ACasterWithNothingLeftToCastWith_OrAlreadyDroppedOnce_IsNoLongerTheFirstToPutDown()
+    {
+        var encounter = SampleEncounters.SignpostWithCasters(Data, new ScriptedDice(), new UtilityGmBrain());
+        var mirella = Named(encounter, "Mirella Vask");
+        mirella.HasCastSpell = true;
+        var assess = new Assessor(encounter.View);
+        var fresh = assess.Value(mirella);
+
+        mirella.HasBeenDropped = true;
+        var dropped = new Assessor(encounter.View).Value(mirella);
+
+        mirella.HasBeenDropped = false;
+        (mirella.Soul, mirella.Body) = (0, 1);
+        var spent = new Assessor(encounter.View).Value(mirella);
+
+        Assert.True(dropped < fresh, $"dropped {dropped:0.00}, fresh {fresh:0.00}");
+        Assert.True(spent < dropped, $"spent {spent:0.00}, dropped {dropped:0.00}");
+        Assert.Equal(0, Assessor.CastsLeft(mirella, mirella.Spells.Single(s => s.Name == "Vital Transfer")));
     }
 
     /// <summary>Who a step is aimed at — a blow, or hands put on them.</summary>

@@ -1394,9 +1394,9 @@ namespace WoundBound.Game.Combat
             // "The cap is set when the fight begins, and it never falls" (Core Rules §9): counted
             // once, raised by anyone who joins, never lowered by anyone who drops.
             adversaryTurnCap = ChallengeCalculator.AdversaryTurnCap(adversaryTurnCap, partyStillToAct.Count);
-            // A Solo takes its Tier plus one turns by nature, however few characters there are to
-            // leave gaps for them (GM Reference §3, "Solo Actions").
-            adversaryTurnsRemaining = Math.Max(adversaryTurnCap.Value, Fighting(Side.Adversaries).Where(a => a.IsSolo).Sum(a => a.TurnsPerRound));
+            // A Solo takes its Tier plus one turns by nature, "above and beyond" the cap (Core Rules
+            // §9; GM Reference §3, "Solo Actions"); the cap is what everything else is owed.
+            adversaryTurnsRemaining = adversaryTurnCap.Value + Fighting(Side.Adversaries).Where(a => a.IsSolo).Sum(a => a.TurnsPerRound);
             BeginNextPartyTurn();
         }
 
@@ -3330,6 +3330,8 @@ namespace WoundBound.Game.Combat
             {
                 combatant.Body = combatant.IsMinion ? 0 : Math.Max(0, combatant.Body - amount);
             }
+
+            combatant.HasBeenDropped |= combatant.Body <= 0;
         }
 
         private static void PayTacticalSpend(Combatant spender, int stamina)

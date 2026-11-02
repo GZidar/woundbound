@@ -811,6 +811,7 @@ namespace WoundBound.Game.Combat
                 {
                     target.TendEligible[WoundType.Body] = true;
                     target.Body = target.IsMinion ? 0 : body;
+                    target.HasBeenDropped |= target.Body <= 0;
                 }
 
                 var (now, max) = target.Track(type);

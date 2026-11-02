@@ -94,10 +94,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public double Value(Combatant c)
         {
+            // Casters first — but only for as long as they can still cast: a caster with nothing
+            // left to pay for a spell is just another body, and one already dropped once, and
+            // brought back on a wound or two, is no longer the threat that made them the target
+            // (the user's direction, 2026-11-02 — for every brain, not only a Solo's).
             var value = 0.5 + (Threat(c) + Support(c)) * Horizon;
             if (c.HasCastSpell)
             {
-                value *= 2.5;
+                value *= 1 + (c.HasBeenDropped ? 0.5 : 1.5) * CastingLeft(c);
             }
 
             if (c.Side == Side.Adversaries && view.MustNotEscape(c))
@@ -107,6 +111,38 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             return value;
         }
+
+        /// <summary>
+        /// How many one-wound castings of <paramref name="spell"/>'s tradition <paramref name="c"/>
+        /// could still pay for from what they have: their native pool — Mind or Soul to the last
+        /// point, Body only down to 1 — and Body down to 1 again if they can Bleed for Power (Core
+        /// Rules §4, "No Spending Yourself to Death"; §11). Elemental Fuel is reckoned as a couple.
+        /// </summary>
+        public static int CastsLeft(Combatant c, Rules.Models.SpellDefinition spell)
+        {
+            if (c.MagicAccess.FirstOrDefault(a => a.Source == spell.Source) is not { } access)
+            {
+                return 0;
+            }
+
+            if (spell.Source == MagicSource.ElementalMagic)
+            {
+                return 2;
+            }
+
+            var native = access.NativeCostTrack switch
+            {
+                WoundType.Mind => c.Mind,
+                WoundType.Soul => c.Soul,
+                _ => c.Body - 1,
+            };
+            var bled = access.CanBleedForPower && access.NativeCostTrack is WoundType.Mind or WoundType.Soul ? c.Body - 1 : 0;
+            return Math.Max(0, native) + Math.Max(0, bled);
+        }
+
+        /// <summary>How much casting <paramref name="c"/> has left, 0 to 1: full with two or more castings still payable.</summary>
+        public static double CastingLeft(Combatant c) =>
+            c.Spells.Count == 0 ? 0 : Math.Min(1, c.Spells.Max(s => CastsLeft(c, s)) / 2.0);
 
         /// <summary>
         /// What <paramref name="amount"/> Body put back on <paramref name="c"/> is worth: how much it lowers
@@ -198,7 +234,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             double best = 0;
             var hurtAllies = view.AlliesOf(c).Count(a => a != c && a.Body < a.BodyMax);
-            foreach (var spell in c.Spells)
+            // Only what they can still pay for: a healer on 1 Body heals nobody with a Body-paid spell.
+            foreach (var spell in c.Spells.Where(s => CastsLeft(c, s) > 0))
             {
                 var worth = spell.SpellType switch
                 {
