@@ -27,6 +27,15 @@ namespace WoundBound.Game.Combat
         public int OwnReach { get; init; } = Rules.Calculation.WeaponCalculator.DefaultOwnReach;
         public bool IsRanged => Weapon?.IsRanged == true;
 
+        /// <summary>
+        /// An attack "against every creature within N squares" — one roll each, as one attack (GM
+        /// Reference §3, "An area attack is one attack"). Null for a blow at one target.
+        /// </summary>
+        public int? AreaSquares { get; init; }
+
+        /// <summary>Rationed to every other round, as a statblock may write an area attack.</summary>
+        public bool EveryOtherRound { get; init; }
+
         /// <summary>Can't strike an adjacent target at all (Core Rules §9, "Weapons").</summary>
         public bool IsUnwieldy => Weapon?.Unwieldy == true;
 

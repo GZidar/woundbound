@@ -64,7 +64,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public List<Option> Options(Combatant actor, bool hasMove, int actions, bool real,
             bool bonusAvailable = false, bool bankFull = false, IReadOnlyCollection<Combatant>? stillToAct = null, Interruption? interrupting = null)
         {
-            var options = OptionsHere(actor, hasMove, actions, real, bonusAvailable, bankFull, stillToAct);
+            var options = SoloAttacks(actor, OptionsHere(actor, hasMove, actions, real, bonusAvailable, bankFull, stillToAct), real);
             return interrupting is null ? options : options.Select(o => o with { Score = o.Score + Spared(actor, o, interrupting) }).ToList();
         }
 
@@ -213,9 +213,72 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>Everything worth doing with an action, standing on <paramref name="at"/>.</summary>
+        /// <summary>
+        /// A Solo's turns carry one attack a round between them (GM Reference §3): once it has made
+        /// it, a blow or a Harm costs a Stamina and its one tactical spend — or can't be had.
+        /// </summary>
+        private static List<Option> SoloAttacks(Combatant actor, List<Option> options, bool real)
+        {
+            if (!actor.IsSolo || actor.AttacksThisRound == 0)
+            {
+                return options;
+            }
+
+            static bool Attacks(Option o) =>
+                (o.Kind == OptionKind.Attack || o.Then == OptionKind.Attack)
+                || ((o.Kind == OptionKind.Cast || o.Then == OptionKind.Cast) && o.Cast?.Spell.SpellType == SpellType.Harm);
+
+            var refused = Encounter.SoloAttackRefusal(actor) is not null;
+            return options
+                .Where(o => !(Attacks(o) && refused))
+                .Select(o => Attacks(o) ? o with { Score = o.Score - Assessor.SpendPrice(actor, o.Score) - 0.3 } : o)
+                .ToList();
+        }
+
+        /// <summary>
+        /// An area attack from <paramref name="at"/>, weighed by everybody it would catch: each
+        /// enemy's blow, and each ally's against it (GM Reference §3, "An area attack is one attack").
+        /// </summary>
+        private IEnumerable<Option> AreaAttacks(Combatant actor, GridPosition at, bool checkRules)
+        {
+            foreach (var line in actor.Attacks.Where(a => a.AreaSquares is not null))
+            {
+                if (line.EveryOtherRound && actor.LastAreaAttackRound == View.Round - 1)
+                {
+                    continue;
+                }
+
+                var squares = line.AreaSquares!.Value;
+                var caught = View.Combatants.Where(c => c != actor && c.OccupiesSquare && !c.IsOutOfFight && actor.DistanceFrom(at, c) <= squares).ToList();
+                var target = caught.FirstOrDefault(c => c.Side != actor.Side);
+                if (target is null || (checkRules && !View.CanAttack(actor, target)))
+                {
+                    continue;
+                }
+
+                double worth = 0;
+                foreach (var victim in caught)
+                {
+                    var blow = assess.Blow(actor, line, victim, line.DamageDieSides, victim.DodgeThreshold + View.VisibilityDodgeModifier(victim));
+                    var value = blow.ExpectedDealt * assess.PerWound(victim) + 0.3 * blow.Kill * assess.Value(victim);
+                    worth += victim.Side == actor.Side ? -1.5 * value : value;
+                }
+
+                if (worth > 0)
+                {
+                    yield return new Option(OptionKind.Attack, worth, $"{line.Name} over {caught.Count(c => c.Side != actor.Side)}", Target: target, With: line);
+                }
+            }
+        }
+
         private IEnumerable<Option> Actions(Combatant actor, GridPosition at, bool checkRules, bool bonusAvailable, bool bankFull,
             IReadOnlyCollection<Combatant>? stillToAct, double care)
         {
+            foreach (var area in AreaAttacks(actor, at, checkRules))
+            {
+                yield return area;
+            }
+
             var enemies = View.EnemiesOf(actor).ToList();
             var spendCost = SpendCostFor(actor);
             var bestBlow = enemies.Select(e => assess.BestAttack(actor, at, e).Worth).DefaultIfEmpty(0).Max();

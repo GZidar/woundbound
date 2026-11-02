@@ -31,7 +31,8 @@ namespace WoundBound.Game.Combat.Brains
         public IEnumerable<Combatant> Adversaries => encounter.Fighting(Side.Adversaries);
 
         /// <summary>The adversaries still fighting that haven't had their turn this round — the ones an owed turn can go to.</summary>
-        public IEnumerable<Combatant> YetToAct => Adversaries.Where(a => !a.HasActedThisRound);
+        /// <remarks>A Solo stays on the list until it has taken all its turns.</remarks>
+        public IEnumerable<Combatant> YetToAct => Adversaries.Where(a => a.HasTurnLeftThisRound);
 
         /// <summary>The party still fighting.</summary>
         public IEnumerable<Combatant> Characters => encounter.Fighting(Side.Party);
@@ -129,8 +130,10 @@ namespace WoundBound.Game.Combat.Brains
         }
 
         /// <summary>Whether <paramref name="attacker"/> could attack <paramref name="target"/> right now, action and all.</summary>
+        /// <remarks>A Solo that has made its attack this round can attack again only if it can buy it.</remarks>
         public bool CanAttack(Combatant attacker, Combatant target) =>
-            encounter.CanAttack(attacker, target) && Believed(attacker, attacker.Position, target.Position, encounter.PlanAttack(attacker, target)).CanAttack;
+            encounter.CanAttack(attacker, target) && Encounter.SoloAttackRefusal(attacker) is null
+            && Believed(attacker, attacker.Position, target.Position, encounter.PlanAttack(attacker, target)).CanAttack;
 
         /// <summary>What an attack at <paramref name="target"/> would face from where <paramref name="attacker"/> stands.</summary>
         public AttackPlan PlanAttack(Combatant attacker, Combatant target) =>

@@ -379,6 +379,27 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public bool IsMinion { get; init; }
 
+        /// <summary>A Solo: one creature run against the whole party (GM Reference §3).</summary>
+        public bool IsSolo => Role == Rules.Enums.AdversaryRole.Solo;
+
+        /// <summary>
+        /// Turns it takes in a round by nature: a Solo, its Tier plus one — 2, 3 or 4 (GM Reference §3,
+        /// "Solo Actions"); anything else, one. Separate from any an Opportunity buys.
+        /// </summary>
+        public int TurnsPerRound => IsSolo ? Tier switch { Tier.T1 => 2, Tier.T2 => 3, _ => 4 } : 1;
+
+        /// <summary>Of its own turns this round, how many it has taken.</summary>
+        public int TurnsTakenThisRound { get; internal set; }
+
+        /// <summary>Has a turn of its own still to take this round.</summary>
+        public bool HasTurnLeftThisRound => TurnsTakenThisRound < TurnsPerRound;
+
+        /// <summary>Attacks made on its turns this round — a Solo's are limited to one, unless it pays.</summary>
+        public int AttacksThisRound { get; internal set; }
+
+        /// <summary>The round it last made an area attack rationed to every other round.</summary>
+        public int? LastAreaAttackRound { get; internal set; }
+
         /// <summary>
         /// Unshakable (GM Reference §9): Advantage on Stability Threshold checks made against being
         /// shoved or knocked prone — read here as Disadvantage on the roll of whoever is shoving,

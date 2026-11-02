@@ -41,7 +41,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         /// <summary>The GM's other creatures that may yet act this round — the ones a Trip would set up.</summary>
         private static IReadOnlyCollection<Combatant> StillToAct(BattleView view, Combatant actor) =>
-            view.Adversaries.Where(a => a != actor && !a.HasActedThisRound).ToList();
+            view.Adversaries.Where(a => a != actor && a.HasTurnLeftThisRound).ToList();
 
         public override Combatant ChooseOwedTurn(BattleView view)
         {

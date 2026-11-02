@@ -151,8 +151,8 @@ namespace WoundBound.Game.Combat
             BaseDodgeThreshold = info.DodgeThreshold,
             BaseStabilityThreshold = info.StabilityThreshold,
             BaseResolveThreshold = info.ResolveThreshold,
-            StatblockAttacks = new[] { StatblockLine(info.AttackName, info.AttackModifier, info.DamageDiceCount, info.DamageDie, info.DamageModifier, info.Reach) }
-                .Concat((info.MoreAttacks ?? []).Select(a => StatblockLine(a.Name, a.Modifier, a.DamageDiceCount, a.DamageDie, a.DamageModifier, info.Reach)))
+            StatblockAttacks = new[] { Area(StatblockLine(info.AttackName, info.AttackModifier, info.DamageDiceCount, info.DamageDie, info.DamageModifier, info.Reach), info.AttackEffect) }
+                .Concat((info.MoreAttacks ?? []).Select(a => Area(StatblockLine(a.Name, a.Modifier, a.DamageDiceCount, a.DamageDie, a.DamageModifier, info.Reach), a.Effect)))
                 .ToList(),
             Armour = info.Armour,
             InnateSpeed = info.Speed,
@@ -193,6 +193,27 @@ namespace WoundBound.Game.Combat
         /// rolls d4 rather than d6 and the target's Dodge Threshold is 2 higher"); the to-hit and the
         /// die at Close and Short are the statblock's own.
         /// </summary>
+        /// <summary>
+        /// An attack line written "against every creature within N squares" becomes an area attack
+        /// reaching that far; "every other round" rations it (GM Reference §3, §11).
+        /// </summary>
+        public static AttackProfile Area(AttackProfile line, string? effect)
+        {
+            if (string.IsNullOrWhiteSpace(effect)
+                || System.Text.RegularExpressions.Regex.Match(effect, @"every creature within (\d+) squares?", System.Text.RegularExpressions.RegexOptions.IgnoreCase) is not { Success: true } within)
+            {
+                return line;
+            }
+
+            var squares = int.Parse(within.Groups[1].Value);
+            return line with
+            {
+                Reach = squares,
+                AreaSquares = squares,
+                EveryOtherRound = effect.Contains("every other round", StringComparison.OrdinalIgnoreCase),
+            };
+        }
+
         public static AttackProfile StatblockLine(string name, int modifier, int diceCount, string die, int damageModifier, int reach) => new(
             Name: name,
             AttackModifier: modifier,

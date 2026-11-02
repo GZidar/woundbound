@@ -1324,10 +1324,12 @@ namespace WoundBound.Game.Combat
                 owedInGap--;
                 adversaryTurnsRemaining--;
                 actor = CheckAdversary(gm.ChooseOwedTurn(view), "an owed turn");
-                if (actor.HasActedThisRound)
+                if (!actor.HasTurnLeftThisRound)
                 {
-                    throw new InvalidOperationException($"The GM brain gave {actor.Name} a second owed turn this round; only an Opportunity buys one.");
+                    throw new InvalidOperationException($"The GM brain gave {actor.Name} more owed turns this round than it takes; only an Opportunity buys another.");
                 }
+
+                actor.TurnsTakenThisRound++;
             }
             else if (extraTurnChosen is { } bought)
             {
@@ -1370,6 +1372,8 @@ namespace WoundBound.Game.Combat
             {
                 combatant.TacticalSpendsThisRound = 0;
                 combatant.HasActedThisRound = false;
+                combatant.TurnsTakenThisRound = 0;
+                combatant.AttacksThisRound = 0;
                 combatant.HasOverclockedThisRound = false;
                 combatant.HasSacrificedThisRound = false;
                 combatant.HasShelteredThisRound = false;
@@ -1390,7 +1394,9 @@ namespace WoundBound.Game.Combat
             // "The cap is set when the fight begins, and it never falls" (Core Rules §9): counted
             // once, raised by anyone who joins, never lowered by anyone who drops.
             adversaryTurnCap = ChallengeCalculator.AdversaryTurnCap(adversaryTurnCap, partyStillToAct.Count);
-            adversaryTurnsRemaining = adversaryTurnCap.Value;
+            // A Solo takes its Tier plus one turns by nature, however few characters there are to
+            // leave gaps for them (GM Reference §3, "Solo Actions").
+            adversaryTurnsRemaining = Math.Max(adversaryTurnCap.Value, Fighting(Side.Adversaries).Where(a => a.IsSolo).Sum(a => a.TurnsPerRound));
             BeginNextPartyTurn();
         }
 
@@ -1516,7 +1522,7 @@ namespace WoundBound.Game.Combat
 
             // Each adversary takes one turn a round: with every one still fighting already acted, the
             // turns still owed have nobody to take them — "fewer adversaries, fewer turns" (Core Rules §9).
-            if (owedInGap > 0 && !Fighting(Side.Adversaries).Any(a => !a.HasActedThisRound))
+            if (owedInGap > 0 && !Fighting(Side.Adversaries).Any(a => a.HasTurnLeftThisRound))
             {
                 Write("Every adversary still fighting has had its turn this round.");
                 adversaryTurnsRemaining = 0;
@@ -1775,13 +1781,24 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain had {actor.Name} {gmManoeuvre.Kind} {attack.Target.Name}: {noManoeuvre}");
                     }
 
+                    if (attack.With is { EveryOtherRound: true } && actor.LastAreaAttackRound == Round - 1)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} use {attack.With.Name} two rounds running; it's every other round.");
+                    }
+
+                    PaySoloSecondAttack(actor);
+                    if (attack.With is { AreaSquares: not null })
+                    {
+                        actor.LastAreaAttackRound = Round;
+                    }
+
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !attack.WithAdvantage;
                     Declare(actor, $"{(attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack).Name} at {attack.Target.Name}"
                                    + (attack.Manoeuvre is { } declaredManoeuvre ? $", to {declaredManoeuvre.Kind}" : string.Empty), attack.Target,
                         () => CanAttack(actor, attack.Target) && (attack.With is not { } with || PlanAttackWith(actor, with, actor.Position, attack.Target).CanAttack),
                         () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithAdvantage,
-                            _ => SwarmBites(actor, attack.Target, attack.With, () => TakeStep(turn, done)), attack.With, manoeuvre: attack.Manoeuvre),
+                            _ => FollowThrough(actor, attack.Target, attack.With, () => TakeStep(turn, done)), attack.With, manoeuvre: attack.Manoeuvre),
                         () => TakeStep(turn, done));
                     return;
 
@@ -1789,6 +1806,11 @@ namespace WoundBound.Game.Combat
                     if (PlanCast(actor, cast.Spell) is not { CanCast: true } castPlan)
                     {
                         throw new InvalidOperationException($"The GM brain had {actor.Name} cast {cast.Spell.Spell.Name}: {PlanCast(actor, cast.Spell).Refusal}");
+                    }
+
+                    if (cast.Spell.Spell.SpellType == SpellType.Harm)
+                    {
+                        PaySoloSecondAttack(actor);
                     }
 
                     turn.HasAttacked = true;
@@ -2349,6 +2371,81 @@ namespace WoundBound.Game.Combat
         /// squares"): having bitten <paramref name="first"/>, it bites each of the rest in turn, its
         /// own side's included — the rats don't choose. Nothing else does this.
         /// </summary>
+        /// <summary>
+        /// Why <paramref name="solo"/> can't make another attack this round, or null if it can: a
+        /// Solo's turns carry one attack a round between them, and a second is bought with a
+        /// Stamina, as a tactical spend (GM Reference §3, "A Solo's Stamina").
+        /// </summary>
+        public static string? SoloAttackRefusal(Combatant solo) =>
+            !solo.IsSolo || solo.AttacksThisRound == 0 ? null
+            : solo.Stamina < 1 ? $"{solo.Name} has made its attack this round, and has no Stamina to buy another."
+            : TacticalSpendRefusal(solo) is { } spent ? $"{solo.Name} has made its attack this round: {spent}"
+            : null;
+
+        /// <summary>Counts a Solo's attack, and pays the Stamina for a second.</summary>
+        private void PaySoloSecondAttack(Combatant actor)
+        {
+            if (!actor.IsSolo)
+            {
+                return;
+            }
+
+            if (SoloAttackRefusal(actor) is { } refused)
+            {
+                throw new InvalidOperationException($"The GM brain had {actor.Name} attack again: {refused}");
+            }
+
+            if (actor.AttacksThisRound > 0)
+            {
+                PayTacticalSpend(actor, CombatActionCatalog.ReactionStaminaCost);
+                Write($"{actor.Name} spends 1 Stamina for another attack this round ({actor.Stamina} left).");
+            }
+
+            actor.AttacksThisRound++;
+        }
+
+        /// <summary>What follows a blow: a Swarm's bite on everyone else in it, or an area attack on everyone else in its reach.</summary>
+        private void FollowThrough(Combatant attacker, Combatant first, AttackProfile? with, Action then)
+        {
+            if (attacker.IsSwarm)
+            {
+                SwarmBites(attacker, first, with, then);
+                return;
+            }
+
+            if (with?.AreaSquares is not { } squares)
+            {
+                then();
+                return;
+            }
+
+            // Against every creature within reach of it, its own side too — one roll each, one attack.
+            var rest = new Queue<Combatant>(combatants.Where(c => c != attacker && c != first && c.OccupiesSquare
+                && (!c.IsOutOfFight || c.IsDefenceless) && attacker.DistanceTo(c) <= squares));
+            void Next()
+            {
+                while (rest.TryDequeue(out var victim))
+                {
+                    if (attacker.IsOutOfFight || attacker.HasFled)
+                    {
+                        break;
+                    }
+
+                    if (!victim.OccupiesSquare || attacker.DistanceTo(victim) > squares)
+                    {
+                        continue;
+                    }
+
+                    ResolveAttack(attacker, victim, asReaction: false, opportunityBonus: false, _ => Next(), with, spendsAction: false);
+                    return;
+                }
+
+                then();
+            }
+
+            Next();
+        }
+
         private void SwarmBites(Combatant swarm, Combatant first, AttackProfile? with, Action then)
         {
             if (!swarm.IsSwarm)
@@ -2638,7 +2735,7 @@ namespace WoundBound.Game.Combat
 
             var (helped, harried) = TakeAid(holder);
             var threshold = held.StabilityThreshold;
-            var roll = RollAgainst(holder.UnarmedAttackModifier, threshold, helped, AttacksAtDisadvantage(holder) || harried, holder);
+            var roll = RollAgainst(holder.UnarmedAttackModifier, threshold, helped, AttacksAtDisadvantage(holder) || harried || held.IsSolo, holder);
 
             void Finish(bool stoodFirm)
             {
@@ -2809,10 +2906,10 @@ namespace WoundBound.Game.Combat
 
             var threshold = target.StabilityThreshold;
             var (helped, harried) = TakeAid(actor);
-            var unshaken = target.IsUnshakable && action is ControlAction.Shove or ControlAction.Trip;
+            var unshaken = (target.IsUnshakable && action is ControlAction.Shove or ControlAction.Trip) || target.IsSolo;
             if (unshaken)
             {
-                Write($"{target.Name} is Unshakable: Disadvantage on the {Verb(action)}.");
+                Write($"{target.Name} is {(target.IsSolo ? "a Solo, Resilient" : "Unshakable")}: Disadvantage on the {Verb(action)}.");
             }
 
             var roll = RollAgainst(actor.UnarmedAttackModifier, threshold, opportunityBonus || helped, AttacksAtDisadvantage(actor) || harried || unshaken, actor);

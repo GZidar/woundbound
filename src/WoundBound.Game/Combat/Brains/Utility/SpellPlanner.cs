@@ -661,7 +661,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var target = plan.Targets[0];
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
-            var chance = Odds.Of(plan.CastBonus, target.StabilityThreshold + answer, disadvantage: target.IsUnshakable).Success;
+            var chance = Odds.Of(plan.CastBonus, target.StabilityThreshold + answer, disadvantage: target.IsUnshakable || target.IsSolo).Success;
             var engaged = View.EnemiesOf(target).Count(a => a.DistanceTo(target) <= target.Reach);
             var separation = engaged > 0 ? 0.6 * assess.Threat(target) * assess.PerWound(actor) : 0;
 

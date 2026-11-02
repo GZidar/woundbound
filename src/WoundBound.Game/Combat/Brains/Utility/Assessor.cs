@@ -315,7 +315,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public (double Worth, AttackProfile? With) BestAttack(Combatant attacker, GridPosition from, Combatant target, bool advantage = false, bool precise = false)
         {
             var best = (Worth: 0.0, With: (AttackProfile?)null);
-            foreach (var attack in attacker.Attacks)
+
+            // An area attack is weighed by everybody it catches, not as a blow at one (TurnPlanner).
+            foreach (var attack in attacker.Attacks.Where(a => a.AreaSquares is null))
             {
                 var plan = view.PlanAttackWith(attacker, attack, from, target);
                 if (!plan.CanAttack)
@@ -417,7 +419,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
             var threshold = againstDodgeToo ? Math.Max(target.DodgeThreshold, target.StabilityThreshold) : target.StabilityThreshold;
             return Odds.Of(actor.UnarmedAttackModifier, threshold + answer, actor.IsHelped,
-                actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried || (topples && target.IsUnshakable)).Success;
+                actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried || (topples && target.IsUnshakable) || target.IsSolo).Success;
         }
 
         /// <summary>

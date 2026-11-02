@@ -811,6 +811,63 @@ namespace WoundBound.Game.Combat
                 setting: Setting.Daylight with { Name = "The cloister yard" }, environment: data.Environment);
         }
 
+        /// <summary>
+        /// A T1 Solo, built for the game by GM Reference §3, "Sizing a Solo": Body 60, Mind and Soul
+        /// 20, one Brute's attack (d8+1), Stamina 3 for a hard but fair capstone. Large, so it stands
+        /// on four squares. Its area attack is rationed to every other round, at about a third of the
+        /// single blow per head (§3, "An area attack is one attack").
+        /// </summary>
+        public static StartingAdversaryInfo HollowStag(GameData data) => data.Adversary("Cave Bear") with
+        {
+            Name = "The Hollow Stag",
+            Role = AdversaryRole.Solo,
+            Tier = Tier.T1,
+            BodyMax = 60,
+            MindMax = 20,
+            SoulMax = 20,
+            Stamina = 3,
+            DodgeThreshold = 14,
+            ResolveThreshold = 13,
+            StabilityThreshold = 16,
+            AttackName = "Antlers",
+            AttackModifier = 3,
+            DamageDiceCount = 1,
+            DamageDie = "d8",
+            DamageModifier = 1,
+            Reach = 2,
+            Size = AdversarySize.Large,
+            Armour = ArmourWeight.Light,
+            AttackEffect = ". One attack a round, whichever of its turns it is taken on",
+            MoreAttacks = [new StartingAttackInfo("Stamping Fury", 3, 1, "d4",
+                Effect: ". Every other round, and it is that round's attack, against every creature within 1 square")],
+            Traits = [AdversaryTrait.SoloActions, AdversaryTrait.SoloResilience],
+            Features = [],
+            CreatureType = CreatureType.Beast,
+            Identity = "A great stag gone hollow in the barrows, moss where its heart was.",
+            Notes = "A T1 Solo staged for the game.",
+        };
+
+        /// <summary>
+        /// The Hollow Stag in the birchwood — staged for the game: the Quickstart's five, in daylight
+        /// among the birches, against one T1 Solo that takes two turns a round, one attack among them.
+        /// </summary>
+        public static Encounter HollowStagInTheBirchwood(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+                CombatantFactory.FromAdversary(HollowStag(data), "The Hollow Stag", new GridPosition(16, 8)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "The birchwood", Ground = Setting.Patches(Terrain.Broken, (10, 2, 13, 4), (10, 13, 13, 15)) },
+                environment: data.Environment);
+        }
+
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
         public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {

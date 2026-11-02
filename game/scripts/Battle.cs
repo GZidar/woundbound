@@ -329,7 +329,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -880,6 +880,7 @@ namespace WoundBoundGame
                 11 => SampleEncounters.RatswarmOnTheCauseway(data, Dice(), PickedGm(), openGround: true),
                 12 => SampleEncounters.ChampionOnTheGreen(data, Dice(), PickedGm()),
                 13 => SampleEncounters.ShrineGuardians(data, Dice(), PickedGm()),
+                14 => SampleEncounters.HollowStagInTheBirchwood(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
             encounter.Logged += OnLogged;
@@ -1700,6 +1701,7 @@ namespace WoundBoundGame
             fightPicker.AddItem("A Ratswarm on open ground");
             fightPicker.AddItem("A Noble Champion on the village green");
             fightPicker.AddItem("The shrine's guardians: a golem and two suits of mail");
+            fightPicker.AddItem("The Hollow Stag: a Solo in the birchwood");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 
