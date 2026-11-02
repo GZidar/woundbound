@@ -344,7 +344,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 if (options.Contains(reach) && Skill.Uses(Trick.Grapple))
                 {
-                    worths.Add((reach, assess.ControlChance(me, leaver, againstDodgeToo: true) * stopping * (reach == LeaverResponse.Grab ? 1 : 0.6)));
+                    worths.Add((reach, assess.ControlChance(me, leaver, againstDodgeToo: true, topples: reach != LeaverResponse.Grab) * stopping * (reach == LeaverResponse.Grab ? 1 : 0.6)));
                 }
             }
 

@@ -55,6 +55,8 @@ Encounter Stage(IDiceRoller dice) => which switch
     "rivals" => SampleEncounters.RivalBand(data, dice, Gm()),
     "swarm" => SampleEncounters.RatswarmOnTheCauseway(data, dice, Gm()),
     "swarmopen" => SampleEncounters.RatswarmOnTheCauseway(data, dice, Gm(), openGround: true),
+    "champion" => SampleEncounters.ChampionOnTheGreen(data, dice, Gm()),
+    "guardians" => SampleEncounters.ShrineGuardians(data, dice, Gm()),
     _ => SampleEncounters.SignpostAmbush(data, dice, Gm()),
 };
 
@@ -70,6 +72,8 @@ var fight = which switch
     "rivals" => "Salla, Drovan, Joren, Mirella and Elthric v the Grey Lanterns, a rival company of five built from the same rules",
     "swarm" => "Salla, Drovan, Joren, Mirella and Elthric v a Fenmoor Ratswarm and four Bramble Ratkin on the fen causeway",
     "swarmopen" => "Salla, Drovan, Joren, Mirella and Elthric v a Fenmoor Ratswarm and four Bramble Ratkin on open ground",
+    "champion" => "Salla, Drovan, Joren, Mirella and Elthric v a Noble Champion and two retainers on the village green",
+    "guardians" => "Salla, Drovan, Joren, Mirella and Elthric v a Stoneheart Golem and two Animated Suits of Mail in a cloister yard",
     "camp" => "Salla, Drovan, Joren, Mirella and Elthric round their campfire at night v a Tollroad Bandit, two Timber Wolves and two Ambushers",
     "fordcasters" => "Salla, Drovan, Joren, Mirella and Elthric, ambushed mid-ford at Longreach Crossing by three Skulkers and two Ambushers",
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",

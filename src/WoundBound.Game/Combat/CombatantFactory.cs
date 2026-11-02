@@ -91,7 +91,7 @@ namespace WoundBound.Game.Combat
                     ? foe.StatblockAttacks
                     : [StatblockLine("Unarmed", AdversarySkillCalculator.Baseline(info.Tier), 1, "d4", 0, info.Reach)],
                 Armour = foe.Armour, InnateSpeed = foe.InnateSpeed, IsSwarm = foe.IsSwarm, Across = foe.Across, Role = foe.Role, Morale = foe.Morale,
-                SkillBonusFor = foe.SkillBonusFor, IsMinion = foe.IsMinion, StaminaMax = foe.StaminaMax, Stamina = foe.Stamina,
+                SkillBonusFor = foe.SkillBonusFor, IsMinion = foe.IsMinion, IsUnshakable = foe.IsUnshakable, StaminaEachRound = foe.StaminaEachRound, StaminaMax = foe.StaminaMax, Stamina = foe.Stamina,
                 TacticalSpendsPerRound = foe.TacticalSpendsPerRound,
                 StatblockManoeuvres = foe.StatblockManoeuvres,
                 Tier = info.Tier,
@@ -162,6 +162,8 @@ namespace WoundBound.Game.Combat
             Morale = Morale.FromStatblock(info),
             SkillBonusFor = info.Kind == AdversaryKind.Combat ? SkillsOf(info) : _ => 0,
             IsMinion = info.Role == AdversaryRole.Minion,
+            IsUnshakable = info.Traits?.Contains(AdversaryTrait.Unshakable) == true,
+            StaminaEachRound = info.Features?.Any(f => f.Name == "Fitness") == true ? 1 : 0,
             StaminaMax = info.Stamina,
             Stamina = info.Stamina,
             TacticalSpendsPerRound = CharacterCalculator.TacticalSpendsPerRound(info.Tier),

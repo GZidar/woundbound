@@ -379,6 +379,16 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public bool IsMinion { get; init; }
 
+        /// <summary>
+        /// Unshakable (GM Reference §9): Advantage on Stability Threshold checks made against being
+        /// shoved or knocked prone — read here as Disadvantage on the roll of whoever is shoving,
+        /// tripping, Toppling or Shifting it, since that roll is the check.
+        /// </summary>
+        public bool IsUnshakable { get; init; }
+
+        /// <summary>A statblock's Fitness: regains this much Stamina at the start of each round, up to its pool.</summary>
+        public int StaminaEachRound { get; init; }
+
         public required int StaminaMax { get; init; }
 
         public int Stamina { get; internal set; }

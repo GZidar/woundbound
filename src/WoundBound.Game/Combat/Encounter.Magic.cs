@@ -966,7 +966,8 @@ namespace WoundBound.Game.Combat
                 }
 
                 var threshold = target.StabilityThreshold;
-                var roll = RollAgainst(plan.CastBonus, threshold, cast.Sacrifice || helped || target.IsDefenceless, AttacksAtDisadvantage(caster) || harried, caster);
+                var unshaken = kind == MotionKind.Shift && target.IsUnshakable;
+                var roll = RollAgainst(plan.CastBonus, threshold, cast.Sacrifice || helped || target.IsDefenceless, AttacksAtDisadvantage(caster) || harried || unshaken, caster);
 
                 void Resolve(bool stoodFirm)
                 {

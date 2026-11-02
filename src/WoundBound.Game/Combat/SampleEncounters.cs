@@ -759,6 +759,58 @@ namespace WoundBound.Game.Combat
                 setting: openGround ? Setting.Daylight with { Name = "Open ground" } : FenCauseway, environment: data.Environment);
         }
 
+        /// <summary>
+        /// A lord's champion — staged for the game, not taken from a book: the Quickstart's five on a
+        /// village green, in daylight, against a Noble Champion (T3 Brute: DT 15, Medium armour, a
+        /// great sword that can Topple, Unshakable, and Fitness to keep his Stamina coming) and the two
+        /// retainers riding with him — a Tollroad Bandit and a Bandit Ambusher with a crossbow. Open
+        /// ground, so the party can ring him; hard to hit, so it takes rounds — the fight a held Bane
+        /// is for.
+        /// </summary>
+        public static Encounter ChampionOnTheGreen(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+                CombatantFactory.FromAdversary(data.Adversary("Noble Champion"), "Noble Champion", new GridPosition(15, 9)),
+                CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Retainer with a cudgel", new GridPosition(16, 6)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Retainer with a crossbow", new GridPosition(19, 11)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "The village green" }, environment: data.Environment);
+        }
+
+        /// <summary>
+        /// A shrine's guardians — staged for the game, not taken from a book: a Stoneheart Golem (T2
+        /// Brute, Large, Heavy armour, Reach 2) and two Animated Suits of Mail (DT 14), in a ruined
+        /// cloister's open yard. Constructs have no Mind or Soul for a Smite, a Mind Spike or a Control
+        /// to find, and nothing in them breaks and runs: the blades have to grind them down, which is
+        /// where a held Curse on the one they're all hitting earns its Stamina.
+        /// </summary>
+        public static Encounter ShrineGuardians(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var mail = data.Adversary("Animated Suit of Mail");
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+                CombatantFactory.FromAdversary(data.Adversary("Stoneheart Golem"), "Stoneheart Golem", new GridPosition(16, 8)),
+                CombatantFactory.FromAdversary(mail, "Suit of Mail by the gate", new GridPosition(14, 5)),
+                CombatantFactory.FromAdversary(mail, "Suit of Mail by the well", new GridPosition(14, 13)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "The cloister yard" }, environment: data.Environment);
+        }
+
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
         public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
         {

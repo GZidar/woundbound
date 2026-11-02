@@ -329,7 +329,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -876,6 +876,10 @@ namespace WoundBoundGame
                 7 => SampleEncounters.FighterVersusRatkin(data, Dice(), PickedGm()),
                 8 => SampleEncounters.HedgeWitchesToll(data, Dice(), PickedGm()),
                 9 => SampleEncounters.RivalBand(data, Dice(), PickedGm()),
+                10 => SampleEncounters.RatswarmOnTheCauseway(data, Dice(), PickedGm()),
+                11 => SampleEncounters.RatswarmOnTheCauseway(data, Dice(), PickedGm(), openGround: true),
+                12 => SampleEncounters.ChampionOnTheGreen(data, Dice(), PickedGm()),
+                13 => SampleEncounters.ShrineGuardians(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
             encounter.Logged += OnLogged;
@@ -1692,6 +1696,10 @@ namespace WoundBoundGame
             fightPicker.AddItem("The Dumb Fighter v three ratkin");
             fightPicker.AddItem("The hedge-witches' toll (enemy casters)");
             fightPicker.AddItem("The Grey Lanterns: a rival company of five");
+            fightPicker.AddItem("A Ratswarm on the fen causeway");
+            fightPicker.AddItem("A Ratswarm on open ground");
+            fightPicker.AddItem("A Noble Champion on the village green");
+            fightPicker.AddItem("The shrine's guardians: a golem and two suits of mail");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 

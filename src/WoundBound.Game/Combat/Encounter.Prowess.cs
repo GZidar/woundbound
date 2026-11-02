@@ -196,6 +196,15 @@ namespace WoundBound.Game.Combat
                 ? (target.ResolveThreshold ?? 0, "RT", ReactionKind.BraceResolve)
                 : (target.StabilityThreshold, "ST", ReactionKind.StandFirm);
 
+            // Unshakable: the check to put it down is made as though at Disadvantage — a third die
+            // rolled, and the attacker keeps the lowest two.
+            if (manoeuvre.Kind == WeaponManoeuvre.Topple && target.IsUnshakable && roll.CountedDice.Count == 2)
+            {
+                var dice = roll.CountedDice.Append(this.dice.Roll(Rules.Calculation.RollCalculator.HighestFace)).OrderBy(d => d).Take(2).ToList();
+                roll = roll with { Total = roll.Modifier + dice.Sum(), CountedDice = dice };
+                Write($"{target.Name} is Unshakable: the Topple is checked at Disadvantage — {string.Join("+", dice)}{(roll.Modifier >= 0 ? "+" : "−")}{Math.Abs(roll.Modifier)} = {roll.Total}.");
+            }
+
             void Resolve(bool braced)
             {
                 var total = roll.Total;

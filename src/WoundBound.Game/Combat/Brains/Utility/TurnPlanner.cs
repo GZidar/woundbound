@@ -447,7 +447,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             var helpers = (stillToAct ?? []).Count(a => a != actor && (View.PlanAttack(a, target).CanAttack || View.StrikeSquare(a, target) is not null));
-            return assess.ControlChance(actor, target) * (0.12 * assess.Value(target) * helpers + 0.15 * assess.Threat(target) * assess.PerWound(actor));
+            return assess.ControlChance(actor, target, topples: true) * (0.12 * assess.Value(target) * helpers + 0.15 * assess.Threat(target) * assess.PerWound(actor));
         }
 
         /// <summary>

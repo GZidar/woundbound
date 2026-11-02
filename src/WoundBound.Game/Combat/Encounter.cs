@@ -1360,6 +1360,12 @@ namespace WoundBound.Game.Combat
             QuietRounds = wounds == woundsAtRoundStart ? QuietRounds + 1 : 0;
             woundsAtRoundStart = wounds;
 
+            foreach (var fit in combatants.Where(c => c.StaminaEachRound > 0 && !c.IsOutOfFight && c.Stamina < c.StaminaMax))
+            {
+                fit.Stamina = Math.Min(fit.StaminaMax, fit.Stamina + fit.StaminaEachRound);
+                Write($"{fit.Name}'s Fitness: +{fit.StaminaEachRound} Stamina ({fit.Stamina}/{fit.StaminaMax}).");
+            }
+
             foreach (var combatant in combatants)
             {
                 combatant.TacticalSpendsThisRound = 0;
@@ -2803,7 +2809,13 @@ namespace WoundBound.Game.Combat
 
             var threshold = target.StabilityThreshold;
             var (helped, harried) = TakeAid(actor);
-            var roll = RollAgainst(actor.UnarmedAttackModifier, threshold, opportunityBonus || helped, AttacksAtDisadvantage(actor) || harried, actor);
+            var unshaken = target.IsUnshakable && action is ControlAction.Shove or ControlAction.Trip;
+            if (unshaken)
+            {
+                Write($"{target.Name} is Unshakable: Disadvantage on the {Verb(action)}.");
+            }
+
+            var roll = RollAgainst(actor.UnarmedAttackModifier, threshold, opportunityBonus || helped, AttacksAtDisadvantage(actor) || harried || unshaken, actor);
             actor.ActionsRemaining--;
 
             var verb = Verb(action);

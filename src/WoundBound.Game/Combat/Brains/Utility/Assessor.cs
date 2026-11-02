@@ -411,12 +411,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>The chance a Grab, Shove or Trip lands — against Stability, and the target standing firm if it can.</summary>
-        public double ControlChance(Combatant actor, Combatant target, bool againstDodgeToo = false)
+        /// <param name="topples">A Shove or a Trip — which an Unshakable target meets at the attacker's Disadvantage.</param>
+        public double ControlChance(Combatant actor, Combatant target, bool againstDodgeToo = false, bool topples = false)
         {
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
             var threshold = againstDodgeToo ? Math.Max(target.DodgeThreshold, target.StabilityThreshold) : target.StabilityThreshold;
             return Odds.Of(actor.UnarmedAttackModifier, threshold + answer, actor.IsHelped,
-                actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried).Success;
+                actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried || (topples && target.IsUnshakable)).Success;
         }
 
         /// <summary>
