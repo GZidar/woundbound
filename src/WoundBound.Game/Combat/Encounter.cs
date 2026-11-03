@@ -540,6 +540,11 @@ namespace WoundBound.Game.Combat
 
         public event Action<string>? Logged;
 
+        /// <summary>What just happened, as a record to animate — raised as its line is written to the log.</summary>
+        public event Action<Happening>? Happened;
+
+        private void Raise(Happening happening) => Happened?.Invoke(happening);
+
         public bool IsOver => Phase is EncounterPhase.Victory or EncounterPhase.Defeat or EncounterPhase.Withdrew;
 
         public IEnumerable<Combatant> Fighting(Side side) => combatants.Where(c => c.Side == side && !c.IsOutOfFight);
@@ -3759,6 +3764,7 @@ namespace WoundBound.Game.Combat
                 if (binding.DealsNoDamage)
                 {
                     var bound = new AttackOutcome(attacker, target, roll, plan, 0, 0, 0, false, usedOpportunity, asReaction, dodged, boost, boostedBy);
+                    Raise(new Struck(bound));
                     then(bound);
                     return;
                 }
@@ -3776,6 +3782,7 @@ namespace WoundBound.Game.Combat
                     var struck = new AttackOutcome(attacker, target, roll, plan, rolledDamage, 0, rolledDamage, false,
                         usedOpportunity, asReaction, dodged, boost, boostedBy);
                     Write(Describe(struck) + $" ({swung.Track})");
+                    Raise(new Struck(struck));
                     Wound(target, swung.Track, rolledDamage, direct: true, () => then(struck));
                     return;
                 }
@@ -3806,6 +3813,7 @@ namespace WoundBound.Game.Combat
                     var landed = new AttackOutcome(attacker, target, hit, plan, rolledHit, absorbedHit, left, false,
                         usedOpportunity, asReaction, dodged, boost, boostedBy);
                     Write(Describe(landed));
+                    Raise(new Struck(landed));
                     Envenom(swung, target, hit, gotThrough, () => then(landed));
                 });
                 return;
@@ -3821,6 +3829,7 @@ namespace WoundBound.Game.Combat
             var outcome = new AttackOutcome(attacker, target, roll, plan, rolledDamage, absorbed, dealt, attackerWounded,
                 usedOpportunity, asReaction, dodged, boost, boostedBy);
             Write(Describe(outcome));
+            Raise(new Struck(outcome));
             then(outcome);
         }
 

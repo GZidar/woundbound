@@ -611,6 +611,7 @@ namespace WoundBound.Game.Combat
                 ShotThroughWalls(caster, caster.Position, plan.Origin);
             }
 
+            Raise(new SpellWorked(caster, spell, plan));
             if (plan.Targets.Count == 1 && plan.Targets[0].IsPhantom)
             {
                 PassesThroughPhantom(caster, plan.Targets[0], spell.Name);
@@ -740,6 +741,8 @@ namespace WoundBound.Game.Combat
                         backfired |= final.IsCritical;
                         Write(line + (final.IsCritical && roll.Success == true ? " — Riposte! The critical becomes a critical failure."
                             : final.IsCritical ? " — critical failure!" : " — miss."));
+                        Raise(new SpellStruck(caster, target, spell, Hit: false, Critical: false, Dodged: boost > 0 && roll.Success == true,
+                            Riposte: boost > 0 && final.IsCritical && roll.Success == true));
                         Next();
                         return;
                     }
@@ -754,6 +757,7 @@ namespace WoundBound.Game.Combat
                     }
 
                     Write(line + (final.IsCritical ? $" — critical! {amount} {type}." : $" — hit, {amount} {type}."));
+                    Raise(new SpellStruck(caster, target, spell, Hit: true, final.IsCritical, Dodged: false, Riposte: false));
                     Wound(target, type, amount, direct: false, Next);
                 }
 

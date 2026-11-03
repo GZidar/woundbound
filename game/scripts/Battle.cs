@@ -57,19 +57,6 @@ namespace WoundBoundGame
         private int? seed;
         private bool quitting;
 
-        /// <summary>What somebody just did, said over their token for a few seconds.</summary>
-        private sealed class Bubble(Combatant who, string text, bool isResult)
-        {
-            public Combatant Who { get; } = who;
-            public string Text { get; } = text;
-            public bool IsResult { get; } = isResult;
-            public double Age { get; set; }
-        }
-
-        private readonly List<Bubble> bubbles = new();
-        private double BubbleLife => demo ? 4.2 : 2.6;
-        private const int BubbleWidth = 230;
-
         /// <summary>Where each token is drawn, eased along towards its square so a move can be followed.</summary>
         private readonly Dictionary<Combatant, Vector2> tokenAt = new();
 
@@ -96,6 +83,7 @@ namespace WoundBoundGame
         private FogOfWar? fog;
 
         private bool fogOn = !OS.GetCmdlineUserArgs().Contains("--nofog");
+
 
         /// <summary>Whether <paramref name="c"/> is drawn: the party's own, or a foe the party sees now.</summary>
         private bool Shown(Combatant c) => fog?.Shows(c) ?? true;
@@ -159,7 +147,7 @@ namespace WoundBoundGame
         private int rosterRound;
 
         /// <summary>
-        /// A colour for each character, so the roster, their token and their bubbles agree: the
+        /// A colour for each character, so the roster, their token and their log lines agree: the
         /// Okabe-Ito set the extension's palette is drawn from, which a colour-blind player can tell
         /// apart — and never the rust that marks the other side.
         /// </summary>
@@ -464,7 +452,7 @@ namespace WoundBoundGame
 
         /// <summary>
         /// The 3D board, in a view filling the board's area on a layer beneath the screen, so the
-        /// highlights, rings, bubbles and menus this screen draws all land on top of it.
+        /// highlights, rings and menus this screen draws all land on top of it.
         /// </summary>
         private void Build3D()
         {
@@ -583,13 +571,6 @@ namespace WoundBoundGame
                 animating = true;
             }
 
-            foreach (var bubble in bubbles)
-            {
-                bubble.Age += delta;
-            }
-
-            animating |= bubbles.RemoveAll(b => b.Age > BubbleLife) > 0 || bubbles.Count > 0;
-
             var glide = 1 - Mathf.Exp(-9 * (float)delta);
             foreach (var c in encounter.Combatants)
             {
@@ -700,10 +681,6 @@ namespace WoundBoundGame
             DrawString(font, gmAt + new Vector2(-40, 36), gmActing ? "acting" : $"{encounter.GmOpportunities} Opp.", HorizontalAlignment.Center, 80, 11, dim);
         }
 
-        /// <summary>
-        /// Turns a line of the log into a bubble: what somebody did, over them — "casts Smite at the
-        /// Ambusher on the ridge" — and how a roll went, over whoever it landed on.
-        /// </summary>
         private BattleLog battleLog = null!;
 
         /// <summary>The reaction on offer, explained — shown in its ring's hover box and above the tabs.</summary>
@@ -720,82 +697,6 @@ namespace WoundBoundGame
             var gmActing = encounter.Phase == EncounterPhase.AdversaryTurn
                            || (encounter.Phase == EncounterPhase.AwaitingReaction && encounter.Active?.Side != Side.Party);
             formattedLog.Add(battleLog.Format(line, encounter.Combatants, gmActing));
-
-            if (line.StartsWith("—") || line.EndsWith("'s turn.") || line.StartsWith("The GM banks") || line.StartsWith("Objective"))
-            {
-                return;
-            }
-
-            var byName = encounter.Combatants.OrderByDescending(c => c.Name.Length).ToList();
-            if (byName.FirstOrDefault(c => line.StartsWith(c.Name + " ")) is { } actor)
-            {
-                Say(actor, line[(actor.Name.Length + 1)..], isResult: false);
-                return;
-            }
-
-            if (byName.FirstOrDefault(c => line.StartsWith(c.Name + ":")) is { } hurt)
-            {
-                Say(hurt, line[(hurt.Name.Length + 1)..].Trim(), isResult: true);
-                return;
-            }
-
-            // "Smite at Ambusher on the ridge: (9+5)+4 = 18 vs DT 17 — hit, 3 Soul."
-            if (line.IndexOf(": (", System.StringComparison.Ordinal) is var colon and > 0
-                && byName.FirstOrDefault(c => line[..colon].EndsWith(c.Name)) is { } target)
-            {
-                Say(target, line[..colon].Replace(" at " + target.Name, string.Empty) + line[colon..], isResult: true);
-            }
-        }
-
-        private void Say(Combatant who, string text, bool isResult)
-        {
-            text = text.Trim().TrimEnd('.');
-            if (text.Length == 0)
-            {
-                return;
-            }
-
-            text = char.ToUpperInvariant(text[0]) + text[1..];
-            bubbles.Add(new Bubble(who, text.Length > 140 ? text[..137] + "…" : text, isResult));
-            while (bubbles.Count(b => b.Who == who) > 2)
-            {
-                bubbles.Remove(bubbles.First(b => b.Who == who));
-            }
-
-            QueueRedraw();
-        }
-
-        /// <summary>The bubbles, over each token, the newest nearest it, fading as they go.</summary>
-        private void DrawBubbles()
-        {
-            var font = ThemeDB.FallbackFont;
-            const int size = 13;
-            foreach (var group in bubbles.GroupBy(b => b.Who).Where(g => Shown(g.Key)))
-            {
-                var who = group.Key;
-                var anchor = TokenCentre(who) - new Vector2(0, CellSize * 0.45f);
-                foreach (var bubble in group.Reverse())
-                {
-                    var fade = Mathf.Clamp((float)((BubbleLife - bubble.Age) / 0.6), 0, 1) * Mathf.Clamp((float)(bubble.Age / 0.15), 0, 1);
-                    var textSize = font.GetMultilineStringSize(bubble.Text, HorizontalAlignment.Left, BubbleWidth, size);
-                    var box = new Vector2(textSize.X + 16, textSize.Y + 10);
-                    var topLeft = new Vector2(Mathf.Clamp(anchor.X - box.X / 2, 4, BoardOrigin.X + BoardArea.X - box.X), Mathf.Max(BoardOrigin.Y + 2, anchor.Y - box.Y - 8));
-                    var fill = bubble.IsResult ? new Color(0.16f, 0.16f, 0.2f, 0.92f * fade) : new Color(0.97f, 0.96f, 0.92f, 0.95f * fade);
-                    var edge = (bubble.IsResult ? new Color(0.8f, 0.8f, 0.85f) : ColourOf(who)) with { A = fade };
-                    DrawStyleBox(new StyleBoxFlat
-                    {
-                        BgColor = fill,
-                        BorderColor = edge,
-                        BorderWidthLeft = 2, BorderWidthRight = 2, BorderWidthTop = 2, BorderWidthBottom = 2,
-                        CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8, CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
-                    }, new Rect2(topLeft, box));
-                    var tail = new Vector2(Mathf.Clamp(anchor.X, topLeft.X + 10, topLeft.X + box.X - 10), topLeft.Y + box.Y);
-                    DrawColoredPolygon([tail + new Vector2(-6, -1), tail + new Vector2(6, -1), tail + new Vector2(0, 8)], fill);
-                    DrawMultilineString(font, topLeft + new Vector2(8, 5 + font.GetAscent(size)), bubble.Text, HorizontalAlignment.Left, BubbleWidth, size, -1,
-                        (bubble.IsResult ? new Color(0.95f, 0.92f, 0.8f) : new Color(0.1f, 0.1f, 0.12f)) with { A = fade });
-                    anchor = new Vector2(anchor.X, topLeft.Y - 4);
-                }
-            }
         }
 
         public override void _UnhandledInput(InputEvent @event)
@@ -1083,7 +984,6 @@ namespace WoundBoundGame
             }
 
             DrawRoster();
-            DrawBubbles();
         }
 
         /// <summary>
@@ -1339,7 +1239,13 @@ namespace WoundBoundGame
             formattedLog.Clear();
             formattedLog.AddRange(encounter.Log.Select(line => battleLog.Format(line, encounter.Combatants, gmActing: false)));
             encounter.Logged += OnLogged;
-            bubbles.Clear();
+            encounter.Happened += happening =>
+            {
+                if (In3D)
+                {
+                    board3D!.Play(happening);
+                }
+            };
             rosterAt.Clear();
             tokenAt.Clear();
             actedThisRound.Clear();
@@ -1382,13 +1288,20 @@ namespace WoundBoundGame
             {
                 stepPending = true;
                 var waitingOn = encounter;
-                GetTree().CreateTimer(demo ? 1.7 : gmToAct ? AdversaryTurnDelay : BotStepDelay).Timeout += () =>
+                GetTree().CreateTimer(In3D && board3D!.Busy ? 0.1 : demo ? 1.7 : gmToAct ? AdversaryTurnDelay : BotStepDelay).Timeout += () =>
                 {
                     stepPending = false;
 
                     // A restart mid-pause replaces the encounter; the old one's turn is moot.
                     if (waitingOn != encounter)
                     {
+                        return;
+                    }
+
+                    // Let the board finish showing what just happened before the next thing does.
+                    if (In3D && board3D!.Busy)
+                    {
+                        Refresh();
                         return;
                     }
 

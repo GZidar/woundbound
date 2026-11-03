@@ -98,6 +98,7 @@ namespace WoundBoundGame
             zoomTarget = Mathf.Clamp(spread * 1.6f + 4, 8, 22);
             yaw.Position = focusTarget;
             camera.Size = zoomTarget;
+            ClearActs();
             Sync(1);
         }
 
@@ -203,6 +204,7 @@ namespace WoundBoundGame
             pitch.RotationDegrees = new Vector3(Mathf.Lerp(pitch.RotationDegrees.X, pitchTarget, ease), 0, 0);
             yaw.Position = yaw.Position.Lerp(focusTarget, ease);
             camera.Size = Mathf.Lerp(camera.Size, zoomTarget, ease);
+            Animate(delta);
 
             var present = fight.Combatants.Concat(fight.Steeds).Where(c => !c.HasFled && c.OccupiesSquare || c.IsOutOfFight && !c.HasFled).Distinct().ToList();
             foreach (var gone in figures.Keys.Except(present).ToList())
@@ -218,7 +220,7 @@ namespace WoundBoundGame
                     figure = new Figure(creature, colourOf(creature));
                     AddChild(figure);
                     figures[creature] = figure;
-                    figure.Position = Where(creature);
+                    figure.Place(Where(creature));
                 }
 
                 // A foe out of sight isn't drawn; one coming into sight appears where it is, not
@@ -226,7 +228,7 @@ namespace WoundBoundGame
                 var shown = fog?.Shows(creature) ?? true;
                 if (shown && !figure.Visible)
                 {
-                    figure.Position = Where(creature);
+                    figure.Place(Where(creature));
                 }
 
                 figure.Follow(Where(creature), FacingOf(creature, fight), ease);
@@ -462,7 +464,10 @@ namespace WoundBoundGame
             public Figure(Combatant creature, Color colour)
             {
                 this.creature = creature;
+                Colour = colour;
                 AddChild(body);
+                arm.Position = Shoulder;
+                body.AddChild(arm);
                 var scale = creature.Across * 1.35f;
                 body.Scale = Vector3.One * (creature.IsTiny ? 0.7f : scale);
                 var cloth = Material(colour);
@@ -502,18 +507,19 @@ namespace WoundBoundGame
                     Part(new SphereMesh { Radius = 0.13f, Height = 0.16f, IsHemisphere = true }, new Vector3(0, 1.06f, 0), metal);              // helm
                 }
 
-                var hand = new Vector3(0.2f, 0.6f, 0.08f);
+                // What's in hand hangs from the shoulder, so a blow can swing it and a cast raise it.
+                var hand = new Vector3(0.2f, 0.6f, 0.08f) - Shoulder;
                 if (creature.HasRangedAttack && creature.Attacks.All(a => a.IsRanged || a.Name == "Unarmed"))
                 {
-                    Part(new BoxMesh { Size = new Vector3(0.03f, 0.65f, 0.05f) }, hand + new Vector3(0, 0.1f, 0.06f), wood);                    // bow stave
+                    Part(new BoxMesh { Size = new Vector3(0.03f, 0.65f, 0.05f) }, hand + new Vector3(0, 0.1f, 0.06f), wood, parent: arm);                    // bow stave
                 }
                 else if (creature.Spells.Count > 0 && creature.Attacks.All(a => a.Name == "Unarmed"))
                 {
-                    Part(new CylinderMesh { TopRadius = 0.02f, BottomRadius = 0.02f, Height = 0.9f }, hand + new Vector3(0, 0.05f, 0), wood);    // a caster's staff
+                    Part(new CylinderMesh { TopRadius = 0.02f, BottomRadius = 0.02f, Height = 0.9f }, hand + new Vector3(0, 0.05f, 0), wood, parent: arm);    // a caster's staff
                 }
                 else if (creature.Attacks.Any(a => a.Name != "Unarmed"))
                 {
-                    Part(new BoxMesh { Size = new Vector3(0.04f, 0.04f, 0.55f) }, hand + new Vector3(0, 0.02f, 0.28f), metal);                  // a blade, held forward
+                    Part(new BoxMesh { Size = new Vector3(0.04f, 0.04f, 0.55f) }, hand + new Vector3(0, 0.02f, 0.28f), metal, parent: arm);                  // a blade, held forward
                 }
 
                 if (creature.InHandShield is not null)
@@ -522,24 +528,34 @@ namespace WoundBoundGame
                 }
             }
 
-            private void Part(Mesh mesh, Vector3 at, Material material, Vector3? turn = null) =>
-                body.AddChild(new MeshInstance3D { Mesh = mesh, Position = at, MaterialOverride = material, RotationDegrees = turn ?? Vector3.Zero });
+            private void Part(Mesh mesh, Vector3 at, Material material, Vector3? turn = null, Node3D? parent = null) =>
+                (parent ?? body).AddChild(new MeshInstance3D { Mesh = mesh, Position = at, MaterialOverride = material, RotationDegrees = turn ?? Vector3.Zero });
 
             private static StandardMaterial3D Material(Color colour, float metallic = 0) =>
                 new() { AlbedoColor = colour, Roughness = metallic > 0 ? 0.35f : 0.8f, Metallic = metallic };
 
-            /// <summary>Eases towards <paramref name="to"/>, turning to face <paramref name="toward"/>; lies flat while down.</summary>
+            /// <summary>
+            /// Eases towards <paramref name="to"/>, turning to face <paramref name="toward"/> — or
+            /// whoever an action has it facing — with the action's pose laid over it; lies flat
+            /// while down, though not before the blow that put it down has been seen to land.
+            /// </summary>
             public void Follow(Vector3 to, float? toward, float ease)
             {
-                Position = Position.DistanceTo(to) < 0.01f ? to : Position.Lerp(to, ease);
-                if (toward is { } angle)
+                Anchor = Anchor.DistanceTo(to) < 0.01f ? to : Anchor.Lerp(to, ease);
+                Position = Anchor + Offset;
+                if ((Face ?? toward) is { } angle)
                 {
-                    facing = Mathf.LerpAngle(facing, angle, ease);
+                    facing = Mathf.LerpAngle(facing, angle, Face is null ? ease : Mathf.Min(1, ease * 2.5f));
                 }
 
-                var down = creature.IsOutOfFight || creature.IsProne;
-                var lie = down ? 85f : 0f;
-                body.RotationDegrees = new Vector3(Mathf.Lerp(body.RotationDegrees.X, lie, ease), Mathf.RadToDeg(facing), 0);
+                if (Holds == 0)
+                {
+                    shownDown = creature.IsOutOfFight || creature.IsProne;
+                }
+
+                var lie = shownDown ? 85f : Lean;
+                body.RotationDegrees = new Vector3(Mathf.Lerp(body.RotationDegrees.X, lie, Holds > 0 && !shownDown ? 1 : ease), Mathf.RadToDeg(facing), 0);
+                arm.RotationDegrees = new Vector3(Swing, 0, 0);
             }
         }
     }
