@@ -62,8 +62,9 @@ namespace WoundBoundGame
 
             // A line that starts with somebody doing something is a new entry; anything else follows from the one before.
             var actor = byName.FirstOrDefault(c => line.StartsWith(c.Name + " ") && !line.StartsWith(c.Name + "'s turn"));
-            var body = Outcomes(Rolls(Names(text)));
-            if (actor is not null && !IsConsequence(line, actor))
+            var body = Unseen(Outcomes(Rolls(Names(text))));
+            var subject = actor?.Name ?? (line.StartsWith(UnseenActor + " ") ? UnseenActor : null);
+            if (subject is not null && !IsConsequence(line, subject))
             {
                 return header + $"[font_size=4] [/font_size]\n{body}\n";
             }
@@ -72,9 +73,9 @@ namespace WoundBoundGame
         }
 
         /// <summary>A line that names its subject first but reports what happened to them, not what they did.</summary>
-        private static bool IsConsequence(string line, Combatant subject)
+        private static bool IsConsequence(string line, string subject)
         {
-            var rest = line[(subject.Name.Length + 1)..];
+            var rest = line[(subject.Length + 1)..];
             return rest.StartsWith("is ") || rest.StartsWith("has ") || rest.StartsWith("takes ") && !rest.StartsWith("takes the ")
                    || rest.StartsWith("falls") || rest.StartsWith("drops") || rest.StartsWith("rolls with") || rest.StartsWith("rolls Harried")
                    || rest.StartsWith("looks again") || rest.StartsWith("lowers") || rest.StartsWith("regains") || rest.StartsWith("is no longer");
@@ -86,6 +87,13 @@ namespace WoundBoundGame
         private string Name(Combatant c) => $"[b][color=#{colourOf(c).Lightened(0.25f).ToHtml(false)}]{Escape(c.Name)}[/color][/b]";
 
         /// <summary>Every combatant's name in the line, in their colour.</summary>
+        /// <summary>How the players' log names a foe they can't see.</summary>
+        public const string UnseenActor = "Something unseen";
+
+        /// <summary>A foe the players can't see, in the hostile colour like a named one, but in italics.</summary>
+        private static string Unseen(string text) =>
+            System.Text.RegularExpressions.Regex.Replace(text, "[Ss]omething unseen", m => $"[i][color=#{GmRed.ToHtml(false)}]{m.Value}[/color][/i]");
+
         private string Names(string text)
         {
             // Longest first, each name swapped for a placeholder so a shorter one inside it isn't coloured twice.
@@ -129,6 +137,9 @@ namespace WoundBoundGame
 
         /// <summary>The log's own square brackets, kept from being read as BBCode.</summary>
         private static string Escape(string text) => text.Replace("[", "[lb]");
+
+        /// <summary>Whether <paramref name="line"/> opens a round.</summary>
+        public static bool IsRound(string line) => RoundLine().IsMatch(line);
 
         [GeneratedRegex(@"^\W*Round (\d+)\W*$")]
         private static partial Regex RoundLine();

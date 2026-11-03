@@ -733,7 +733,7 @@ namespace WoundBoundGame
         {
             var gmActing = encounter.Phase == EncounterPhase.AdversaryTurn
                            || (encounter.Phase == EncounterPhase.AwaitingReaction && encounter.Active?.Side != Side.Party);
-            formattedLog.Add(battleLog.Format(line, encounter.Combatants, gmActing));
+            AddToLogs(line, gmActing);
         }
 
         public override void _UnhandledInput(InputEvent @event)
@@ -1296,10 +1296,7 @@ namespace WoundBoundGame
             fog = fogOn ? new FogOfWar(encounter) : null;
             board3D?.ApplyFog(fog);
 
-            // Lines written while the fight was set up came before anyone was listening.
-            battleLog = new BattleLog(ColourOf);
-            formattedLog.Clear();
-            formattedLog.AddRange(encounter.Log.Select(line => battleLog.Format(line, encounter.Combatants, gmActing: false)));
+            StartLogs();
             encounter.Logged += OnLogged;
             encounter.Happened += happening =>
             {
@@ -1338,12 +1335,12 @@ namespace WoundBoundGame
                 board3D?.ApplyFog(fog);
             }
 
-            foreach (var line in formattedLog.Skip(linesShown))
+            foreach (var line in ShownLog.Skip(linesShown))
             {
                 logLabel.AppendText(line);
             }
 
-            linesShown = formattedLog.Count;
+            linesShown = ShownLog.Count;
 
             UpdateHud();
             QueueRedraw();
@@ -2195,6 +2192,7 @@ namespace WoundBoundGame
                 fogOn = index == 0;
                 fog = fogOn ? new FogOfWar(encounter) : null;
                 board3D?.ApplyFog(fog);
+                ReshowLog();
                 Refresh();
             };
             botRow.AddChild(viewPicker);
