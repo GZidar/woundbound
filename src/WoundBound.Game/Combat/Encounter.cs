@@ -282,6 +282,19 @@ namespace WoundBound.Game.Combat
             : !Setting.IsUnlit ? Setting.Visibility
             : WorkOutVisibility(tables, null, square);
 
+        /// <summary>
+        /// How far one carried light reaches, in squares: the outer edge of the furthest band the
+        /// light table says a single carried light still lights (Short, 4). Two lights this close
+        /// are each lighting the other, and pool.
+        /// </summary>
+        private int OneLightReach(EnvironmentTables tables) =>
+            oneLightReach ??= bands.Bands.OrderBy(b => b.MaxSquares)
+                .TakeWhile(b => RangeBandCalculator.BandForSquares(bands, b.MaxSquares) is { } band
+                    && EnvironmentCalculator.VisibilityFromLight(tables, 1, builtFire: false, band) != Visibility.None)
+                .Select(b => b.MaxSquares).DefaultIfEmpty(1).Max();
+
+        private int? oneLightReach;
+
         private Visibility WorkOutVisibility(EnvironmentTables tables, Combatant? target, GridPosition square)
         {
 
@@ -297,44 +310,50 @@ namespace WoundBound.Game.Combat
                 .Concat(lightsOnTheGround)
                 .ToList();
 
-            // Conjured light: a carried source or two where it was put down, lighting from the
-            // nearest square of its block. Never a built fire, so never out to Long — and only one
-            // casting counts, so it is grouped with the lights around it but not with another
-            // conjured one (Core Rules §9, "What the Levers Touch Elsewhere").
+            // Lights pool (Core Rules §9, "Lights together"): a light within one light's reach of
+            // another counts with it, and through it with every light the other is pooled with — a
+            // chain of torchbearers is one pool from end to end. Whose light it is doesn't matter.
+            // A conjured light joins the pool at the nearest square of its block, counting as its
+            // grade's worth of carried lights; only one casting counts in any pool.
             var conjured = workings.Where(w => w.Lever == Lever.Light && w.Holds).ToList();
-            var bestConjured = Setting.Visibility;
-            foreach (var working in conjured)
+            var reach = OneLightReach(tables);
+            var nodes = sources.Select(s => (IReadOnlyList<GridPosition>)[s]).Concat(conjured.Select(w => w.Squares.ToList())).ToList();
+            var pool = Enumerable.Range(0, nodes.Count).ToArray();
+            int Root(int i) => pool[i] == i ? i : pool[i] = Root(pool[i]);
+            for (var i = 0; i < nodes.Count; i++)
             {
-                var nearest = working.Squares.MinBy(sq => sq.DistanceTo(square));
-                if (RangeBandCalculator.BandForSquares(bands, nearest.DistanceTo(square)) is not { } band
-                    || (Setting.Walls.Count > 0 && !Sight.Clear(nearest, square, Setting.IsWall)))
+                for (var j = i + 1; j < nodes.Count; j++)
                 {
-                    continue;
+                    if (nodes[i].Any(x => nodes[j].Any(y => x.DistanceTo(y) <= reach)))
+                    {
+                        pool[Root(i)] = Root(j);
+                    }
                 }
-
-                var with = working.Grade + sources.Count(s => working.Squares.Any(sq => sq.DistanceTo(s) <= 1));
-                var grade = EnvironmentCalculator.VisibilityFromLight(tables, with, builtFire: false, band);
-                bestConjured = grade < bestConjured ? grade : bestConjured;
             }
 
-            // Each light lights the square by its own group — the lights carried together with it,
-            // within a square of one another — at the band it is from the square. Two torches across
-            // the field are two single lights, not a pair. A built fire holds its grade further.
-            var best = Setting.Visibility;
-            foreach (var source in sources)
+            int LightsIn(int root)
             {
-                if (RangeBandCalculator.BandForSquares(bands, source.DistanceTo(square)) is not { } band
-                    || (Setting.Walls.Count > 0 && !Sight.Clear(source, square, Setting.IsWall)))
+                var carried = Enumerable.Range(0, sources.Count).Count(i => Root(i) == root);
+                var cast = Enumerable.Range(0, conjured.Count).Where(k => Root(sources.Count + k) == root).Select(k => conjured[k].Grade).DefaultIfEmpty(0).Max();
+                return carried + cast;
+            }
+
+            // Each light lights the square at the band it is from it, by its whole pool's count.
+            // A built fire holds its grade further, and pools with nothing: it needs no help.
+            var best = Setting.Visibility;
+            for (var i = 0; i < nodes.Count; i++)
+            {
+                var from = nodes[i].MinBy(sq => sq.DistanceTo(square));
+                if (RangeBandCalculator.BandForSquares(bands, from.DistanceTo(square)) is not { } band
+                    || (Setting.Walls.Count > 0 && !Sight.Clear(from, square, Setting.IsWall)))
                 {
                     continue;
                 }
 
-                var together = sources.Count(other => other.DistanceTo(source) <= 1);
-                var grade = EnvironmentCalculator.VisibilityFromLight(tables, together, builtFire: false, band);
+                var grade = EnvironmentCalculator.VisibilityFromLight(tables, LightsIn(Root(i)), builtFire: false, band);
                 best = grade < best ? grade : best;
             }
 
-            best = bestConjured < best ? bestConjured : best;
             foreach (var fire in Fires)
             {
                 if (RangeBandCalculator.BandForSquares(bands, fire.DistanceTo(square)) is { } band
