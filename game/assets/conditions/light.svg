@@ -1,0 +1,7 @@
+<!-- Light: a flame - it carries a light. Drawn by the game, in the style of the extension's condition markers:
+     dark with a gold rim for a condition, rust for what the wound tracks have done. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46.0" fill="#1c1f26" stroke="#f2d36b" stroke-width="6" />
+  <path d="M50 16 C53 30 70 40 70 58 C70 72 61 82 50 82 C39 82 30 72 30 59 C30 50 35 43 41 37 C41 46 44 51 48 52 C46 40 44 28 50 16 Z" fill="#f2d36b" />
+  <path d="M50 52 C53 60 60 63 60 70 C60 76 55 80 50 80 C45 80 40 76 40 70 C40 64 46 60 50 52 Z" fill="#f4f1ea" />
+</svg>

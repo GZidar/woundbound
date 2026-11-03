@@ -702,9 +702,9 @@ namespace WoundBoundGame
             NoDepthTest = false,
         };
 
-        private enum Missile { Arrow, Bolt, Stone, Thrown }
+        internal enum Missile { Arrow, Bolt, Stone, Thrown }
 
-        private static Missile MissileOf(AttackProfile with)
+        internal static Missile MissileOf(AttackProfile with)
         {
             var name = $"{with.Name} {with.Weapon?.Name}".ToLowerInvariant();
             return with.IsThrown ? Missile.Thrown
@@ -739,7 +739,7 @@ namespace WoundBoundGame
         /// blue, air pale, earth ochre); otherwise by what it does — harm vermilion-violet, heal
         /// bluish green, buff gold, bane and control purple, motion sky blue, illusion bone.
         /// </summary>
-        private static Color SpellColour(WoundBound.Rules.Models.SpellDefinition spell) =>
+        internal static Color SpellColour(WoundBound.Rules.Models.SpellDefinition spell) =>
             SpellArea.ElementOf(spell) switch
             {
                 Element.Fire => Color.FromHtml("#e69f00"),

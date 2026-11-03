@@ -1,0 +1,9 @@
+<!-- Holding: a closed fist - it has somebody Held. Drawn by the game, in the style of the extension's condition markers:
+     dark with a gold rim for a condition, rust for what the wound tracks have done. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <circle cx="50" cy="50" r="46.0" fill="#1c1f26" stroke="#f2d36b" stroke-width="6" />
+  <rect x="26" y="34" width="46" height="34" rx="12" fill="#f4f1ea" />
+  <path d="M38 36 L38 50 M50 36 L50 50 M62 36 L62 50" stroke="#1c1f26" stroke-width="4" stroke-linecap="round" />
+  <rect x="20" y="52" width="26" height="12" rx="6" fill="#f4f1ea" stroke="#1c1f26" stroke-width="3" />
+  <rect x="38" y="66" width="22" height="16" fill="#f4f1ea" />
+</svg>

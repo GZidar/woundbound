@@ -69,7 +69,7 @@ namespace WoundBoundGame
 
         private Vector2 TokenCentre(Combatant c) =>
             In3D && board3D!.FigureScreenOf(c) is { } shown ? BoardOrigin + shown
-            : tokenAt.TryGetValue(c, out var at) ? at : SquareCentreOf(c);
+            : (tokenAt.TryGetValue(c, out var at) ? at : SquareCentreOf(c)) + NudgeOf(c);
 
         /// <summary>The board in three dimensions, under everything the screen draws; null until built.</summary>
         private Board3D? board3D;
@@ -411,7 +411,10 @@ namespace WoundBoundGame
             ? LargestCell
             : In3D
                 ? Mathf.Clamp(Mathf.RoundToInt(board3D!.ScreenOf(new Vector2(0, 0)).DistanceTo(board3D.ScreenOf(new Vector2(1, 0)))), 12, 96)
-            : Mathf.Min(LargestCell, Mathf.Min((int)BoardArea.X / encounter.Width, (int)BoardArea.Y / encounter.Height));
+            : Mathf.Clamp(Mathf.RoundToInt(FittedCell * flatZoom), FittedCell, Mathf.Max(FittedCell, LargestFlatCell));
+
+        /// <summary>The flat board's square when the whole field fits the board area.</summary>
+        private int FittedCell => Mathf.Min(LargestCell, Mathf.Min((int)BoardArea.X / encounter.Width, (int)BoardArea.Y / encounter.Height));
 
         public override void _Ready()
         {
@@ -430,7 +433,14 @@ namespace WoundBoundGame
                     {
                         "top" => Do(board3D.ToggleTopDown),
                         "turn" => Do(() => board3D.Turn(1)),
-                        "zoom" => Do(() => board3D.Zoom(4)),
+                        "zoom" => Do(() =>
+                        {
+                            board3D.Zoom(4);
+                            if (flatBoard && encounter.Combatants.FirstOrDefault(c => c.Side == Side.Party) is { } first)
+                            {
+                                ZoomFlat(2.4f, SquareCentreOf(first));
+                            }
+                        }),
                         _ => false,
                     };
                 }
@@ -477,7 +487,7 @@ namespace WoundBoundGame
         {
             if (!In3D)
             {
-                return false;
+                return HandleFlatCamera(@event);
             }
 
             switch (@event)
@@ -575,11 +585,23 @@ namespace WoundBoundGame
                 animating = true;
             }
 
+            else
+            {
+                animating |= StepFlat(delta);
+            }
+
             var glide = 1 - Mathf.Exp(-9 * (float)delta);
             foreach (var c in encounter.Combatants)
             {
                 var target = SquareCentreOf(c);
                 var at = tokenAt.TryGetValue(c, out var was) ? was : target;
+                if (!In3D && FlatHeld(c))
+                {
+                    // Something it did is still to be shown: it stays put until then.
+                    tokenAt[c] = at;
+                    continue;
+                }
+
                 var next = at.DistanceTo(target) < 0.5f ? target : at.Lerp(target, glide);
                 animating |= next != target;
                 tokenAt[c] = next;
@@ -981,10 +1003,21 @@ namespace WoundBoundGame
                 }
             }
 
+            if (!In3D)
+            {
+                DrawFlatCrumbs();
+            }
+
             // A Swarm first, beneath: whoever stands in the mass is drawn on top of it.
             foreach (var combatant in encounter.Combatants.OrderBy(c => c.HoldsGround).Where(Shown))
             {
                 DrawToken(combatant, active);
+            }
+
+            if (!In3D)
+            {
+                DrawFlatActs();
+                MaskBoardEdges();
             }
 
             DrawRoster();
@@ -1005,9 +1038,11 @@ namespace WoundBoundGame
 
         /// <summary>
         /// What a creature is marked with, in the order drawn: first what its wound tracks have done
-        /// to it (rust discs), then its conditions in the order they went on, then a mount (gold-rimmed).
+        /// to it (rust discs), then its conditions in the order they went on, then what else the
+        /// fight has put on it — running, holding, shielded, helped, harried, blessed, cursed, off
+        /// its footing, carrying a light — then a mount (all gold-rimmed).
         /// </summary>
-        private static List<string> MarkersOf(Combatant c)
+        private List<string> MarkersOf(Combatant c)
         {
             var markers = new List<string>();
             if (c.BodyStatus == BodyStatus.Dead)
@@ -1034,6 +1069,25 @@ namespace WoundBoundGame
             }
 
             markers.AddRange(c.Conditions.Select(k => k.ToString().ToLowerInvariant()));
+
+            // Then the game's own: what the fight has put on it that the book has no condition for.
+            void Mark(bool on, string key)
+            {
+                if (on)
+                {
+                    markers.Add(key);
+                }
+            }
+
+            Mark(c.IsBroken, "running");
+            Mark(c.Holding is not null, "holding");
+            Mark(c.ShieldBonus > 0, "shield");
+            Mark(c.IsHelped, "helped");
+            Mark(c.IsHarried, "harried");
+            Mark(encounter.SpellsInPlay.Any(e => e.Target == c && e.Type == SpellType.Buff), "blessed");
+            Mark(encounter.SpellsInPlay.Any(e => e.Target == c && e.Type == SpellType.Bane), "cursed");
+            Mark(c.NeedsFooting, "offfooting");
+            Mark(c.CarriedLights > 0, "light");
             if (c.IsRiding)
             {
                 markers.Add("mounted");
@@ -1105,8 +1159,11 @@ namespace WoundBoundGame
             var rect = new Rect2(centre - new Vector2(across, across) / 2, new Vector2(across, across));
             var radius = across * (offMap ? 0.22f : combatant.IsSwarm ? 0.46f : 0.36f);
 
+            // Still to be shown taking the blow that put it down, or making the run that took it off: it stands till then.
+            var stillShowing = !In3D && FlatHeld(combatant);
+
             // Gone from the field altogether.
-            if (combatant.HasFled)
+            if (combatant.HasFled && !stillShowing)
             {
                 return;
             }
@@ -1116,7 +1173,7 @@ namespace WoundBoundGame
                 return; // the figure lies where it fell
             }
 
-            if (combatant.IsOutOfFight && !combatant.IsDefenceless)
+            if (combatant.IsOutOfFight && !combatant.IsDefenceless && !stillShowing)
             {
                 // Left where it fell, so the board remembers the fight.
                 DrawString(font, new Vector2(rect.Position.X, centre.Y + 8), "✕", HorizontalAlignment.Center, CellSize, Mathf.Max(10, CellSize * 2 / 5),
@@ -1181,26 +1238,6 @@ namespace WoundBoundGame
                     CellSize, Mathf.Max(8, CellSize / 4), new Color(1f, 1f, 1f, 0.8f));
             }
 
-            // What's been done to it, across the top of the square.
-            var marks = string.Join(" ", new[]
-            {
-                // Conditions and what the wound tracks have done are markers on the corners now (DrawMarkers).
-                combatant.Holding is not null ? "holding" : null,
-                combatant.IsBroken ? "running" : null,
-                combatant.ShieldBonus > 0 ? "shield" : null,
-                combatant.IsHelped ? "helped" : null,
-                combatant.IsHarried ? "harried" : null,
-                combatant.CarriedLights > 0 ? "light" : null,
-                combatant.NeedsFooting ? "off footing" : null,
-                encounter.SpellsInPlay.Any(e => e.Target == combatant && e.Type == SpellType.Buff) ? "blessed" : null,
-                encounter.SpellsInPlay.Any(e => e.Target == combatant && e.Type == SpellType.Bane) ? "cursed" : null,
-            }.Where(m => m is not null));
-            if (marks.Length > 0)
-            {
-                DrawString(font, new Vector2(rect.Position.X, rect.Position.Y + 13), marks, HorizontalAlignment.Center, across, Mathf.Max(7, CellSize / 6),
-                    new Color(1f, 0.85f, 0.5f));
-            }
-
             // Body bar along the foot of the square.
             var inset = CellSize / 9f;
             var bar = new Rect2(rect.Position.X + inset, rect.End.Y - inset - 2, across - inset * 2, Mathf.Max(2, CellSize / 14));
@@ -1249,9 +1286,15 @@ namespace WoundBoundGame
                 {
                     board3D!.Play(happening);
                 }
+                else
+                {
+                    PlayFlat(happening);
+                }
             };
             rosterAt.Clear();
             tokenAt.Clear();
+            ClearFlat();
+            ResetFlatCamera();
             actedThisRound.Clear();
             rosterRound = 0;
             shown = null;
@@ -1292,7 +1335,7 @@ namespace WoundBoundGame
             {
                 stepPending = true;
                 var waitingOn = encounter;
-                GetTree().CreateTimer(In3D && board3D!.Busy ? 0.1 : demo ? 1.7 : gmToAct ? AdversaryTurnDelay : BotStepDelay).Timeout += () =>
+                GetTree().CreateTimer(BoardBusy ? 0.1 : demo ? 1.7 : gmToAct ? AdversaryTurnDelay : BotStepDelay).Timeout += () =>
                 {
                     stepPending = false;
 
@@ -1303,7 +1346,7 @@ namespace WoundBoundGame
                     }
 
                     // Let the board finish showing what just happened before the next thing does.
-                    if (In3D && board3D!.Busy)
+                    if (BoardBusy)
                     {
                         Refresh();
                         return;
@@ -2114,6 +2157,7 @@ namespace WoundBoundGame
                 }
 
                 tokenAt.Clear();
+                ClearFlat();
                 QueueRedraw();
             };
             botRow.AddChild(flat);
@@ -2296,7 +2340,7 @@ namespace WoundBoundGame
         }
 
         private Rect2 SquareRect(GridPosition square) =>
-            new(BoardOrigin + new Vector2(square.X, square.Y) * CellSize, new Vector2(CellSize, CellSize));
+            new(BoardOrigin + flatPan + new Vector2(square.X, square.Y) * CellSize, new Vector2(CellSize, CellSize));
 
         private GridPosition SquareAt(Vector2 point)
         {
@@ -2305,7 +2349,7 @@ namespace WoundBoundGame
                 return board3D!.SquareAtScreen(point - BoardOrigin);
             }
 
-            var local = (point - BoardOrigin) / CellSize;
+            var local = (point - BoardOrigin - flatPan) / CellSize;
             return new GridPosition(Mathf.FloorToInt(local.X), Mathf.FloorToInt(local.Y));
         }
 
