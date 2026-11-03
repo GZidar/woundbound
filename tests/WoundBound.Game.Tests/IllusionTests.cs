@@ -26,8 +26,8 @@ public class IllusionTests
     private static (Encounter Encounter, Combatant Elthric, Combatant First, Combatant Second) Road(int[] dice, IGmBrain? gm = null, Setting? setting = null)
     {
         var elthric = CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(Data), new GridPosition(2, 4));
-        var first = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "First bandit", new GridPosition(9, 4));
-        var second = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Second bandit", new GridPosition(9, 6));
+        var first = CombatantFactory.FromAdversary(SampleEncounters.CowardlyBandit(SampleEncounters.RoadsideBandit), "First bandit", new GridPosition(9, 4));
+        var second = CombatantFactory.FromAdversary(SampleEncounters.CowardlyBandit(SampleEncounters.RoadsideBandit), "Second bandit", new GridPosition(9, 6));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [elthric, first, second], Data.RangeBands,
             new ScriptedDice(dice), gm, setting: setting, environment: Data.Environment);
         encounter.TryBeginTurn(elthric);
@@ -157,8 +157,8 @@ public class IllusionTests
         // Body is; the unhurt one isn't, however close Cowardice puts it to running.
         var build = SampleEncounters.MirellaVask(Data);
         var mirella = CombatantFactory.FromCharacter(build, new GridPosition(2, 4));
-        var coward = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Coward", new GridPosition(9, 4));
-        var steady = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit with { Features = [new("Not a Fanatic", "")] },
+        var coward = CombatantFactory.FromAdversary(SampleEncounters.CowardlyBandit(SampleEncounters.RoadsideBandit), "Coward", new GridPosition(9, 4));
+        var steady = CombatantFactory.FromAdversary(SampleEncounters.CowardlyBandit(SampleEncounters.RoadsideBandit) with { Features = [new("Not a Fanatic", "")] },
             "Steady", new GridPosition(9, 6));
         Assert.Equal("Not a Fanatic", steady.Morale?.Trait);
         coward.Body = 3;

@@ -40,7 +40,9 @@ public class SecondaryWoundRuleTests
         Assert.Contains(encounter.Log, l => l.Contains("caught mid-motion"));
         Assert.Contains(encounter.Log, l => l.StartsWith("Bandit attacks Salla Rinehart") && l.Contains("Disadvantage") && l.EndsWith("miss."));
         Assert.Equal(salla.BodyMax, salla.Body);
-        Assert.DoesNotContain(drovan, encounter.PartyStillToAct);
+
+        // The Interrupt was Drovan's turn for the round: with it taken, the round is over.
+        Assert.Equal(2, encounter.Round);
     }
 
     [Fact]

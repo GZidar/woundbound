@@ -243,6 +243,16 @@ namespace WoundBoundGame
         /// <summary>Which way it faces: towards the nearest creature of the other side still in the fight.</summary>
         private static float? FacingOf(Combatant c, Encounter fight)
         {
+            // A hold has the two of them face each other.
+            if ((c.Holding ?? c.HeldBy) is { } grappled)
+            {
+                var g = new Vector2(grappled.Position.X - c.Position.X, grappled.Position.Y - c.Position.Y);
+                if (g.LengthSquared() > 1e-4f)
+                {
+                    return Mathf.Atan2(g.X, g.Y);
+                }
+            }
+
             var nearest = fight.Combatants.Where(o => o.Side != c.Side && !o.IsOutOfFight && !o.HasFled)
                 .OrderBy(o => o.DistanceTo(c)).FirstOrDefault();
             if (nearest is null)
@@ -578,8 +588,10 @@ namespace WoundBoundGame
                 body.RotationDegrees = new Vector3(Mathf.Lerp(body.RotationDegrees.X, lie, Holds > 0 && !shownDown ? 1 : ease), Mathf.RadToDeg(facing), 0);
                 var step = Mathf.Sin(stridePhase) * walking;
                 leftHip.RotationDegrees = new Vector3(32 * step, 0, 0);
-                rightHip.RotationDegrees = new Vector3(-32 * step, 0, 0);
-                offArm.RotationDegrees = new Vector3(-22 * step, 0, 0);
+                rightHip.RotationDegrees = new Vector3(-32 * step - Kick, 0, 0);
+                // A hand kept on whoever it holds, for as long as the hold lasts.
+                var holding = creature.Holding is not null && !shownDown ? -70f : 0f;
+                offArm.RotationDegrees = new Vector3(OffSwing + holding - 22 * step, 0, 0);
                 arm.RotationDegrees = new Vector3(Swing + 12 * step, 0, 0);
                 body.Position = Vector3.Up * 0.035f * Mathf.Abs(Mathf.Cos(stridePhase)) * walking;
             }

@@ -80,4 +80,47 @@ public class HappeningTests
         }).Where(x => x is not null).ToList();
         Assert.Equal(["turn", "move", "strike"], order.Take(3));
     }
+
+    [Fact]
+    public void AGrab_IsRaisedAsHandsOnThatTook()
+    {
+        // 5+4 +4 = 13 against the Biter's ST 11: held.
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(5, 4));
+        var fighter = encounter.Active!;
+        var biter = encounter.Combatants.Single(c => c.Name == "Ratkin Biter");
+        fighter.Position = new GridPosition(6, 2);
+        biter.Position = new GridPosition(7, 2);
+        var seen = new List<Happening>();
+        encounter.Happened += seen.Add;
+
+        encounter.TryControl(ControlAction.Grab, biter);
+
+        var grab = Assert.Single(seen.OfType<Handled>());
+        Assert.Equal(ControlAction.Grab, grab.Action);
+        Assert.Same(fighter, grab.Actor);
+        Assert.True(grab.Worked);
+    }
+
+    [Fact]
+    public void AShoveThatTakes_IsFollowedByThePush()
+    {
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(5, 4));
+        var fighter = encounter.Active!;
+        var biter = encounter.Combatants.Single(c => c.Name == "Ratkin Biter");
+        fighter.Position = new GridPosition(6, 2);
+        biter.Position = new GridPosition(7, 2);
+        var seen = new List<Happening>();
+        encounter.Happened += seen.Add;
+
+        encounter.TryControl(ControlAction.Shove, biter);
+
+        // Pushed out of the fighter's own reach, the Biter could be struck as it goes; let it go.
+        Assert.True(encounter.RespondToLeaver(LeaverResponse.LetThemGo));
+
+        var shove = seen.OfType<Handled>().Single();
+        Assert.True(shove.Worked);
+        var push = seen.OfType<Moved>().Single(m => m.Mover == biter);
+        Assert.True(push.Forced);
+        Assert.True(seen.IndexOf(shove) < seen.IndexOf(push));
+    }
 }

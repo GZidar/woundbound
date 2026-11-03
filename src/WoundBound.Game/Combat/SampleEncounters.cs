@@ -336,8 +336,8 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The Quickstart Adventure's Roadside Bandit (Blood and Vintage, "Roadside Ambush"): the
-        /// lantern-bearer at the signpost, and his like. Cowardice — he breaks below half his Body,
-        /// or on seeing one of his side go down.
+        /// lantern-bearer at the signpost, and his like. Without the book's Cowardice here (see
+        /// <see cref="CowardlyBandit"/>).
         /// </summary>
         public static StartingAdversaryInfo RoadsideBandit { get; } = QuickstartBandit("Roadside Bandit", "Rusty Sword", die: "d6", damageModifier: 0);
 
@@ -373,11 +373,20 @@ namespace WoundBound.Game.Combat
             Notes: "Blood and Vintage, Roadside Ambush.",
             Armour: ArmourWeight.Light,
             FortitudeThreshold: 12,
-            Features:
+            // The book gives these bandits Cowardice so the first fight of the Quickstart can't end
+            // in a wipe; the user's call (2026-11-04) is that it's too much of a weakness for a fight
+            // the game uses as its test bed, so here they fight on. CowardlyBandit puts it back.
+            Features: []);
+
+        /// <summary>A Quickstart bandit as the book has him: Cowardice — below half his Body, or seeing one of his side go down, he looks to run.</summary>
+        public static StartingAdversaryInfo CowardlyBandit(StartingAdversaryInfo bandit) => bandit with
+        {
+            Features =
             [
                 new StartingFeatureInfo("Cowardice",
                     "reduced below half its Body pool, or watching another of its side go down, it looks for a chance to break and run rather than fight to the last wound."),
-            ]);
+            ],
+        };
 
         /// <summary>
         /// The Quickstart's signpost ambush for a table of three (Blood and Vintage, "Roadside
@@ -389,6 +398,7 @@ namespace WoundBound.Game.Combat
         /// the Dumb Fighter carries the party's one torch, and everybody else stands in the dark.
         /// The ridge and the trees are broken ground. The opening volley isn't in yet.
         /// </summary>
+        /// <param name="cowardly">The bandits as the book has them, with Cowardice — for testing how foes break and run.</param>
         /// <param name="fourPlayers">
         /// The book's table of four: Joren Blacke joins the party, and the fourth bandit — a second
         /// Roadside Bandit, around the corner — joins the ambush ("If you have four players, then
@@ -396,12 +406,14 @@ namespace WoundBound.Game.Combat
         /// </param>
         /// <param name="setting">Where to stage it: the book's night by default; <see cref="Setting.Daylight"/> stages it with no
         /// lights needed, and the Dumb Fighter's torch stays in his pack.</param>
-        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool fourPlayers = false, Setting? setting = null, bool ambush = false)
+        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool fourPlayers = false, Setting? setting = null, bool ambush = false, bool cowardly = false)
         {
+            var roadside = cowardly ? CowardlyBandit(RoadsideBandit) : RoadsideBandit;
+            var ambusher = cowardly ? CowardlyBandit(BanditAmbusher) : BanditAmbusher;
             setting ??= ambush ? SignpostAmbushNight : SignpostNight;
             var dy = ambush ? 6 : 0;
             var dark = setting.IsUnlit;
-            var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4 + dy));
+            var lanternBearer = CombatantFactory.FromAdversary(roadside, "Lantern-bearer", new GridPosition(6, 4 + dy));
             lanternBearer.StatblockLights = dark ? 1 : 0;
 
             var combatants = new List<Combatant>
@@ -410,14 +422,14 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(1, 3 + dy)),
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(1, 5 + dy)),
                 lanternBearer,
-                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", ambush ? new GridPosition(3, 3) : new GridPosition(7, 1)), ambush),
-                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", ambush ? new GridPosition(3, 16) : new GridPosition(7, 6)), ambush),
+                Lurking(CombatantFactory.FromAdversary(ambusher, "Ambusher on the ridge", ambush ? new GridPosition(3, 3) : new GridPosition(7, 1)), ambush),
+                Lurking(CombatantFactory.FromAdversary(ambusher, "Ambusher in the trees", ambush ? new GridPosition(3, 16) : new GridPosition(7, 6)), ambush),
             };
 
             if (fourPlayers)
             {
                 combatants.Insert(3, CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(2, 4 + dy)));
-                combatants.Add(CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3 + dy)));
+                combatants.Add(CombatantFactory.FromAdversary(roadside, "Bandit round the corner", new GridPosition(11, 3 + dy)));
             }
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,

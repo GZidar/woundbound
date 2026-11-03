@@ -48,6 +48,7 @@ namespace WoundBoundGame
         private static IEnumerable<Combatant> Involved(Happening happening) => happening switch
         {
             Moved m => [m.Mover],
+            Handled h => [h.Actor, h.Target],
             Struck s => [s.Attacker, s.Target],
             SpellWorked w => w.Plan.Targets.Prepend(w.Caster),
             SpellStruck s => [s.Caster, s.Target],
@@ -133,6 +134,7 @@ namespace WoundBoundGame
             Struck s when Seen(s.Attacker, s.Target) => Blow(s),
             SpellWorked w when Seen(w.Plan.Targets.Prepend(w.Caster).ToArray()) => Working(w),
             SpellStruck s when Seen(s.Caster, s.Target) => SpellLands(s),
+            Handled h when Seen(h.Actor, h.Target) => Handling(h),
             TurnBegan => new Act(happening, 0, _ => ClearTrails()),
             _ => null,
         };
@@ -312,6 +314,87 @@ namespace WoundBoundGame
                 else
                 {
                     target.Lean = -6 * Bump(t, impact, impact + 0.3);
+                }
+            });
+        }
+
+        /// <summary>
+        /// Hands on somebody. A Grab lunges with both hands and, if it takes, pulls the target in; a
+        /// Shove thrusts with both (the push itself follows, as a slide); a Trip drops low and sweeps
+        /// a leg through, and the target goes down as it lands. Breaking free is a wrench and a step
+        /// back. A target that stood firm braces; one that dodged sidesteps; one who overbalanced
+        /// goes down when the act ends.
+        /// </summary>
+        private Act Handling(Handled h)
+        {
+            var actor = figures[h.Actor];
+            var target = figures[h.Target];
+            var (forward, side) = Across(actor, target);
+            var impact = 0.38;
+            var flashed = false;
+            return new Act(h, 0.8, t =>
+            {
+                actor.Face = Angle(forward);
+                target.Face = Angle(-forward);
+                var reach = Bump(t, 0.12, 0.7);
+                switch (h.Action)
+                {
+                    case ControlAction.Grab:
+                        actor.Offset = forward * 0.3f * reach;
+                        actor.Swing = -80 * reach;
+                        actor.OffSwing = -80 * reach;
+                        actor.Lean = 12 * reach;
+                        break;
+                    case ControlAction.Shove:
+                        actor.Offset = forward * (0.38f * Bump(t, 0.2, 0.62) - 0.08f * Bump(t, 0, 0.3));
+                        actor.Swing = -85 * Bump(t, 0.1, 0.7);
+                        actor.OffSwing = -85 * Bump(t, 0.1, 0.7);
+                        actor.Lean = -8 * Bump(t, 0, 0.3) + 18 * Bump(t, 0.25, 0.65);
+                        break;
+                    case ControlAction.Trip:
+                        actor.Offset = forward * 0.25f * reach;
+                        actor.Lean = 24 * reach;
+                        actor.Kick = 70 * Bump(t, 0.2, 0.62);
+                        break;
+                    default:
+                        // Breaking free: a twist against the hold, then a step back out of it.
+                        actor.Lean = 16 * Mathf.Sin((float)t * 22) * reach;
+                        actor.OffSwing = -50 * reach;
+                        if (h.Worked)
+                        {
+                            actor.Offset = -forward * 0.25f * Bump(t, 0.45, 0.8);
+                        }
+
+                        break;
+                }
+
+                if (h.Worked && h.Action is not null)
+                {
+                    if (!flashed && t >= impact)
+                    {
+                        flashed = true;
+                        Spark(target.Chest, Color.FromHtml("#f0e442"), 0.22f);
+                    }
+
+                    target.Offset = h.Action switch
+                    {
+                        ControlAction.Grab => -forward * 0.12f * Bump(t, impact, 0.8),
+                        ControlAction.Shove => forward * 0.14f * Bump(t, impact, 0.8),
+                        _ => Vector3.Zero,
+                    };
+                    target.Lean = h.Action == ControlAction.Trip ? -25 * Bump(t, impact, 0.8) : -10 * Bump(t, impact, 0.75);
+                }
+                else if (!h.Worked)
+                {
+                    if (h.Resisted && h.Action is not ControlAction.Trip)
+                    {
+                        // Stood firm: braced against it, leaning in.
+                        target.Lean = 14 * Bump(t, 0.25, 0.8);
+                    }
+                    else if (h.Action is not null)
+                    {
+                        target.Offset = side * 0.32f * Bump(t, 0.2, 0.7);
+                    }
                 }
             });
         }
@@ -783,6 +866,12 @@ namespace WoundBoundGame
 
             public float Swing { get; set; }
 
+            /// <summary>The other arm, raised forward by this many degrees (negative) — a grab, a shove.</summary>
+            public float OffSwing { get; set; }
+
+            /// <summary>A leg swept forward — a trip.</summary>
+            public float Kick { get; set; }
+
             public Vector3 Chest => Anchor + Vector3.Up * 0.68f * BodyScale;
 
             private float BodyScale => body.Scale.Y;
@@ -801,6 +890,8 @@ namespace WoundBoundGame
                 Face = null;
                 Lean = 0;
                 Swing = 0;
+                OffSwing = 0;
+                Kick = 0;
             }
         }
     }

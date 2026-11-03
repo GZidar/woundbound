@@ -2721,6 +2721,7 @@ namespace WoundBound.Game.Combat
                     Write(line + (overbalanced
                         ? $" — {(dodged ? "Riposte" : "critical failure")}! {actor.Name} overbalances and goes down, Prone."
                         : $" — {target.Name} slips past."));
+                    Raise(new Handled(actor, target, action, Worked: false, Critical: false, Resisted: (dodged || stoodFirm) && roll.Success == true, overbalanced));
                     if (overbalanced)
                     {
                         actor.SetCondition(CharacterCondition.Prone, true);
@@ -3539,6 +3540,7 @@ namespace WoundBound.Game.Combat
                 // so a critical that standing firm turned aside is merely a failure.
                 var overbalanced = roll.IsCritical && rolled.Success != true;
                 Write(line + (overbalanced ? $" — critical failure! {actor.Name} overbalances and goes down, Prone." : " — fails."));
+                Raise(new Handled(actor, target, action, Worked: false, Critical: false, Resisted: stoodFirm && rolled.Success == true, overbalanced));
                 if (overbalanced)
                 {
                     actor.SetCondition(CharacterCondition.Prone, true);
@@ -3563,11 +3565,13 @@ namespace WoundBound.Game.Combat
                 case ControlAction.Grab:
                     Write(line + (critical ? " — critical! Held, and Off-guard while the hold lasts." : $" — {target.Name} is Held."));
                     TakeHold(actor, target, offGuard: critical);
+                    Raise(new Handled(actor, target, action, Worked: true, critical, Resisted: false, Overbalanced: false));
                     then();
                     return;
 
                 case ControlAction.Trip:
                     Write(line + (critical ? $" — critical! {target.Name} goes down, and is shoved too." : $" — {target.Name} goes down, Prone."));
+                    Raise(new Handled(actor, target, action, Worked: true, critical, Resisted: false, Overbalanced: false));
                     KnockDown(target, $"{actor.Name}'s Trip");
                     if (critical)
                     {
@@ -3580,6 +3584,7 @@ namespace WoundBound.Game.Combat
 
                 default:
                     Write(line + (critical ? " — critical! A shove that also trips." : " — a shove."));
+                    Raise(new Handled(actor, target, action, Worked: true, critical, Resisted: false, Overbalanced: false));
                     Shove(actor, target, () =>
                     {
                         if (critical && !target.IsOutOfFight)
@@ -3718,6 +3723,8 @@ namespace WoundBound.Game.Combat
                 {
                     Write(line + " — held fast.");
                 }
+
+                Raise(new Handled(breaker, holder, Action: null, final.Success == true, Critical: false, Resisted: stoodFirm && roll.Success == true, Overbalanced: false));
 
                 then();
             }

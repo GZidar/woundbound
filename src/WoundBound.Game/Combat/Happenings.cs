@@ -39,6 +39,15 @@ namespace WoundBound.Game.Combat
     /// </summary>
     public sealed record Moved(Combatant Mover, IReadOnlyList<GridPosition> Path, bool Forced) : Happening;
 
+    /// <summary>
+    /// Hands put on somebody: a Grab, Shove or Trip — or, where <paramref name="Action"/> is null,
+    /// <paramref name="Actor"/> straining to break <paramref name="Target"/>'s hold — and whether it
+    /// worked; whether the target turned it by standing firm or dodging; whether the one who
+    /// lunged overbalanced and went down. A Shove that works is followed by the push itself, a
+    /// <see cref="Moved"/> that's <see cref="Moved.Forced"/>.
+    /// </summary>
+    public sealed record Handled(Combatant Actor, Combatant Target, ControlAction? Action, bool Worked, bool Critical, bool Resisted, bool Overbalanced) : Happening;
+
     /// <summary>Somebody's turn begins — and with it, the routes walked in the turn before are swept away.</summary>
     public sealed record TurnBegan(Combatant Who) : Happening;
 

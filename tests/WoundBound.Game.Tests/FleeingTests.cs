@@ -13,7 +13,7 @@ public class FleeingTests
 {
     private static readonly Game.Data.GameData Data = TestData.Load();
 
-    private static Encounter Signpost(params int[] dice) => SampleEncounters.SignpostAmbush(Data, new ScriptedDice(dice), setting: Setting.Daylight);
+    private static Encounter Signpost(params int[] dice) => SampleEncounters.SignpostAmbush(Data, new ScriptedDice(dice), setting: Setting.Daylight, cowardly: true);
 
     private static Combatant Named(Encounter encounter, string name) => encounter.Combatants.Single(c => c.Name == name);
 
@@ -30,7 +30,7 @@ public class FleeingTests
     public void BreakingPoints_ComeFromTheStatblock()
     {
         Assert.Equal(Morale.NotAFanatic, CombatantFactory.FromAdversary(Data.Adversary("Tollroad Bandit"), "Bandit", default).Morale);
-        Assert.Equal(Morale.Cowardice, CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", default).Morale);
+        Assert.Equal(Morale.Cowardice, CombatantFactory.FromAdversary(SampleEncounters.CowardlyBandit(SampleEncounters.RoadsideBandit), "Bandit", default).Morale);
         Assert.Null(CombatantFactory.FromAdversary(Data.Adversary("Bramble Ratkin"), "Ratkin", default).Morale);
     }
 
@@ -223,7 +223,7 @@ public class FleeingTests
         var reactions = 0;
         foreach (var tactics in PartyTactics.Presets)
         {
-            var report = Simulator.Run(dice => SampleEncounters.SignpostAmbush(Data, dice), () => new TacticalPartyBrain(tactics), fights: 15);
+            var report = Simulator.Run(dice => SampleEncounters.SignpostAmbush(Data, dice, cowardly: true), () => new TacticalPartyBrain(tactics), fights: 15);
             Assert.Equal(15, report.Fights.Count);
             Assert.NotNull(report.ObjectiveRate);
             reactions += report.Fights.Sum(f => f.Tally.LeaverReactions);

@@ -188,6 +188,7 @@ namespace WoundBoundGame
             1 => new UtilityGmBrain(BrainSkill.Balanced, new System.Random(), PickedKnowledge()),
             2 => new UtilityGmBrain(BrainSkill.Poor, new System.Random(), PickedKnowledge()),
             3 => new SimpleGmBrain(),
+            4 => new TrippingGmBrain(),
             _ => new UtilityGmBrain(BrainSkill.Best, new System.Random(), PickedKnowledge()),
         };
 
@@ -541,7 +542,7 @@ namespace WoundBoundGame
 
             if (Value("--gm") is { } gm)
             {
-                gmPicker.Select(gm switch { "balanced" => 1, "poor" => 2, "simple" => 3, _ => 0 });
+                gmPicker.Select(gm switch { "balanced" => 1, "poor" => 2, "simple" => 3, "tripping" => 4, _ => 0 });
             }
 
             if (Value("--knowledge") is { } knows)
@@ -551,7 +552,10 @@ namespace WoundBoundGame
 
             if (demo)
             {
-                tacticPicker.Select(0);
+                // --tactic picks the party's bot by its place in the list, a preset by name.
+                var tactic = Value("--tactic");
+                var preset = PartyTactics.Presets.ToList().FindIndex(p => p.Name.Equals(tactic, System.StringComparison.OrdinalIgnoreCase));
+                tacticPicker.Select(preset >= 0 ? BrainSkill.Levels.Count + preset : 0);
                 botToggle.SetPressedNoSignal(true);
 
                 // Nobody is at the controls: only what a viewer follows stays on the panel.
@@ -2169,6 +2173,7 @@ namespace WoundBoundGame
             gmPicker.AddItem("Balanced — usually the best");
             gmPicker.AddItem("Poor — loose and careless");
             gmPicker.AddItem("Simple — goes for the nearest");
+            gmPicker.AddItem("Tripping — trips first, then strikes");
             gmPicker.ItemSelected += _ => StartEncounter();
             gmRow.AddChild(gmPicker);
 
