@@ -126,11 +126,21 @@ namespace WoundBoundGame
         /// <summary>The GM for a new fight, from the picker: the utility GM at each skill, or the simple placeholder.</summary>
         private IGmBrain PickedGm() => gmPicker.Selected switch
         {
-            1 => new UtilityGmBrain(BrainSkill.Balanced, new System.Random()),
-            2 => new UtilityGmBrain(BrainSkill.Poor, new System.Random()),
+            1 => new UtilityGmBrain(BrainSkill.Balanced, new System.Random(), PickedKnowledge()),
+            2 => new UtilityGmBrain(BrainSkill.Poor, new System.Random(), PickedKnowledge()),
             3 => new SimpleGmBrain(),
-            _ => new UtilityGmBrain(BrainSkill.Best, new System.Random()),
+            _ => new UtilityGmBrain(BrainSkill.Best, new System.Random(), PickedKnowledge()),
         };
+
+        /// <summary>The GM knowledge dial from its picker: with the skill, the sheets, or only what it has seen.</summary>
+        private Knowledge? PickedKnowledge() => knowledgePicker.Selected switch
+        {
+            1 => Knowledge.Sheets,
+            2 => Knowledge.Seen,
+            _ => null,
+        };
+
+        private OptionButton knowledgePicker = null!;
         private OptionButton fightPicker = null!;
         private HFlowContainer chooseRow = null!;
         private Label partyLabel = null!;
@@ -374,6 +384,11 @@ namespace WoundBoundGame
             if (Value("--gm") is { } gm)
             {
                 gmPicker.Select(gm switch { "balanced" => 1, "poor" => 2, "simple" => 3, _ => 0 });
+            }
+
+            if (Value("--knowledge") is { } knows)
+            {
+                knowledgePicker.Select(knows switch { "sheets" => 1, "seen" => 2, _ => 0 });
             }
 
             if (demo)
@@ -1978,6 +1993,20 @@ namespace WoundBoundGame
             gmPicker.AddItem("Simple — goes for the nearest");
             gmPicker.ItemSelected += _ => StartEncounter();
             gmRow.AddChild(gmPicker);
+
+            // The second dial beside how cleverly the GM chooses: how much it knows of the party.
+            var knowsRow = new HBoxContainer();
+            knowsRow.AddThemeConstantOverride("separation", 8);
+            column.AddChild(knowsRow);
+            knowsRow.AddChild(new Label { Text = "GM knows:" });
+            knowledgePicker = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "How much the GM knows of the party. Takes effect from the next fight." };
+            knowledgePicker.FitToLongestItem = false;
+            knowledgePicker.ClipText = true;
+            knowledgePicker.AddItem("With its skill — sheets at Best, what it has seen below");
+            knowledgePicker.AddItem("The sheets — every Threshold, every caster");
+            knowledgePicker.AddItem("What it has seen — rolls, casts, the look of them");
+            knowledgePicker.ItemSelected += _ => StartEncounter();
+            knowsRow.AddChild(knowledgePicker);
 
             reactionBox = new PanelContainer { Visible = false };
             reactionBox.AddThemeStyleboxOverride("panel", new StyleBoxFlat

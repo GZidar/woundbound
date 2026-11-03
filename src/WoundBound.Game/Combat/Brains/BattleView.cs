@@ -315,6 +315,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>The cover <paramref name="target"/> has against an attack from <paramref name="from"/>.</summary>
         public Rules.Enums.Cover CoverFrom(GridPosition from, Combatant target, GridPosition? targetAt = null) => encounter.CoverFrom(from, target, targetAt);
 
+        /// <summary>What the rolls so far have shown of <paramref name="creature"/>'s sheet <paramref name="threshold"/>, or null.</summary>
+        public (int Min, int Max)? SeenBounds(Combatant creature, Rules.Enums.ThresholdType threshold) => encounter.SeenBounds(creature, threshold);
+
         /// <summary>How far Long reaches, in squares — as far as anything can be targeted.</summary>
         public int LongRangeSquares => encounter.LongRangeSquares;
 

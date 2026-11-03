@@ -265,7 +265,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var dodge = target.DodgeThreshold + View.VisibilityDodgeModifier(target);
+                var dodge = assess.Dodge(target) + View.VisibilityDodgeModifier(target);
                 var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
                 var odds = Odds.Of(plan.CastBonus, dodge + answer, target.IsDefenceless,
                     actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried);
@@ -528,9 +528,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var unlowered = threshold switch
             {
-                ThresholdType.Dodge => target.DodgeThreshold,
-                ThresholdType.Stability => target.StabilityThreshold,
-                _ => target.ResolveThreshold ?? 99,
+                ThresholdType.Dodge => assess.Dodge(target),
+                ThresholdType.Stability => assess.Stability(target),
+                _ => assess.Resolve(target) ?? 99,
             };
             var holds = Odds.Of(plan.CastBonus, unlowered + (target.Stamina > 0 ? ThresholdModifierCalculator.ReactionBonus : 0)).Success;
             var everyRound = BaneWorth(actor, target, threshold, cast.Spell.SpellTier, wholeRound: true);
@@ -601,7 +601,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                             continue;
                         }
 
-                        var dodge = target.DodgeThreshold + View.VisibilityDodgeModifier(target);
+                        var dodge = assess.Dodge(target) + View.VisibilityDodgeModifier(target);
                         var now = assess.Blow(attacker, with, target, with.DamageDieSides, dodge);
                         var then = assess.Blow(attacker, with, target, with.DamageDieSides, dodge - amount);
                         worth += (then.ExpectedDealt - now.ExpectedDealt) * assess.PerWound(target)
@@ -646,7 +646,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private double ControlWorth(Combatant actor, ControlEffect effect, CastPlan plan)
         {
             var target = plan.Targets.FirstOrDefault();
-            if (target is null || target.IsBroken || target.ResolveThreshold is not { } resolve || target.IsMinion)
+            if (target is null || target.IsBroken || assess.Resolve(target) is not { } resolve || target.IsMinion)
             {
                 return 0;
             }
@@ -698,18 +698,18 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// reach, and whatever it is driven into.
         /// </summary>
         /// <summary>The chance a Bind takes: the cast against Stability, which the target may raise by standing firm.</summary>
-        private static double BindChance(CastPlan plan)
+        private double BindChance(CastPlan plan)
         {
             var target = plan.Targets[0];
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
-            return Odds.Of(plan.CastBonus, target.StabilityThreshold + answer).Success;
+            return Odds.Of(plan.CastBonus, assess.Stability(target) + answer).Success;
         }
 
         private double ShiftWorth(Combatant actor, CastPlan plan)
         {
             var target = plan.Targets[0];
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
-            var chance = Odds.Of(plan.CastBonus, target.StabilityThreshold + answer, disadvantage: target.IsUnshakable || target.IsSolo).Success;
+            var chance = Odds.Of(plan.CastBonus, assess.Stability(target) + answer, disadvantage: target.IsUnshakable || target.IsSolo).Success;
             var engaged = View.EnemiesOf(target).Count(a => a.DistanceTo(target) <= target.Reach);
             var separation = engaged > 0 ? 0.6 * assess.Threat(target) * assess.PerWound(actor) : 0;
 

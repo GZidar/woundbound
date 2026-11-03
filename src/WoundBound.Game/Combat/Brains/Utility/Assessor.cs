@@ -35,6 +35,23 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public static IReadOnlyList<BrainSkill> Levels { get; } = [Best, Balanced, Poor];
     }
 
+    /// <summary>
+    /// How much a brain knows of the other side (the GM knowledge dial — the user's direction,
+    /// 2026-11-02: the GM may cheat on knowledge, never on dice, and how much it knows scales with
+    /// the challenge).
+    /// </summary>
+    public enum Knowledge
+    {
+        /// <summary>
+        /// Only what the fight has shown: each Threshold guessed and narrowed by the rolls made
+        /// against it, and a caster known once they cast.
+        /// </summary>
+        Seen,
+
+        /// <summary>The character sheets: every Threshold true, and who can cast before they do.</summary>
+        Sheets,
+    }
+
     /// <summary>The kinds of play past a plain blow, move or spell, each of which a brain can be told to leave alone.</summary>
     public enum Trick
     {
@@ -76,10 +93,108 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private readonly Dictionary<Combatant, double> support = new();
         private readonly Dictionary<Combatant, double> lasts = new();
 
-        public Assessor(BattleView view)
+        public Assessor(BattleView view, Knowledge knows = Knowledge.Sheets, Side? side = null)
         {
             this.view = view;
+            Knows = knows;
+            this.side = side;
         }
+
+        private readonly Side? side;
+
+        /// <summary>
+        /// What this brain knows of the other side (the GM knowledge dial, 2026-11-02): their
+        /// sheets, or only what it has seen in the fight. A brain with no side named reads every
+        /// Threshold true and counts a caster once they've shown themselves, as brains always have.
+        /// </summary>
+        public Knowledge Knows { get; }
+
+        /// <summary>Whether this brain reads <paramref name="c"/>'s sheet — its own side's, or anybody's at <see cref="Knowledge.Sheets"/>.</summary>
+        private bool Reads(Combatant c) => side is null || Knows == Knowledge.Sheets || c.Side == side;
+
+        /// <summary>
+        /// <paramref name="c"/>'s <paramref name="threshold"/> as this brain believes it, given
+        /// <paramref name="actual"/> — what it faces now, everything declared on top of the sheet
+        /// included. Where it hasn't read the sheet, the sheet value is a guess (11 + Tier + a
+        /// middling +1) held inside what the rolls so far have shown.
+        /// </summary>
+        public int Believed(Combatant c, ThresholdType threshold, int actual)
+        {
+            if (Reads(c) || Encounter.SheetThreshold(c, threshold) is not { } sheet)
+            {
+                return actual;
+            }
+
+            return actual + Guess(c, threshold) - sheet;
+        }
+
+        /// <summary>What this brain takes <paramref name="c"/>'s sheet <paramref name="threshold"/> to be, from what it has seen.</summary>
+        public int Guess(Combatant c, ThresholdType threshold)
+        {
+            // What the kit says (the user, 2026-11-03): heavy armour is a fighter's, and a fighter's
+            // Strength; a body in little or none is likelier quick, or a caster's sharp mind.
+            var guess = 12 + (int)c.Tier + threshold switch
+            {
+                ThresholdType.Stability => c.Armour switch { ArmourWeight.Heavy => 1, ArmourWeight.None => -1, _ => 0 },
+                ThresholdType.Resolve => Softness(c) >= 0.75 ? 1 : c.Armour == ArmourWeight.Heavy ? -1 : 0,
+                ThresholdType.Dodge => c.Armour == ArmourWeight.Light ? 1 : 0,
+                _ => 0,
+            };
+            if (view.SeenBounds(c, threshold) is var (min, max))
+            {
+                guess = min > max ? min : Math.Clamp(guess, min, max);
+            }
+
+            return guess;
+        }
+
+        public int Dodge(Combatant c) => Believed(c, ThresholdType.Dodge, c.DodgeThreshold);
+
+        public int Stability(Combatant c) => Believed(c, ThresholdType.Stability, c.StabilityThreshold);
+
+        public int? Resolve(Combatant c) => c.ResolveThreshold is { } resolve ? Believed(c, ThresholdType.Resolve, resolve) : null;
+
+        public int? Fortitude(Combatant c) => c.FortitudeThreshold is { } fortitude ? Believed(c, ThresholdType.Fortitude, fortitude) : null;
+
+        /// <summary>What an attack <paramref name="plan"/> on <paramref name="target"/> is believed to roll against.</summary>
+        public int PlanThreshold(Combatant target, AttackPlan plan) =>
+            Believed(target, plan.Profile?.Against ?? ThresholdType.Dodge, plan.DodgeThreshold);
+
+        /// <summary>
+        /// Whether this brain counts <paramref name="c"/> a caster: once they've shown it by casting
+        /// or been sensed — or, reading the other side's sheets, before they've cast at all.
+        /// </summary>
+        public bool KnownCaster(Combatant c) =>
+            c.ShowsAsCaster || (side is not null && Knows == Knowledge.Sheets && c.Side != side && c.Spells.Count > 0);
+
+        /// <summary>
+        /// How soft <paramref name="c"/> looks to somebody who hasn't read its sheet, 0 to 1: by the
+        /// armour it wears, less for a shield or a second blade. Heavy armour is almost certainly a
+        /// fighter; little or none, and few weapons, is the look of a caster — though not always.
+        /// </summary>
+        public static double Softness(Combatant c)
+        {
+            var soft = c.Armour switch
+            {
+                ArmourWeight.None => 1.0,
+                ArmourWeight.Light => 0.75,
+                ArmourWeight.Medium => 0.4,
+                _ => 0.1,
+            };
+            soft -= c.InHandShield is not null ? 0.2 : 0;
+            soft -= c.OffHandWeapon is not null ? 0.15 : 0;
+            return Math.Clamp(soft, 0, 1);
+        }
+
+        /// <summary>
+        /// How likely this brain reckons <paramref name="c"/> a caster who hasn't yet shown it — 0 for
+        /// one it knows either way (its own side, a read sheet, a cast seen), otherwise by the look of them.
+        /// </summary>
+        public double SuspectedCaster(Combatant c) =>
+            Reads(c) || c.ShowsAsCaster ? 0 : 0.6 * Softness(c);
+
+        /// <summary>Whether this brain knows what spells <paramref name="c"/> could cast at it.</summary>
+        public bool KnowsSpells(Combatant c) => Reads(c) || c.ShowsAsCaster;
 
         public BattleView View => view;
 
@@ -126,9 +241,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private double RawValue(Combatant c)
         {
             var value = 0.5 + (Threat(c) + Support(c)) * Lasts(c);
-            if (c.ShowsAsCaster)
+            if (KnownCaster(c))
             {
                 value *= 1 + (c.HasBeenDropped ? 0.5 : 1.5) * CastingLeft(c) * Spread(c);
+            }
+            else if (SuspectedCaster(c) is var suspected and > 0)
+            {
+                // Not known yet, only guessed from the look of them: worth a share of a caster's
+                // premium, taken at a middling pool and reach since neither can be seen.
+                value *= 1 + 1.5 * 0.5 * suspected;
             }
 
             return value;
@@ -183,7 +304,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var output = view.EnemiesOf(c).Where(e => !e.IsPhantom && !e.IsBroken)
                 .Sum(e => e.Attacks.Where(a => a.AreaSquares is null)
-                    .Select(a => Blow(e, a, c, a.DamageDieSides, c.DodgeThreshold).ExpectedDealt)
+                    .Select(a => Blow(e, a, c, a.DamageDieSides, Dodge(c)).ExpectedDealt)
                     .DefaultIfEmpty(0).Max());
             var rounds = Math.Clamp(c.Body / Math.Max(1, output), Horizon, MaxHorizon);
             lasts[c] = rounds;
@@ -257,7 +378,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             var best = view.EnemiesOf(c)
-                .SelectMany(e => c.Attacks.Select(a => Blow(c, a, e, a.DamageDieSides, e.DodgeThreshold).ExpectedDealt).Append(SpellHarm(c, e)))
+                .SelectMany(e => c.Attacks.Select(a => Blow(c, a, e, a.DamageDieSides, Dodge(e)).ExpectedDealt).Append(SpellHarm(c, e)))
                 .DefaultIfEmpty(0)
                 .Max();
 
@@ -265,7 +386,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // round it can, and an adversary's only when the GM spends an Opportunity on it — about half the time.
             if (c.OffHandAttack is { } offHand && (c.Side == Side.Party ? c.Stamina >= 2 : c.OpportunityBonus.Kind == OpportunityBonusKind.OffHand))
             {
-                var second = view.EnemiesOf(c).Select(e => Blow(c, offHand, e, offHand.DamageDieSides, e.DodgeThreshold).ExpectedDealt).DefaultIfEmpty(0).Max();
+                var second = view.EnemiesOf(c).Select(e => Blow(c, offHand, e, offHand.DamageDieSides, Dodge(e)).ExpectedDealt).DefaultIfEmpty(0).Max();
                 best += (c.Side == Side.Party ? 1 : 0.5) * second;
             }
 
@@ -278,7 +399,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// on average — the chance the cast lands, times its dice after armour where it's Body. A
         /// caster's threat is its spells, however feeble the knife in its other hand.
         /// </summary>
-        private static double SpellHarm(Combatant c, Combatant e) => SpellHarm(c, e, e.DodgeThreshold, Cover.None, AreaCatch);
+        private double SpellHarm(Combatant c, Combatant e) => KnowsSpells(c) ? SpellHarm(c, e, Dodge(e), Cover.None, AreaCatch) : 0;
 
         /// <summary>
         /// As <see cref="SpellHarm(Combatant, Combatant)"/>, on <paramref name="e"/> alone at
@@ -330,7 +451,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             // A caster shows what they are by casting; until then they're reckoned like anybody else.
-            if (!c.ShowsAsCaster)
+            if (!KnownCaster(c))
             {
                 support[c] = 0;
                 return 0;
@@ -402,9 +523,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// its dice Direct on its track. Mind or Soul wounds count a little under Body's. Nothing for a
         /// target with no living body.
         /// </summary>
-        private static double PoisonDealt(AttackProfile attack, Combatant target, int dodge, int absorbs, bool advantage, bool disadvantage)
+        private double PoisonDealt(AttackProfile attack, Combatant target, int dodge, int absorbs, bool advantage, bool disadvantage)
         {
-            if (attack.Poison is not { } poison || target.FortitudeThreshold is not { } fortitude)
+            if (attack.Poison is not { } poison || Fortitude(target) is not { } fortitude)
             {
                 return 0;
             }
@@ -488,7 +609,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var blow = Blow(attacker, attack, target, plan.DamageDieSides, plan.DodgeThreshold,
+                var blow = Blow(attacker, attack, target, plan.DamageDieSides, PlanThreshold(target, plan),
                     advantage || view.PackMateOf(attacker, target) is not null, precise: precise, extraDamage: extraDamage);
                 var worth = (attack.DealsNoDamage ? 0 : Worth(blow, target))
                             + (attack.Imposes is { } bound ? blow.Hit * BindWorth(attacker, target, bound) : 0);
@@ -555,12 +676,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         var shot = view.PlanAttackWith(enemy, attack, enemy.Position, creature, square);
                         if (shot.CanAttack)
                         {
-                            (dodge, die) = (shot.DodgeThreshold, shot.DamageDieSides);
+                            (dodge, die) = (PlanThreshold(creature, shot), shot.DamageDieSides);
                         }
                     }
                     else if (creature.DistanceFrom(square, enemy) <= attack.Reach + stride)
                     {
-                        (dodge, die) = (creature.DodgeThreshold + view.VisibilityDodgeModifier(creature, square), attack.DamageDieSides);
+                        (dodge, die) = (Dodge(creature) + view.VisibilityDodgeModifier(creature, square), attack.DamageDieSides);
                     }
 
                     if (dodge is { } dt)
@@ -571,10 +692,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
                 // A Harm spell from where it stands: a Ray is stopped by full cover and has partial to
                 // beat; a Volume flows round both (Core Rules §9, "Cover").
-                if (enemy.Spells.Count > 0 && enemy.DistanceTo(square) <= view.LongRangeSquares && view.LineOpen(enemy.Position, square))
+                if (enemy.Spells.Count > 0 && KnowsSpells(enemy) && enemy.DistanceTo(square) <= view.LongRangeSquares && view.LineOpen(enemy.Position, square))
                 {
                     var cover = view.CoverFrom(enemy.Position, creature, square);
-                    var dodge = creature.DodgeThreshold + view.VisibilityDodgeModifier(creature, square) + extraDodge;
+                    var dodge = Dodge(creature) + view.VisibilityDodgeModifier(creature, square) + extraDodge;
                     best = Math.Max(best, SpellHarm(enemy, creature, dodge, cover));
                 }
 
@@ -620,7 +741,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var blow = Blow(enemy, plan.Profile ?? enemy.Attack, mover, plan.DamageDieSides, plan.DodgeThreshold,
+                var blow = Blow(enemy, plan.Profile ?? enemy.Attack, mover, plan.DamageDieSides, PlanThreshold(mover, plan),
                     disadvantage: enemy == harried, woundsAlready: (int)Math.Round(dealt));
                 if (!WouldStrikeAtLeaver(enemy, mover, blow))
                 {
@@ -658,7 +779,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public double ControlChance(Combatant actor, Combatant target, bool againstDodgeToo = false, bool topples = false)
         {
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
-            var threshold = againstDodgeToo ? Math.Max(target.DodgeThreshold, target.StabilityThreshold) : target.StabilityThreshold;
+            var threshold = againstDodgeToo ? Math.Max(Dodge(target), Stability(target)) : Stability(target);
             return Odds.Of(actor.UnarmedAttackModifier, threshold + answer, actor.IsHelped,
                 actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried || (topples && target.IsUnshakable) || target.IsSolo).Success;
         }
@@ -672,7 +793,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1 ? ThresholdModifierCalculator.ReactionBonus : 0;
             var plan = view.PlanAttackFrom(actor, with, from, target);
-            var dodge = plan.CanAttack ? plan.DodgeThreshold : target.DodgeThreshold;
+            var dodge = plan.CanAttack ? PlanThreshold(target, plan) : Dodge(target);
             return Odds.Of(with.AttackModifier, Math.Max(dodge, threshold + answer), actor.IsHelped,
                 actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried).Success;
         }
@@ -681,10 +802,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public double ShieldBreakChance(Combatant actor, AttackProfile with, Combatant target, GridPosition from)
         {
             var plan = view.PlanAttackFrom(actor, with, from, target);
-            var dodge = plan.CanAttack ? plan.DodgeThreshold : target.DodgeThreshold;
+            var dodge = plan.CanAttack ? PlanThreshold(target, plan) : Dodge(target);
             var disadvantage = actor.IsStandingGround || actor.IsOffGuard || actor.IsHarried;
-            var reachesBare = Odds.Of(with.AttackModifier, Math.Max(dodge - target.ShieldBonus, target.StabilityThreshold), actor.IsHelped, disadvantage).Success;
-            var hits = Odds.Of(with.AttackModifier, Math.Max(dodge, target.StabilityThreshold), actor.IsHelped, disadvantage).Success;
+            var reachesBare = Odds.Of(with.AttackModifier, Math.Max(dodge - target.ShieldBonus, Stability(target)), actor.IsHelped, disadvantage).Success;
+            var hits = Odds.Of(with.AttackModifier, Math.Max(dodge, Stability(target)), actor.IsHelped, disadvantage).Success;
             return Math.Max(0, reachesBare - hits);
         }
 

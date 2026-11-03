@@ -76,6 +76,7 @@ namespace WoundBound.Game.Combat
                 void Resolve(bool braced)
                 {
                     var final = braced ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                    Witness(target, ThresholdType.Resolve, final);
                     var line = $"{spell.Name} at {target.Name}: {DescribeRoll(final)} vs RT {final.Threshold}" + (braced ? " (+2 steeling themselves)" : string.Empty);
                     if (final.Success != true)
                     {
@@ -162,6 +163,7 @@ namespace WoundBound.Game.Combat
                 void Resolve(bool braced)
                 {
                     var final = braced ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                    Witness(target, ThresholdType.Resolve, final);
                     var line = $"{hold.Spell.Name} rechecked against {target.Name}: {DescribeRoll(final)} vs RT {final.Threshold}";
                     if (final.Success == true)
                     {

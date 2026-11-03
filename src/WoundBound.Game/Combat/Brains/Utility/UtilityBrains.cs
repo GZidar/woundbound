@@ -12,17 +12,27 @@ namespace WoundBound.Game.Combat.Brains.Utility
     {
         private readonly Random random;
 
-        public UtilityGmBrain(BrainSkill? skill = null, Random? random = null)
+        public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null)
         {
             Skill = skill ?? BrainSkill.Best;
             this.random = random ?? new Random(1);
+            Knowledge = knowledge ?? KnowledgeFor(Skill);
         }
 
         public BrainSkill Skill { get; }
 
+        /// <summary>What it knows of the party: the sheets at Best, what it has seen below that.</summary>
+        public Knowledge Knowledge { get; }
+
+        /// <summary>The knowledge that goes with a skill when none is named: the challenge scales both together.</summary>
+        public static Knowledge KnowledgeFor(BrainSkill skill) => skill.Name == BrainSkill.Best.Name ? Knowledge.Sheets : Knowledge.Seen;
+
+        /// <summary>An assessor that sees the party as this GM does.</summary>
+        private Assessor Assess(BattleView view) => new(view, Knowledge, Side.Adversaries);
+
         private TurnPlanner Planner(BattleView view, out Assessor assess)
         {
-            assess = new Assessor(view);
+            assess = Assess(view);
             return new TurnPlanner(assess, Skill);
         }
 
@@ -178,11 +188,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
                 case OpportunityBonusKind.OffHand when turn.HasAttacked && actor.AttacksThisRound > 0 && actor.OffHandAttack is { } offHand:
                 {
-                    var assess = new Assessor(view);
+                    var assess = Assess(view);
                     var best = view.EnemiesOf(actor).Where(e => !e.IsOutOfFight && !e.IsPhantom)
                         .Select(e => (Who: e, Plan: view.PlanAttackWith(actor, offHand, actor.Position, e)))
                         .Where(x => x.Plan.CanAttack)
-                        .Select(x => (x.Who, Worth: assess.Worth(assess.Blow(actor, offHand, x.Who, x.Plan.DamageDieSides, x.Plan.DodgeThreshold), x.Who)))
+                        .Select(x => (x.Who, Worth: assess.Worth(assess.Blow(actor, offHand, x.Who, x.Plan.DamageDieSides, assess.PlanThreshold(x.Who, x.Plan)), x.Who)))
                         .OrderByDescending(x => x.Worth).FirstOrDefault();
                     return best.Who is not null && best.Worth >= Math.Max(price, 0.3) ? new GmStep.OffHand(best.Who) : null;
                 }
@@ -207,7 +217,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         /// <summary>Strikes at a leaver where the blow is worth the Stamina — and never while running.</summary>
         public override bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) =>
-            !adversary.IsBroken && CanSpare(adversary) && new Assessor(view).BestAttack(adversary, adversary.Position, leaver).Worth >= 0.4;
+            !adversary.IsBroken && CanSpare(adversary) && Assess(view).BestAttack(adversary, adversary.Position, leaver).Worth >= 0.4;
 
         public override bool PanicDodges(BattleView view, PendingReaction reaction) =>
             (CanSpare(reaction.Defender) && WorthAvoiding(view, reaction)) || SavesItself(reaction.Defender, reaction);
@@ -491,7 +501,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var best = view.EnemiesOf(character)
                 .Select(e => (Who: e, Plan: view.PlanAttackWith(character, offHand, character.Position, e)))
                 .Where(x => x.Plan.CanAttack && !x.Who.IsOutOfFight)
-                .Select(x => (x.Who, Worth: assess.Worth(assess.Blow(character, offHand, x.Who, x.Plan.DamageDieSides, x.Plan.DodgeThreshold,
+                .Select(x => (x.Who, Worth: assess.Worth(assess.Blow(character, offHand, x.Who, x.Plan.DamageDieSides, assess.PlanThreshold(x.Who, x.Plan),
                     view.PackMateOf(character, x.Who) is not null), x.Who)))
                 .OrderByDescending(x => x.Worth)
                 .FirstOrDefault();

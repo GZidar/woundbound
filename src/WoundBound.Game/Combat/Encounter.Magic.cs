@@ -731,6 +731,7 @@ namespace WoundBound.Game.Combat
                 void Land(int boost, string? boostedBy)
                 {
                     var final = boost > 0 ? Reread(roll, threshold + boost) : roll;
+                    Witness(target, ThresholdType.Dodge, final);
                     var line = $"{spell.Name} at {target.Name}: {DescribeRoll(final)} vs DT {final.Threshold}" + (boost > 0 ? $" (+{boost} {boostedBy})" : string.Empty);
                     if (final.Success != true)
                     {
@@ -1056,6 +1057,7 @@ namespace WoundBound.Game.Combat
                 void Resolve(bool stoodFirm)
                 {
                     var final = stoodFirm ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                    Witness(target, ThresholdType.Stability, final);
                     var line = $"{spell.Name} at {target.Name}: {DescribeRoll(final)} vs ST {final.Threshold}" + (stoodFirm ? " (+2 standing firm)" : string.Empty);
                     if (final.Success != true)
                     {
@@ -1173,6 +1175,7 @@ namespace WoundBound.Game.Combat
             void Resolve(bool boosted)
             {
                 var final = boosted ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                Witness(target, checks, final);
                 var label = checks switch { ThresholdType.Dodge => "DT", ThresholdType.Stability => "ST", _ => "RT" };
                 if (final.Success == true)
                 {

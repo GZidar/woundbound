@@ -88,8 +88,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return 0;
             }
 
-            var harm = foe.Attacks.Select(a => assess.Blow(foe, a, victim, a.DamageDieSides, victim.DodgeThreshold)).MaxBy(b => b.ExpectedDealt);
-            var harmDis = foe.Attacks.Select(a => assess.Blow(foe, a, victim, a.DamageDieSides, victim.DodgeThreshold, disadvantage: true)).Max(b => b.ExpectedDealt);
+            var harm = foe.Attacks.Select(a => assess.Blow(foe, a, victim, a.DamageDieSides, assess.Dodge(victim))).MaxBy(b => b.ExpectedDealt);
+            var harmDis = foe.Attacks.Select(a => assess.Blow(foe, a, victim, a.DamageDieSides, assess.Dodge(victim), disadvantage: true)).Max(b => b.ExpectedDealt);
             var perWound = assess.PerWound(victim);
             var whole = Math.Max(harm.ExpectedDealt, assess.Threat(foe)) * perWound;
 
@@ -112,7 +112,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.Control => (assess.ControlChance(actor, foe), 0.0),
                 OptionKind.Cast => (0.6, 0.0),
                 _ => assess.BestAttack(actor, from, foe).With is { } with
-                    ? assess.Blow(actor, with, foe, with.DamageDieSides, foe.DodgeThreshold) is var b ? (b.Hit, b.Kill) : (0, 0)
+                    ? assess.Blow(actor, with, foe, with.DamageDieSides, assess.Dodge(foe)) is var b ? (b.Hit, b.Kill) : (0, 0)
                     : (0, 0),
             };
 
@@ -348,7 +348,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 double worth = 0;
                 foreach (var victim in caught)
                 {
-                    var blow = assess.Blow(actor, line, victim, line.DamageDieSides, victim.DodgeThreshold + View.VisibilityDodgeModifier(victim, seer: actor));
+                    var blow = assess.Blow(actor, line, victim, line.DamageDieSides, assess.Dodge(victim) + View.VisibilityDodgeModifier(victim, seer: actor));
                     var value = blow.ExpectedDealt * assess.PerWound(victim) + 0.3 * blow.Kill * assess.Value(victim);
                     worth += victim.Side == actor.Side ? -1.5 * value : value;
                 }
@@ -366,6 +366,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// (GM Reference §9, "On Opportunity"). Nothing, when the bank is full and it would be lost.
         /// </summary>
         public const double BonusPrice = 1.0;
+
+        /// <summary>What a cowardly creature adds to a blow at somebody who looks wholly soft, in wounds' worth.</summary>
+        public const double CowardsPick = 0.6;
 
         /// <summary>
         /// What the off-hand strike an Attack action allows is worth on top of it (Core Rules §9, "Two
@@ -392,7 +395,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var best = View.EnemiesOf(actor).Where(e => !e.IsOutOfFight)
                 .Select(e => (Who: e, Plan: View.PlanAttackWith(actor, offHand, at, e)))
                 .Where(x => x.Plan.CanAttack)
-                .Select(x => assess.Worth(assess.Blow(actor, offHand, x.Who, x.Plan.DamageDieSides, x.Plan.DodgeThreshold), x.Who))
+                .Select(x => assess.Worth(assess.Blow(actor, offHand, x.Who, x.Plan.DamageDieSides, assess.PlanThreshold(x.Who, x.Plan)), x.Who))
                 .DefaultIfEmpty(0).Max();
             return Math.Max(0, best - price);
         }
@@ -454,6 +457,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     ? actor.Role == AdversaryRole.Skirmisher ? 0.3 : 0
                     : actor.Role == AdversaryRole.Brute ? 0.2 : 0;
                 worth += OffHandFollowUp(actor, at, bonusAvailable, bankFull);
+
+                // A coward picks on whoever looks weakest (the user, 2026-11-03), caster or not.
+                worth += actor.Morale == Morale.Cowardice ? CowardsPick * Assessor.Softness(target) : 0;
                 yield return new Option(OptionKind.Attack, worth, $"{with.Name} at {target.Name}", Target: target, With: with, WithBonus: advantage);
 
                 // A Cleave the Opportunity pays for (GM Reference §9): two characters within reach of the same blade.
@@ -526,12 +532,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     }
                 }
 
-                var takes = assess.ManoeuvreChance(actor, with, target, at, target.StabilityThreshold);
+                var takes = assess.ManoeuvreChance(actor, with, target, at, assess.Stability(target));
                 foreach (var (kind, gain) in new[]
                 {
                     (WeaponManoeuvre.Disarm, takes * DisarmWorth(actor, target, stillToAct)),
                     (WeaponManoeuvre.Sunder, SunderWorth(actor, with, target, at, takes)),
-                    (WeaponManoeuvre.Ring, assess.ManoeuvreChance(actor, with, target, at, target.ResolveThreshold ?? 99) * RingWorth(target, stillToAct)),
+                    (WeaponManoeuvre.Ring, assess.ManoeuvreChance(actor, with, target, at, assess.Resolve(target) ?? 99) * RingWorth(target, stillToAct)),
                 })
                 {
                     if (!permitted.Contains(kind) || gain <= 0)
@@ -561,7 +567,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         continue;
                     }
 
-                    var worth = assess.Worth(assess.Blow(actor, thrown, target, plan.DamageDieSides, plan.DodgeThreshold), target) - price;
+                    var worth = assess.Worth(assess.Blow(actor, thrown, target, plan.DamageDieSides, assess.PlanThreshold(target, plan)), target) - price;
                     yield return new Option(OptionKind.Throw, worth, $"throw the {thrown.Name} at {target.Name}", Target: target);
                 }
             }
@@ -598,7 +604,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         continue;
                     }
 
-                    var blow = assess.Blow(actor, line, steed, plan.DamageDieSides, plan.DodgeThreshold);
+                    var blow = assess.Blow(actor, line, steed, plan.DamageDieSides, assess.PlanThreshold(steed, plan));
                     var unhorsed = steed.Rider is { IsRiding: true } rider ? 0.4 * assess.Value(rider) : 0.2;
                     yield return new Option(OptionKind.Attack, blow.ExpectedDealt * 0.2 + blow.Kill * unhorsed,
                         $"{line.Name} at {steed.Name}", Target: steed, With: line);
@@ -632,7 +638,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             if (actor.HeldBy is { } holder && at == actor.Position && (!checkRules || BattleView.BreakFreeRefusal(actor) is null))
             {
-                var chance = Odds.Of(actor.UnarmedAttackModifier, holder.StabilityThreshold).Success;
+                var chance = Odds.Of(actor.UnarmedAttackModifier, assess.Stability(holder)).Success;
                 yield return new Option(OptionKind.BreakFree, chance * (actor.IsBroken ? assess.Value(actor) : 0.6), $"break {holder.Name}'s hold");
             }
 
@@ -736,7 +742,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 var with = assess.BestAttack(enemy, enemy.Position, actor).With ?? enemy.MeleeAttack;
                 double Worth(Combatant victim) =>
-                    assess.Blow(enemy, with, victim, with.DamageDieSides, victim.DodgeThreshold + View.VisibilityDodgeModifier(victim)).ExpectedDealt
+                    assess.Blow(enemy, with, victim, with.DamageDieSides, assess.Dodge(victim) + View.VisibilityDodgeModifier(victim)).ExpectedDealt
                     * assess.PerWound(victim);
                 double BestFrom(IEnumerable<GridPosition> squares, IEnumerable<Combatant> victims)
                 {
@@ -774,7 +780,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         continue;
                     }
 
-                    var dodge = victim.DodgeThreshold + View.VisibilityDodgeModifier(victim, seer: foe);
+                    var dodge = assess.Dodge(victim) + View.VisibilityDodgeModifier(victim, seer: foe);
                     var plain = assess.Blow(foe, attack, victim, attack.DamageDieSides, dodge);
                     var harried = assess.Blow(foe, attack, victim, attack.DamageDieSides, dodge, disadvantage: true);
                     best = Math.Max(best, assess.Worth(plain, victim) - assess.Worth(harried, victim));
@@ -866,7 +872,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     continue;
                 }
 
-                var dodge = target.DodgeThreshold + View.VisibilityDodgeModifier(target);
+                var dodge = assess.Dodge(target) + View.VisibilityDodgeModifier(target);
                 var now = assess.Blow(helper, with, target, with.DamageDieSides, dodge);
                 var down = assess.Blow(helper, with, target, with.DamageDieSides, dodge - 2);
                 gain += (down.ExpectedDealt - now.ExpectedDealt) * assess.PerWound(target) + 0.3 * (down.Kill - now.Kill) * assess.Value(target);
@@ -1033,7 +1039,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         continue;
                     }
 
-                    best = Math.Max(best, assess.Worth(assess.Blow(actor, attack, enemy, attack.DamageDieSides, enemy.DodgeThreshold), enemy));
+                    best = Math.Max(best, assess.Worth(assess.Blow(actor, attack, enemy, attack.DamageDieSides, assess.Dodge(enemy)), enemy));
                 }
             }
 

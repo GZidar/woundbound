@@ -33,12 +33,19 @@ var which = Text("--fight", "signpost");
 var gmName = Text("--gm", "simple")!;
 var seats = Text("--party", "all");
 RuleTrials.MinionStamina = Option("--minion-stamina", 1);
+// The GM knowledge dial: sheets or seen; left out, it goes with the skill (Best reads the sheets).
+Knowledge? knowledge = Text("--knowledge", null) switch
+{
+    "sheets" => Knowledge.Sheets,
+    "seen" => Knowledge.Seen,
+    _ => null,
+};
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),
-    "best" => new UtilityGmBrain(BrainSkill.Best),
-    "balanced" => new UtilityGmBrain(BrainSkill.Balanced),
-    "poor" => new UtilityGmBrain(BrainSkill.Poor),
+    "best" => new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge),
+    "balanced" => new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge),
+    "poor" => new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge),
     _ => new SimpleGmBrain(),
 };
 
@@ -90,7 +97,7 @@ var fight = which switch
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 
-Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}.");
+Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}" : string.Empty)}.");
 Console.WriteLine();
 
 // --show N: play the one fight on seed N with the best utility party (or --show-as balanced|poor), and print its log.
@@ -119,6 +126,12 @@ if (seats is "variants")
         .. Enum.GetValues<Trick>().Select(t => BrainSkill.Best with { Name = $"Best, no {t}", Off = new HashSet<Trick> { t } }),
     ];
     parties.AddRange(variants.Select(v => (Func<IPartyBrain>)(() => new UtilityPartyBrain(v))));
+}
+
+// --party best: the Best party alone — the measure for "every fight can be lost".
+if (seats is "best")
+{
+    parties.Add(() => new UtilityPartyBrain(BrainSkill.Best));
 }
 
 if (seats is "all" or "utility")

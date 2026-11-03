@@ -108,10 +108,12 @@ public class UtilityBrainTests
         bearer.ActionsRemaining = 1;
         var turn = new GmTurn(bearer, isExtraTurn: false, bonusAvailable: false);
 
-        var before = TargetOf(new UtilityGmBrain().NextStep(encounter.View, turn));
+        // A GM that knows only what it has seen: the casters are unknown until they cast.
+        var seen = new UtilityGmBrain(knowledge: Knowledge.Seen);
+        var before = TargetOf(seen.NextStep(encounter.View, turn));
         var other = before == mirella ? elthric : mirella;
         other.HasCastSpell = true;
-        var after = TargetOf(new UtilityGmBrain().NextStep(encounter.View, turn));
+        var after = TargetOf(seen.NextStep(encounter.View, turn));
 
         Assert.Same(other, after);
     }

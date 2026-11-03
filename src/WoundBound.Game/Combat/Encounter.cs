@@ -3124,6 +3124,7 @@ namespace WoundBound.Game.Combat
             void Finish(bool stoodFirm)
             {
                 var final = stoodFirm ? Reread(roll, threshold + ThresholdModifierCalculator.ReactionBonus) : roll;
+                Witness(held, ThresholdType.Stability, final);
                 var line = $"{holder.Name} tries to drag {held.Name}: {DescribeRoll(final)} vs ST {final.Threshold}" +
                            (stoodFirm ? " (+2 standing firm)" : string.Empty);
 
@@ -3348,6 +3349,7 @@ namespace WoundBound.Game.Combat
         private void FinishControl(Combatant actor, ControlAction action, Combatant target, RollResult rolled, int threshold, bool stoodFirm, Action then)
         {
             var roll = stoodFirm ? Reread(rolled, threshold + ThresholdModifierCalculator.ReactionBonus) : rolled;
+            Witness(target, ThresholdType.Stability, roll);
             var line = $"{actor.Name} tries to {Verb(action)} {target.Name}: {DescribeRoll(roll)} vs ST {roll.Threshold}" +
                        (stoodFirm ? $" (+{ThresholdModifierCalculator.ReactionBonus} standing firm)" : string.Empty);
 
@@ -3657,6 +3659,7 @@ namespace WoundBound.Game.Combat
             // critical failure, which is exactly what a Riposte is (Core Rules §10).
             var dodged = boost > 0;
             var roll = dodged ? Reread(rolled, plan.DodgeThreshold + boost) : rolled;
+            Witness(target, (plan.Profile ?? attacker.Attack).Against, roll);
 
             // A held Precise is spent on this attack, hit or miss.
             var precise = preciseOn == attacker;
