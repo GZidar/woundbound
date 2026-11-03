@@ -20,11 +20,11 @@ namespace WoundBoundGame
     public partial class Battle : Node2D
     {
         /// <summary>The room the board is drawn in; a big field gets smaller squares to fit it.</summary>
-        private static readonly Vector2 BoardArea = new(800, 592);
+        private static readonly Vector2 BoardArea = new(800, 568);
         private const int LargestCell = 72;
         private const double AdversaryTurnDelay = 0.7;
         private const double BotStepDelay = 0.4;
-        private static readonly Vector2 BoardOrigin = new(24, 104);
+        private static readonly Vector2 BoardOrigin = new(24, 128);
 
         /// <summary>Where the side panel starts — above the board, beside the roster.</summary>
         private const float HudTop = 24;
@@ -82,7 +82,7 @@ namespace WoundBoundGame
         /// <summary>The party's fog of war, or null with it turned off (Options, or <c>--nofog</c>).</summary>
         private FogOfWar? fog;
 
-        private bool fogOn = !OS.GetCmdlineUserArgs().Contains("--nofog");
+        private bool fogOn = !OS.GetCmdlineUserArgs().Contains("--nofog") && !string.Join(" ", OS.GetCmdlineUserArgs()).Contains("--view gm");
 
 
         /// <summary>Whether <paramref name="c"/> is drawn: the party's own, or a foe the party sees now.</summary>
@@ -433,6 +433,13 @@ namespace WoundBoundGame
                     {
                         "top" => Do(board3D.ToggleTopDown),
                         "turn" => Do(() => board3D.Turn(1)),
+                        "focus" => Do(() =>
+                        {
+                            if (RosterFoes().FirstOrDefault() is { } foe)
+                            {
+                                CentreOn(foe);
+                            }
+                        }),
                         "zoom" => Do(() =>
                         {
                             board3D.Zoom(4);
@@ -590,6 +597,8 @@ namespace WoundBoundGame
                 animating |= StepFlat(delta);
             }
 
+            animating |= StepSpotlight(delta);
+
             var glide = 1 - Mathf.Exp(-9 * (float)delta);
             foreach (var c in encounter.Combatants)
             {
@@ -672,7 +681,7 @@ namespace WoundBoundGame
         {
             var font = ThemeDB.FallbackFont;
             var dim = new Color(0.75f, 0.75f, 0.8f);
-            DrawRect(new Rect2(BoardOrigin.X, 8, BoardArea.X, 84), new Color(0.12f, 0.13f, 0.16f));
+            DrawRect(new Rect2(BoardOrigin.X, 8, BoardArea.X, 112), new Color(0.12f, 0.13f, 0.16f));
             DrawString(font, new Vector2(BoardOrigin.X + 10, 26), $"Round {encounter.Round}", HorizontalAlignment.Left, -1, 14, Colors.White);
             DrawString(font, new Vector2(YetToActX - 24, 26), "Yet to act", HorizontalAlignment.Left, -1, 13, dim);
             DrawString(font, new Vector2(ActingX - 24, 26), "Acting", HorizontalAlignment.Left, -1, 13, ActiveRing);
@@ -705,6 +714,8 @@ namespace WoundBoundGame
 
             DrawString(font, gmAt + new Vector2(-20, 5), "GM", HorizontalAlignment.Center, 40, 14, Colors.White);
             DrawString(font, gmAt + new Vector2(-40, 36), gmActing ? "acting" : $"{encounter.GmOpportunities} Opp.", HorizontalAlignment.Center, 80, 11, dim);
+
+            DrawFoeStrip();
         }
 
         private BattleLog battleLog = null!;
@@ -751,6 +762,14 @@ namespace WoundBoundGame
                     Refresh();
                 }
 
+                return;
+            }
+
+            // A roster icon: the camera goes to whoever it stands for.
+            if (@event is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } rosterClick
+                && RosterAt(rosterClick.Position) is { } picked)
+            {
+                CentreOn(picked);
                 return;
             }
 
@@ -1013,6 +1032,8 @@ namespace WoundBoundGame
             {
                 DrawToken(combatant, active);
             }
+
+            DrawSpotlight();
 
             if (!In3D)
             {
@@ -2162,15 +2183,21 @@ namespace WoundBoundGame
             };
             botRow.AddChild(flat);
 
-            var fogBox = new CheckButton { Text = "Fog of war", ButtonPressed = fogOn, TooltipText = "Show only what the party can see now; ground seen before stays, dimmed, without whoever stands on it." };
-            fogBox.Toggled += on =>
+            var viewPicker = new OptionButton
             {
-                fogOn = on;
-                fog = on ? new FogOfWar(encounter) : null;
+                TooltipText = "Players' view: fog of war, and only the foes the party sees now on the roster.\nGM's view: no fog, every foe on the roster.",
+            };
+            viewPicker.AddItem("Players' view");
+            viewPicker.AddItem("GM's view");
+            viewPicker.Select(fogOn ? 0 : 1);
+            viewPicker.ItemSelected += index =>
+            {
+                fogOn = index == 0;
+                fog = fogOn ? new FogOfWar(encounter) : null;
                 board3D?.ApplyFog(fog);
                 Refresh();
             };
-            botRow.AddChild(fogBox);
+            botRow.AddChild(viewPicker);
 
             var skills = new Button { Text = "Skill challenges…", TooltipText = "Play a Skill Challenge (Core Rules §8): the Quickstart wagon, or an obstacle that fights back." };
             skills.Pressed += () => GetTree().ChangeSceneToFile("res://scenes/SkillChallenge.tscn");

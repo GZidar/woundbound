@@ -107,6 +107,13 @@ namespace WoundBoundGame
         /// <summary>Zooms in (a positive <paramref name="steps"/>) or out.</summary>
         public void Zoom(float steps) => zoomTarget = Mathf.Clamp(zoomTarget * Mathf.Pow(0.88f, steps), 5, 60);
 
+        /// <summary>Brings the camera round over <paramref name="boardPoint"/> (in squares), close enough to pick it out.</summary>
+        public void FocusOn(Vector2 boardPoint)
+        {
+            focusTarget = new Vector3(boardPoint.X, 0, boardPoint.Y);
+            zoomTarget = Math.Min(zoomTarget, 14);
+        }
+
         /// <summary>Turns the board an eighth at a time.</summary>
         public void Turn(int eighths) => yawTarget += 45 * eighths;
 
