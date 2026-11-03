@@ -33,6 +33,15 @@ namespace WoundBound.Game.Combat
     /// <summary>A spell worked: the caster, the spell, and the plan it was cast on — its origin, squares and who it caught.</summary>
     public sealed record SpellWorked(Combatant Caster, SpellDefinition Spell, CastPlan Plan) : Happening;
 
+    /// <summary>
+    /// A creature changed squares: walked <paramref name="Path"/> (where it started first), or was
+    /// carried along it — shoved, swept or dragged — when <paramref name="Forced"/>.
+    /// </summary>
+    public sealed record Moved(Combatant Mover, IReadOnlyList<GridPosition> Path, bool Forced) : Happening;
+
+    /// <summary>Somebody's turn begins — and with it, the routes walked in the turn before are swept away.</summary>
+    public sealed record TurnBegan(Combatant Who) : Happening;
+
     /// <summary>One creature's share of a Harm spell's rolls: hit, missed, dodged or Riposted.</summary>
     public sealed record SpellStruck(Combatant Caster, Combatant Target, SpellDefinition Spell, bool Hit, bool Critical, bool Dodged, bool Riposte) : Happening;
 }

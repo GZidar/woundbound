@@ -27,7 +27,7 @@ public class HappeningTests
         fight.RunAdversaryTurn();
         fight.RespondToReaction(spend: false);
 
-        var struck = Assert.IsType<Struck>(Assert.Single(seen));
+        var struck = Assert.Single(seen.OfType<Struck>());
         Assert.Same(fighter, struck.Target);
         Assert.True(struck.Hit);
         Assert.False(struck.Dodged);
@@ -41,10 +41,43 @@ public class HappeningTests
         fight.RunAdversaryTurn();
         fight.RespondToReaction(spend: true);
 
-        var struck = Assert.IsType<Struck>(seen.First());
+        var struck = seen.OfType<Struck>().First();
         Assert.Same(fighter, struck.Target);
         Assert.False(struck.Hit);
         Assert.True(struck.Dodged);
         Assert.True(struck.Riposte);
+    }
+
+    [Fact]
+    public void AMove_IsRaisedAsTheRouteWalked_AheadOfWhatItLedTo()
+    {
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(8, 6, 3, 2));
+        var seen = new List<Happening>();
+        encounter.Happened += seen.Add;
+        var fighter = encounter.Combatants.Single(c => c.Side == Side.Party);
+        var start = fighter.Position;
+
+        Assert.True(encounter.TryMove(new GridPosition(4, 4)));
+
+        var walked = Assert.Single(seen.OfType<Moved>());
+        Assert.Same(fighter, walked.Mover);
+        Assert.Equal(start, walked.Path[0]);
+        Assert.Equal(new GridPosition(4, 4), walked.Path[^1]);
+        Assert.False(walked.Forced);
+
+        encounter.EndTurn();
+        encounter.RunAdversaryTurn();
+        encounter.RespondToReaction(spend: false);
+
+        // The biter closes before it bites, and its turn begins before either.
+        var biter = seen.OfType<Struck>().First().Attacker;
+        var order = seen.Select(h => h switch
+        {
+            TurnBegan t when t.Who == biter => "turn",
+            Moved m when m.Mover == biter => "move",
+            Struck => "strike",
+            _ => null,
+        }).Where(x => x is not null).ToList();
+        Assert.Equal(["turn", "move", "strike"], order.Take(3));
     }
 }

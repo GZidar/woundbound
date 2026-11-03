@@ -17,7 +17,6 @@ namespace WoundBoundGame
     {
         private readonly Queue<Happening> happenings = new();
         private Act? playing;
-        private double waited;
         private Node3D? effects;
 
         /// <summary>Whether something is still being shown — the battle screen holds the next step until it isn't.</summary>
@@ -40,6 +39,7 @@ namespace WoundBoundGame
         {
             happenings.Clear();
             playing = null;
+            ClearTrails();
             effects?.QueueFree();
             effects = new Node3D();
             AddChild(effects);
@@ -47,6 +47,7 @@ namespace WoundBoundGame
 
         private static IEnumerable<Combatant> Involved(Happening happening) => happening switch
         {
+            Moved m => [m.Mover],
             Struck s => [s.Attacker, s.Target],
             SpellWorked w => w.Plan.Targets.Prepend(w.Caster),
             SpellStruck s => [s.Caster, s.Target],
@@ -62,15 +63,6 @@ namespace WoundBoundGame
                     return;
                 }
 
-                // Let whoever is in it get to where it happens first — a foe that closed and struck
-                // in one turn arrives, then swings — but don't wait on a figure for ever.
-                waited += delta;
-                if (waited < 1.2 && Involved(next).Any(c => figures.TryGetValue(c, out var f) && f.Anchor.DistanceTo(Where(c)) > 0.08f))
-                {
-                    return;
-                }
-
-                waited = 0;
                 happenings.Dequeue();
                 foreach (var who in Involved(next))
                 {
@@ -78,6 +70,21 @@ namespace WoundBoundGame
                     {
                         figure.ResetPose();
                     }
+                }
+
+                // Moves one after another - a rider and its horse, foes closing in at the round's
+                // end - walk together.
+                if (next is Moved first)
+                {
+                    var together = new List<Moved> { first };
+                    while (happenings.TryPeek(out var after) && after is Moved also && together.All(m => m.Mover != also.Mover))
+                    {
+                        happenings.Dequeue();
+                        together.Add(also);
+                    }
+
+                    playing = Walks(together);
+                    return;
                 }
 
                 playing = Begin(next);
@@ -93,7 +100,11 @@ namespace WoundBoundGame
             if (playing.Time >= playing.Duration)
             {
                 playing.Finish();
-                Release(playing.Happening);
+                foreach (var done in playing.Covers)
+                {
+                    Release(done);
+                }
+
                 playing = null;
             }
         }
@@ -122,10 +133,136 @@ namespace WoundBoundGame
             Struck s when Seen(s.Attacker, s.Target) => Blow(s),
             SpellWorked w when Seen(w.Plan.Targets.Prepend(w.Caster).ToArray()) => Working(w),
             SpellStruck s when Seen(s.Caster, s.Target) => SpellLands(s),
+            TurnBegan => new Act(happening, 0, _ => ClearTrails()),
             _ => null,
         };
 
         // ---- The acts ----
+
+        private const float WalkSpeed = 3.6f;
+        private const float CarriedSpeed = 7f;
+        private Node3D? trails;
+
+        /// <summary>
+        /// Creatures walking their routes square by square, together, stepping as they go; a creature
+        /// shoved, swept or dragged slides instead, leaning back. Each leaves a breadcrumb on every
+        /// square it passes — dots for a walk, dashes for a carry — which stays until the next turn
+        /// begins, so everybody can see exactly which way it went.
+        /// </summary>
+        private Act Walks(List<Moved> moves)
+        {
+            var walks = moves.Where(m => figures.ContainsKey(m.Mover) && m.Path.Count > 1 && Seen(m.Mover))
+                .Select(m => (Move: m, Figure: figures[m.Mover], Points: m.Path.Select(sq => Centre(m.Mover, sq)).ToList()))
+                .ToList();
+            foreach (var walk in walks)
+            {
+                // Start where the walk starts, whatever the figure was last easing towards.
+                walk.Figure.Anchor = walk.Points[0];
+            }
+
+            var lengths = walks.Select(w => w.Points.Zip(w.Points.Skip(1), (a, b) => a.DistanceTo(b)).Sum()).ToList();
+            var durations = walks.Select((w, i) => Math.Min(1.9, lengths[i] / (w.Move.Forced ? CarriedSpeed : WalkSpeed))).ToList();
+            var dropped = walks.Select(_ => 0).ToList();
+            var act = new Act(moves[0], durations.DefaultIfEmpty(0).Max(), t =>
+            {
+                for (var i = 0; i < walks.Count; i++)
+                {
+                    var (move, figure, points) = walks[i];
+                    var along = lengths[i] * (float)Math.Clamp(t / Math.Max(0.01, durations[i]), 0, 1);
+                    var (at, heading, passed) = Along(points, along);
+                    var was = figure.Anchor;
+                    figure.Anchor = at;
+                    if (heading.LengthSquared() > 1e-4f)
+                    {
+                        figure.Face = Angle(move.Forced ? -heading : heading);
+                    }
+
+                    if (move.Forced)
+                    {
+                        figure.Lean = along < lengths[i] ? -14 : 0;
+                    }
+                    else
+                    {
+                        figure.Stride(was.DistanceTo(at));
+                    }
+
+                    // A crumb for every square it has reached, the first included.
+                    while (dropped[i] <= passed && dropped[i] < points.Count)
+                    {
+                        var from = dropped[i] > 0 ? points[dropped[i] - 1] : points[0];
+                        Crumb(points[dropped[i]], points[dropped[i]] - from, figure.Colour, move.Forced);
+                        dropped[i]++;
+                    }
+                }
+            });
+            act.Covers = moves;
+            return act;
+        }
+
+        /// <summary>Where a creature stands on <paramref name="square"/>: the middle of its footprint, up on its horse if riding.</summary>
+        private static Vector3 Centre(Combatant c, GridPosition square) =>
+            new(square.X + c.Across / 2f, c.IsRiding ? 0.55f : 0, square.Y + c.Across / 2f);
+
+        /// <summary>The point <paramref name="distance"/> along a route, the way it's heading there, and the last corner passed.</summary>
+        private static (Vector3 At, Vector3 Heading, int Passed) Along(List<Vector3> points, float distance)
+        {
+            for (var i = 0; i < points.Count - 1; i++)
+            {
+                var leg = points[i].DistanceTo(points[i + 1]);
+                if (distance <= leg || i == points.Count - 2)
+                {
+                    var k = leg < 1e-4f ? 1 : Mathf.Clamp(distance / leg, 0, 1);
+                    return (points[i].Lerp(points[i + 1], k), (points[i + 1] - points[i]).Normalized(), k >= 0.999f ? i + 1 : i);
+                }
+
+                distance -= leg;
+            }
+
+            return (points[^1], Vector3.Zero, points.Count - 1);
+        }
+
+        /// <summary>A breadcrumb: a dot where a walk passed, a dash along the way a carry went.</summary>
+        private void Crumb(Vector3 at, Vector3 heading, Color colour, bool carried)
+        {
+            if (trails is null)
+            {
+                trails = new Node3D();
+                AddChild(trails);
+            }
+
+            var crumb = new MeshInstance3D
+            {
+                Mesh = carried
+                    ? new BoxMesh { Size = new Vector3(0.09f, 0.02f, 0.38f) }
+                    : new CylinderMesh { TopRadius = 0.09f, BottomRadius = 0.09f, Height = 0.02f, RadialSegments = 16 },
+                MaterialOverride = Shine(colour, 1f),
+                Position = at with { Y = 0.02f },
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            };
+            trails.AddChild(crumb);
+
+            // A dark rim under it, so a crumb in any colour stands off any ground.
+            crumb.AddChild(new MeshInstance3D
+            {
+                Mesh = carried
+                    ? new BoxMesh { Size = new Vector3(0.15f, 0.01f, 0.44f) }
+                    : new CylinderMesh { TopRadius = 0.125f, BottomRadius = 0.125f, Height = 0.01f, RadialSegments = 16 },
+                MaterialOverride = Shine(new Color(0.05f, 0.05f, 0.07f), 0.6f),
+                Position = Vector3.Down * 0.006f,
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            });
+            if (carried && heading.LengthSquared() > 1e-4f)
+            {
+                crumb.Rotation = new Vector3(0, Angle(heading), 0);
+            }
+        }
+
+        /// <summary>Sweeps the breadcrumbs away: a new turn has begun.</summary>
+        private void ClearTrails()
+        {
+            trails?.QueueFree();
+            trails = null;
+        }
 
         /// <summary>A blade swung: wind up, lunge and strike, then back; the target flinches, sidesteps, or sidesteps and strikes back.</summary>
         private Act Blow(Struck s)
@@ -574,6 +711,9 @@ namespace WoundBoundGame
 
             public double Time { get; set; }
 
+            /// <summary>The happenings this act shows - more than one when several creatures walk together.</summary>
+            public IReadOnlyList<Happening> Covers { get; set; } = [happening];
+
             public void Step(double t) => step(t);
 
             public void Finish() => finish?.Invoke();
@@ -609,12 +749,28 @@ namespace WoundBoundGame
         {
             private static readonly Vector3 Shoulder = new(0.2f, 0.85f, 0);
             private readonly Node3D arm = new();
+            private readonly Node3D offArm = new();
+            private readonly Node3D leftHip = new();
+            private readonly Node3D rightHip = new();
+            private float stridePhase;
+            private float walking;
+            private bool striding;
             private bool shownDown;
 
             public Color Colour { get; } = Colors.White;
 
             /// <summary>Where it stands, eased; the pose is laid over this.</summary>
-            public Vector3 Anchor { get; private set; }
+            public Vector3 Anchor { get; set; }
+
+            /// <summary>Carries the stride on by <paramref name="distance"/> travelled: a step every half square or so.</summary>
+            public void Stride(float distance)
+            {
+                if (distance > 1e-4f)
+                {
+                    stridePhase += distance / 0.5f * Mathf.Pi;
+                    striding = true;
+                }
+            }
 
             /// <summary>How many acts still to be shown involve it: while any are, it doesn't fall before it's struck.</summary>
             public int Holds { get; set; }

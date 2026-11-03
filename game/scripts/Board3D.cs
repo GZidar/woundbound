@@ -494,7 +494,18 @@ namespace WoundBoundGame
                 }
 
                 var bulk = creature.Armour switch { ArmourWeight.Heavy => 0.34f, ArmourWeight.Medium => 0.3f, ArmourWeight.Light => 0.27f, _ => 0.24f };
-                Part(new CylinderMesh { TopRadius = 0.07f, BottomRadius = 0.09f, Height = 0.45f }, new Vector3(0, 0.23f, 0), cloth);           // legs
+                // Two legs and two arms, each hung from its joint so a walk can swing them.
+                foreach (var (hip, x) in new[] { (leftHip, -0.065f), (rightHip, 0.065f) })
+                {
+                    hip.Position = new Vector3(x, 0.45f, 0);
+                    body.AddChild(hip);
+                    Part(new CylinderMesh { TopRadius = 0.05f, BottomRadius = 0.04f, Height = 0.45f }, new Vector3(0, -0.225f, 0), cloth, parent: hip);
+                }
+
+                offArm.Position = Shoulder with { X = -Shoulder.X };
+                body.AddChild(offArm);
+                Part(new CylinderMesh { TopRadius = 0.035f, BottomRadius = 0.03f, Height = 0.3f }, new Vector3(0, -0.15f, 0), cloth, parent: offArm);
+                Part(new CylinderMesh { TopRadius = 0.035f, BottomRadius = 0.03f, Height = 0.3f }, new Vector3(0, -0.13f, 0.04f), cloth, new Vector3(15, 0, 0), parent: arm);
                 Part(new CapsuleMesh { Radius = bulk / 2, Height = 0.5f }, new Vector3(0, 0.66f, 0), cloth);                                       // torso
                 if (creature.Armour is ArmourWeight.Medium or ArmourWeight.Heavy)
                 {
@@ -541,7 +552,17 @@ namespace WoundBoundGame
             /// </summary>
             public void Follow(Vector3 to, float? toward, float ease)
             {
-                Anchor = Anchor.DistanceTo(to) < 0.01f ? to : Anchor.Lerp(to, ease);
+                // While an act still to be shown involves it, the acts move it - along the route it
+                // walked, not straight to where the rules have already put it.
+                if (Holds == 0)
+                {
+                    var was = Anchor;
+                    Anchor = Anchor.DistanceTo(to) < 0.01f ? to : Anchor.Lerp(to, ease);
+                    Stride(was.DistanceTo(Anchor));
+                }
+
+                walking = Mathf.MoveToward(walking, striding ? 1 : 0, ease * 3);
+                striding = false;
                 Position = Anchor + Offset;
                 if ((Face ?? toward) is { } angle)
                 {
@@ -555,7 +576,12 @@ namespace WoundBoundGame
 
                 var lie = shownDown ? 85f : Lean;
                 body.RotationDegrees = new Vector3(Mathf.Lerp(body.RotationDegrees.X, lie, Holds > 0 && !shownDown ? 1 : ease), Mathf.RadToDeg(facing), 0);
-                arm.RotationDegrees = new Vector3(Swing, 0, 0);
+                var step = Mathf.Sin(stridePhase) * walking;
+                leftHip.RotationDegrees = new Vector3(32 * step, 0, 0);
+                rightHip.RotationDegrees = new Vector3(-32 * step, 0, 0);
+                offArm.RotationDegrees = new Vector3(-22 * step, 0, 0);
+                arm.RotationDegrees = new Vector3(Swing + 12 * step, 0, 0);
+                body.Position = Vector3.Up * 0.035f * Mathf.Abs(Mathf.Cos(stridePhase)) * walking;
             }
         }
     }

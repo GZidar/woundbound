@@ -520,7 +520,20 @@ namespace WoundBound.Game.Combat
         public EncounterPhase Phase { get; private set; }
 
         /// <summary>Whoever is taking a turn. Null between turns and once the fight is over.</summary>
-        public Combatant? Active { get; private set; }
+        public Combatant? Active
+        {
+            get => active;
+            private set
+            {
+                active = value;
+                if (value is not null)
+                {
+                    Raise(new TurnBegan(value));
+                }
+            }
+        }
+
+        private Combatant? active;
 
         /// <summary>The choice the player is being asked to make, while <see cref="Phase"/> is <see cref="EncounterPhase.AwaitingReaction"/>.</summary>
         public PendingReaction? Pending { get; private set; }
@@ -541,9 +554,97 @@ namespace WoundBound.Game.Combat
         public event Action<string>? Logged;
 
         /// <summary>What just happened, as a record to animate — raised as its line is written to the log.</summary>
-        public event Action<Happening>? Happened;
+        public event Action<Happening>? Happened
+        {
+            add
+            {
+                // Where everybody stands as the screen starts watching: moves are reported from here.
+                foreach (var creature in combatants.Concat(Steeds))
+                {
+                    shownAt[creature] = creature.Position;
+                }
 
-        private void Raise(Happening happening) => Happened?.Invoke(happening);
+                happened += value;
+            }
+
+            remove => happened -= value;
+        }
+
+        private Action<Happening>? happened;
+
+        private void Raise(Happening happening)
+        {
+            ReportMoves();
+            happened?.Invoke(happening);
+        }
+
+        private readonly Dictionary<Combatant, GridPosition> shownAt = new();
+        private readonly Dictionary<Combatant, (IReadOnlyList<GridPosition> Path, bool Forced)> routes = new();
+
+        /// <summary>The way <paramref name="mover"/> is about to go, so a move reported from it follows the ground rather than a straight line.</summary>
+        private void Route(Combatant mover, IReadOnlyList<GridPosition> path, bool forced = false) => routes[mover] = (path, forced);
+
+        /// <summary>
+        /// Raises a <see cref="Moved"/> for everybody whose square has changed since the last one —
+        /// called before every log line and every happening, so a move is always reported ahead of
+        /// what it led to: a walk up to where a reaction caught it, the blow, then the rest of the way.
+        /// </summary>
+        private void ReportMoves()
+        {
+            if (happened is null)
+            {
+                return;
+            }
+
+            foreach (var creature in combatants.Concat(Steeds).Distinct())
+            {
+                if (!shownAt.TryGetValue(creature, out var was))
+                {
+                    shownAt[creature] = creature.Position;
+                    continue;
+                }
+
+                var now = creature.Position;
+                if (was == now)
+                {
+                    continue;
+                }
+
+                shownAt[creature] = now;
+                IReadOnlyList<GridPosition> path = PathBetween(was, now);
+                var forced = false;
+                if (routes.TryGetValue(creature, out var route))
+                {
+                    var from = IndexOf(route.Path, was);
+                    var to = IndexOf(route.Path, now);
+                    if (from >= 0 && to > from)
+                    {
+                        path = route.Path.Skip(from).Take(to - from + 1).ToList();
+                        forced = route.Forced;
+                    }
+
+                    if (to == route.Path.Count - 1 || to < 0)
+                    {
+                        routes.Remove(creature);
+                    }
+                }
+
+                happened.Invoke(new Moved(creature, path, forced));
+            }
+
+            static int IndexOf(IReadOnlyList<GridPosition> path, GridPosition square)
+            {
+                for (var i = 0; i < path.Count; i++)
+                {
+                    if (path[i] == square)
+                    {
+                        return i;
+                    }
+                }
+
+                return -1;
+            }
+        }
 
         public bool IsOver => Phase is EncounterPhase.Victory or EncounterPhase.Defeat or EncounterPhase.Withdrew;
 
@@ -2352,13 +2453,16 @@ namespace WoundBound.Game.Combat
         /// square it was caught in — "the rest of that move is lost" (Core Rules §9). Leaves the
         /// position for the caller to set, along with the log line.
         /// </summary>
-        private void Relocate(Combatant mover, IReadOnlyList<GridPosition> path, Action<GridPosition> then) =>
+        private void Relocate(Combatant mover, IReadOnlyList<GridPosition> path, Action<GridPosition> then)
+        {
+            Route(mover, path);
             ReactToLeaving(mover, path.ToList(), LeavingReachOf(mover, path), caughtAt =>
             {
                 var reached = caughtAt ?? path[^1];
                 TouchIllusions(mover, path, reached);
                 then(reached);
             });
+        }
 
         /// <summary>
         /// Swimming deep water on the way (the user's ruling): Athletics against the setting's
@@ -3225,6 +3329,7 @@ namespace WoundBound.Game.Combat
                 var route = PlanMove(holder, square)?.Path ?? PathBetween(holder.Position, square);
                 var setOff = holder.Position;
                 var holderReactors = new Queue<Combatant>(LeavingReachOf(holder, route).Where(e => e != held));
+                Route(holder, route);
                 ReactToLeaving(holder, route.ToList(), holderReactors, caughtAt =>
                 {
                     var arrivedAt = caughtAt ?? square;
@@ -3247,6 +3352,7 @@ namespace WoundBound.Game.Combat
                         .FirstOrDefault() ?? heldFrom;
 
                     var reactors = new Queue<Combatant>(LeavingReachOf(held, PathBetween(heldFrom, landing)).Where(a => a != holder));
+                    Route(held, PathBetween(heldFrom, landing), forced: true);
 
                     ReactToLeaving(held, PathBetween(heldFrom, landing), reactors, caughtAt =>
                     {
@@ -3534,6 +3640,7 @@ namespace WoundBound.Game.Combat
             var impact = distance - crossed;
             var into = stoppedBy is null ? string.Empty : $" into {stoppedBy} — {impact} Body before armour";
             var path = PathBetween(target.Position, destination);
+            Route(target, path, forced: true);
 
             OfferReaction(
                 new PendingReaction(ReactionKind.Arrest, target, cause ?? target, Roll: null, Threshold: 0,
@@ -4223,6 +4330,7 @@ namespace WoundBound.Game.Combat
 
         private void Write(string line)
         {
+            ReportMoves();
             log.Add(line);
             Logged?.Invoke(line);
         }
