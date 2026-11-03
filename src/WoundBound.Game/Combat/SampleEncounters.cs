@@ -891,6 +891,56 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
+        /// A clearing in the woods at dusk — a random encounter, nobody's set piece: trees to stand
+        /// behind (full cover), lines of bushes (partial), a scree of broken rock, and the party's own
+        /// lights against the gloom. The band met there — two Reedmarsh Skulkers, two Timber Wolves and
+        /// two Bramble Ratkin, none of them quick to break, a Standard Challenge for five — is placed by the GM's
+        /// setup (<see cref="Brains.Placement"/>), anywhere from Short to Long of the party, lying in
+        /// wait when <paramref name="prepared"/>.
+        /// </summary>
+        public static Encounter WoodlandClearing(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null,
+            Brains.SetupSkill setup = Brains.SetupSkill.Smart, bool prepared = true, int seed = 7)
+        {
+            var party = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(12, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(12, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(11, 9)),
+                CombatantFactory.FromCharacter(MirellaVask(data, lantern: true), new GridPosition(10, 8)),
+                CombatantFactory.FromCharacter(ElthricDane(data, torch: true), new GridPosition(10, 10)),
+            };
+            var band = new List<Combatant>
+            {
+                CombatantFactory.FromAdversary(data.Adversary("Reedmarsh Skulker"), "First skulker", new GridPosition(0, 0)),
+                CombatantFactory.FromAdversary(data.Adversary("Reedmarsh Skulker"), "Second skulker", new GridPosition(0, 1)),
+                CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "First wolf", new GridPosition(0, 2)),
+                CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "Second wolf", new GridPosition(0, 3)),
+                CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Biter", new GridPosition(0, 4)),
+                CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Shiv", new GridPosition(0, 5)),
+            };
+
+            Brains.Placement.Place(band, party, WoodlandAtDusk, data.Environment, data.RangeBands, FieldWidth, FieldHeight,
+                Brains.Placement.ZoneAround(party, FieldWidth, FieldHeight, minimum: 3, maximum: 12), setup, prepared, new Random(seed));
+            return new Encounter(FieldWidth, FieldHeight, [.. party, .. band], data.RangeBands, dice, gm,
+                setting: WoodlandAtDusk, environment: data.Environment);
+        }
+
+        /// <summary>The clearing: dusk under the trees, so a light is what anybody is seen by.</summary>
+        public static Setting WoodlandAtDusk { get; } = new()
+        {
+            Name = "A clearing at dusk",
+            Visibility = Visibility.Poor,
+            Cause = VisibilityCause.Unlit,
+            Ground = Setting.Patches(Terrain.Broken, (18, 13, 21, 15)),
+            CoverPieces = Merge(
+                Setting.CoverOf(Cover.Full, (4, 3, 4, 3), (7, 14, 7, 14), (16, 4, 16, 4), (19, 9, 19, 9), (22, 3, 22, 3), (15, 15, 15, 15), (6, 8, 6, 8), (24, 12, 24, 12)),
+                Setting.CoverOf(Cover.Partial, (15, 6, 17, 6), (15, 12, 17, 12), (6, 4, 8, 4), (6, 13, 8, 13), (21, 8, 21, 10))),
+        };
+
+        private static Dictionary<GridPosition, Cover> Merge(params Dictionary<GridPosition, Cover>[] maps) =>
+            maps.SelectMany(m => m).GroupBy(kv => kv.Key).ToDictionary(g => g.Key, g => g.Max(kv => kv.Value));
+
+        /// <summary>
         /// A gnoll following a rout — staged for the game: a Duskfang Gnoll (T2 Brute, GM Reference
         /// §11, Rampage) lying in wait in the brush five squares off the road, behind a Tollroad Bandit
         /// and two Roadside Bandits, in daylight. Rampage costs the party nothing until somebody drops, and then a great deal.

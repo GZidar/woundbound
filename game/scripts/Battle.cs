@@ -375,7 +375,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders", "glamour", "roadblock", "gnoll" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders", "glamour", "roadblock", "gnoll", "clearing" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -1102,6 +1102,7 @@ namespace WoundBoundGame
                 16 => SampleEncounters.GlamouredMill(data, Dice(), PickedGm()),
                 17 => SampleEncounters.Roadblock(data, Dice(), PickedGm(), ambush: true),
                 18 => SampleEncounters.GnollRaid(data, Dice(), PickedGm(), ambush: true),
+                19 => SampleEncounters.WoodlandClearing(data, Dice(), PickedGm(), seed: System.Environment.TickCount),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), ambush: true),
             };
             // Lines written while the fight was set up came before anyone was listening.
@@ -1947,6 +1948,7 @@ namespace WoundBoundGame
             fightPicker.AddItem("The glamoured mill: bats and a glamourer");
             fightPicker.AddItem("The roadblock: crossbows behind cover");
             fightPicker.AddItem("A Duskfang Gnoll with bandits (Rampage)");
+            fightPicker.AddItem("A woodland clearing: a band placed by the GM's setup");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 

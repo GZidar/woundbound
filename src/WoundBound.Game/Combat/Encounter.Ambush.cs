@@ -50,7 +50,7 @@ namespace WoundBound.Game.Combat
             // Awareness, not Search: nobody is looking for an ambush.
             var watcher = party.MaxBy(c => c.SkillBonus("Awareness"))!;
             var roll = RollAgainst(watcher.SkillBonus("Awareness"), stealth, advantage: false, disadvantage: false, watcher);
-            Write($"Something is waiting by the road. Stealth ({dice1}+{dice2}){Signed(hiding)}" + (dark > 0 ? $" +{dark} for the dark" : string.Empty)
+            Write($"Something lies in wait. Stealth ({dice1}+{dice2}){Signed(hiding)}" + (dark > 0 ? $" +{dark} for the dark" : string.Empty)
                   + $" = {stealth}; {watcher.Name}'s Awareness {DescribeRoll(roll)}.");
             if (roll.Success == true)
             {

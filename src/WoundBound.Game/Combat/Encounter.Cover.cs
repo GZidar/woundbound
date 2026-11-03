@@ -33,16 +33,7 @@ namespace WoundBound.Game.Combat
         /// <summary>The cover the pieces on the map give, before anything the target has done about it.</summary>
         private Cover CoverAsPlaced(GridPosition from, Combatant target, GridPosition? targetAt = null)
         {
-            if (Setting.CoverPieces.Count == 0)
-            {
-                return Cover.None;
-            }
-
-            var at = targetAt ?? target.Position;
-            var stands = Footprints.At(at, target.Across).ToList();
-            return CoverCalculator.Best(Sight.Between(from, at)
-                .Where(sq => !stands.Contains(sq) && stands.Any(s => s.DistanceTo(sq) <= 1))
-                .Select(Setting.CoverAt));
+            return Setting.CoverAgainst(from, targetAt ?? target.Position, target.Across);
         }
 
         /// <summary>
@@ -50,10 +41,7 @@ namespace WoundBound.Game.Combat
         /// and no full piece of cover that stands beside neither end — a pillar in the middle of
         /// the room blocks a look across it, where one beside the archer is only leant round.
         /// </summary>
-        internal bool LineOpen(GridPosition from, GridPosition to) =>
-            (Setting.Walls.Count == 0 || Sight.Clear(from, to, Setting.IsWall))
-            && (Setting.CoverPieces.Count == 0
-                || !Sight.Between(from, to).Any(sq => Setting.CoverAt(sq) == Cover.Full && sq.DistanceTo(from) > 1 && sq.DistanceTo(to) > 1));
+        internal bool LineOpen(GridPosition from, GridPosition to) => Setting.LineOpen(from, to);
 
         /// <summary>What partial cover adds to Dodge Threshold, by the table.</summary>
         private int CoverDodgeBonus(Cover grade) => grade == Cover.Partial ? CoverCalculator.DodgeThresholdModifier(environment, Cover.Partial) : 0;

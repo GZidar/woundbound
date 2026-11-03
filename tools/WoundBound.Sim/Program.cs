@@ -38,6 +38,10 @@ RuleTrials.IgnoreMorale = args.Contains("--no-morale");
 
 // --extra N: N more of the fight's own adversaries, cycling through them, each on the nearest open
 // square to the one it copies — for calibrating Threat Value against what the brains can do.
+// --setup smart|neutral|poor and --unprepared: how a band met at random is placed (the clearing).
+var setup = Enum.TryParse<SetupSkill>(Text("--setup", "smart"), ignoreCase: true, out var s) ? s : SetupSkill.Smart;
+var prepared = !args.Contains("--unprepared");
+var placementSeed = 7;
 var extra = Option("--extra", 0);
 if (extra > 0)
 {
@@ -104,6 +108,7 @@ Encounter Stage(IDiceRoller dice) => which switch
     "glamour" => SampleEncounters.GlamouredMill(data, dice, Gm()),
     "roadblock" => SampleEncounters.Roadblock(data, dice, Gm(), ambush: true),
     "gnoll" => SampleEncounters.GnollRaid(data, dice, Gm(), ambush: true),
+    "clearing" => SampleEncounters.WoodlandClearing(data, dice, Gm(), setup, prepared, placementSeed++),
     "guardians" => SampleEncounters.ShrineGuardians(data, dice, Gm()),
     "stag" => SampleEncounters.HollowStagInTheBirchwood(data, dice, Gm()),
     _ => SampleEncounters.SignpostAmbush(data, dice, Gm(), ambush: true),
@@ -124,6 +129,7 @@ var fight = which switch
     "champion" => "Salla, Drovan, Joren, Mirella and Elthric v a Noble Champion and two retainers on the village green",
     "outriders" => "Salla, Drovan, Joren, Mirella and Elthric v three Tollroad Bandits on horseback and an ambusher on foot",
     "glamour" => "Salla, Drovan, Joren, Mirella and Elthric v a Tollroad Bandit, his wolf, two Vampire Bats and a Fen Glamourer at the old mill",
+    "clearing" => $"Salla, Drovan, Joren, Mirella and Elthric met at dusk in a woodland clearing by two skulkers, two wolves and two ratkin, placed by a {setup} setup" + (prepared ? ", lying in wait" : string.Empty),
     "gnoll" => "Salla, Drovan, Joren, Mirella and Elthric v a Duskfang Gnoll (Rampage) with a Tollroad Bandit and two Roadside Bandits",
     "roadblock" => "Salla, Drovan, Joren, Mirella and Elthric v a roadblock: two crossbows behind crates, two bandits behind carts, and the Tollroad Bandit",
     "guardians" => "Salla, Drovan, Joren, Mirella and Elthric v a Stoneheart Golem and two Animated Suits of Mail in a cloister yard",

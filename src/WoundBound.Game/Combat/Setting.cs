@@ -68,6 +68,34 @@ namespace WoundBound.Game.Combat
         /// <summary>The cover a piece on <paramref name="square"/> gives, or None where there is none.</summary>
         public Cover CoverAt(GridPosition square) => CoverPieces.TryGetValue(square, out var grade) ? grade : Cover.None;
 
+        /// <summary>
+        /// The cover a creature <paramref name="across"/> squares wide, standing on <paramref name="at"/>,
+        /// has against an attack from <paramref name="from"/> (Core Rules §9, "Cover"): the best piece on
+        /// the line that stands right beside it.
+        /// </summary>
+        public Cover CoverAgainst(GridPosition from, GridPosition at, int across = 1)
+        {
+            if (CoverPieces.Count == 0)
+            {
+                return Cover.None;
+            }
+
+            var stands = Footprints.At(at, across).ToList();
+            return Rules.Calculation.CoverCalculator.Best(Sight.Between(from, at)
+                .Where(sq => !stands.Contains(sq) && stands.Any(s => s.DistanceTo(sq) <= 1))
+                .Select(CoverAt));
+        }
+
+        /// <summary>
+        /// Whether a line between two squares is open: no wall on it, and no full piece of cover that
+        /// stands beside neither end — a pillar in the middle of the room blocks a look across it,
+        /// where one beside the archer is only leant round.
+        /// </summary>
+        public bool LineOpen(GridPosition from, GridPosition to) =>
+            (Walls.Count == 0 || Sight.Clear(from, to, IsWall))
+            && (CoverPieces.Count == 0
+                || !Sight.Between(from, to).Any(sq => CoverAt(sq) == Cover.Full && sq.DistanceTo(from) > 1 && sq.DistanceTo(to) > 1));
+
         /// <summary>Whether anything solid stands on <paramref name="square"/> — a wall or a piece of cover: nobody stands in it or moves through it.</summary>
         public bool IsSolid(GridPosition square) => Walls.Contains(square) || CoverPieces.ContainsKey(square);
 
