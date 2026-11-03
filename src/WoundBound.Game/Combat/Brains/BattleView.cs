@@ -305,5 +305,20 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Why <paramref name="combatant"/> can't make a tactical Stamina spend now, or null if they can.</summary>
         public static string? TacticalSpendRefusal(Combatant combatant) => Encounter.TacticalSpendRefusal(combatant);
+
+        /// <summary>Why <paramref name="actor"/> can't Rampage at <paramref name="target"/> now, or null.</summary>
+        public string? RampageRefusal(Combatant actor, Combatant target, AttackProfile? with = null) => encounter.RampageRefusal(actor, target, with);
+
+        /// <summary>Why <paramref name="combatant"/> can't duck back into full cover now, or null.</summary>
+        public static string? DuckBackRefusal(Combatant combatant) => Encounter.DuckBackRefusal(combatant);
+
+        /// <summary>The cover <paramref name="target"/> has against an attack from <paramref name="from"/>.</summary>
+        public Rules.Enums.Cover CoverFrom(GridPosition from, Combatant target, GridPosition? targetAt = null) => encounter.CoverFrom(from, target, targetAt);
+
+        /// <summary>How far Long reaches, in squares — as far as anything can be targeted.</summary>
+        public int LongRangeSquares => encounter.LongRangeSquares;
+
+        /// <summary>Whether nothing solid blocks a line between two squares — a wall, or a full piece of cover beside neither end.</summary>
+        public bool LineOpen(GridPosition from, GridPosition to) => encounter.LineOpen(from, to);
     }
 }

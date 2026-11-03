@@ -79,6 +79,29 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var options = WithoutAttacks(attacked, planner.Options(actor, actor.HasMove, actor.ActionsRemaining, real: true,
                 turn.BonusAvailable, view.BankedOpportunities >= view.MaxBankedOpportunities, StillToAct(view, actor)));
 
+            // Rampage: its blow just dropped somebody, and a Stamina buys a second at somebody else —
+            // closing with its move first if it must — where that blow beats keeping the Stamina.
+            if (actor.RampageFrom is { } dropped && actor.Stamina >= 2 && Skill.UsesTricks && BattleView.TacticalSpendRefusal(actor) is null)
+            {
+                var second = planner.Options(actor, actor.HasMove, 1, real: false, bonusAvailable: false, stillToAct: StillToAct(view, actor))
+                    .Where(o => o.Target is { } t && t != dropped && t.Side != actor.Side
+                                && (o.Kind == OptionKind.Attack || (o.Kind == OptionKind.Move && o.Then == OptionKind.Attack)))
+                    .MaxBy(o => o.Score);
+                var keep = options.Select(o => o.Score).DefaultIfEmpty(0).Max();
+                if (second is not null && second.Score - keep > planner.ExtraActionPrice(actor))
+                {
+                    if (second.Kind == OptionKind.Move)
+                    {
+                        return new GmStep.Move(second.Square!.Value);
+                    }
+
+                    if (view.RampageRefusal(actor, second.Target!, second.With) is null)
+                    {
+                        return new GmStep.Rampage(second.Target!, second.With);
+                    }
+                }
+            }
+
             // Out of actions: another, for Stamina, where the best thing it buys beats keeping the
             // Stamina — and the reaction that Stamina would otherwise pay for this round.
             if (actor.ActionsRemaining == 0 && actor.Stamina >= 2 && BattleView.TacticalSpendRefusal(actor) is null && Skill.UsesTricks)
@@ -115,6 +138,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.PickUpWeapon => new GmStep.PickUpWeapon(choice.Lying!),
                 OptionKind.Exploit => new GmStep.Exploit(choice.Exploit!.Value),
                 OptionKind.RaiseShield => new GmStep.RaiseShield(),
+                OptionKind.DuckBack => new GmStep.DuckBack(),
                 OptionKind.Cast => new GmStep.Cast(choice.Cast!, choice.WithBonus && turn.BonusAvailable),
                 OptionKind.Search => new GmStep.Search(choice.Illusion!),
                 OptionKind.Control => new GmStep.Control(choice.Control!.Value, choice.Target!),
@@ -372,6 +396,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.Move => new PartyStep.Move(choice.Square!.Value),
                 OptionKind.Attack => new PartyStep.Attack(choice.Target!, Manoeuvre: choice.Manoeuvre),
                 OptionKind.Exploit => new PartyStep.Exploit(choice.Exploit!.Value),
+                OptionKind.DuckBack => new PartyStep.DuckBack(),
                 OptionKind.Mount => new PartyStep.Mount(),
                 OptionKind.Throw => new PartyStep.Throw(choice.Target!),
                 OptionKind.DrawWeapon => new PartyStep.DrawWeapon(choice.Weapon!),

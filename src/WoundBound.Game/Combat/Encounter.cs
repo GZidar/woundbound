@@ -886,10 +886,20 @@ namespace WoundBound.Game.Combat
         internal AttackPlan PlanAttackWith(Combatant attacker, AttackProfile attack, GridPosition from, Combatant target, GridPosition? targetAt = null)
         {
             var distance = Footprints.Distance(from, attacker.Across, targetAt ?? target.Position, target.Across);
-            if (distance > 1 && Setting.Walls.Count > 0 && !Sight.Clear(from, targetAt ?? target.Position, Setting.IsWall))
+            if (distance > 1 && !LineOpen(from, targetAt ?? target.Position))
             {
                 return new AttackPlan("Something solid is in the way.", 0, 0, null, "Something solid is in the way.", attack);
             }
+
+            // Cover (Core Rules §9): full can't be targeted at all; partial is +2 DT.
+            var cover = CoverFrom(from, target, targetAt);
+            if (cover == Cover.Full)
+            {
+                return new AttackPlan("Behind full cover from here — go round it, or wait for them to show themselves.", 0, 0, null,
+                    "Behind full cover.", attack);
+            }
+
+            var sheltered = CoverDodgeBonus(cover);
 
             if (attack.Against == ThresholdType.Stability)
             {
@@ -933,8 +943,9 @@ namespace WoundBound.Game.Combat
                 }
 
                 var dark = VisibilityDodgeModifier(target, targetAt, attacker);
-                return new AttackPlan(null, target.DodgeThreshold + dark, 0, attack.DamageDieSides,
-                    $"Melee, within Reach {attack.Reach}" + (dark > 0 ? $"; +{dark} DT for the dark." : "."), attack);
+                return new AttackPlan(null, target.DodgeThreshold + dark + sheltered, 0, attack.DamageDieSides,
+                    $"Melee, within Reach {attack.Reach}" + (dark > 0 ? $"; +{dark} DT for the dark" : string.Empty)
+                    + (sheltered > 0 ? $"; +{sheltered} DT for partial cover." : "."), attack) { CoverDodgeModifier = sheltered };
             }
 
             if (SaddleForbids(attacker, attack))
@@ -961,14 +972,14 @@ namespace WoundBound.Game.Combat
             return shot.CanAttack
                 ? new AttackPlan(
                     Refusal: null,
-                    DodgeThreshold: target.DodgeThreshold + shot.DodgeThresholdModifier + gloom,
+                    DodgeThreshold: target.DodgeThreshold + shot.DodgeThresholdModifier + gloom + sheltered,
                     RangeDodgeModifier: shot.DodgeThresholdModifier + gloom,
                     // A statblock's own die holds at Close and Short; past that the weapon's falls off.
                     DamageDieSides: shot.DamageDie is { } die
                         ? attacker.Build is null && shot.DodgeThresholdModifier == 0 ? attack.DamageDieSides : DiceNotation.ParseSides(die)
                         : null,
-                    Note: shot.Summary,
-                    Profile: attack)
+                    Note: shot.Summary + (sheltered > 0 ? $"; +{sheltered} DT for partial cover" : string.Empty),
+                    Profile: attack) { CoverDodgeModifier = sheltered }
                 : Refused(shot.Summary);
 
             AttackPlan Refused(string why) => new(why, 0, 0, null, why, attack);
@@ -1429,6 +1440,7 @@ namespace WoundBound.Game.Combat
                 combatant.TurnsTakenThisRound = 0;
                 combatant.AttacksThisRound = 0;
                 combatant.HasTakenBonusAttackThisRound = false;
+                combatant.HasRampagedThisRound = false;
                 combatant.HasOverclockedThisRound = false;
                 combatant.HasSacrificedThisRound = false;
                 combatant.HasShelteredThisRound = false;
@@ -1735,6 +1747,11 @@ namespace WoundBound.Game.Combat
             combatant.HasWithdrawnThisTurn = false;
             combatant.HasBeenAttackedSinceTurnStart = false;
             combatant.IsRinged = false;
+            if (combatant.IsShowingFromCover)
+            {
+                combatant.IsShowingFromCover = false;
+                combatant.MayDuckBack = false;
+            }
 
             if (wasStanding.Count > 0)
             {
@@ -1799,7 +1816,8 @@ namespace WoundBound.Game.Combat
 
             // Every step spends a move or an action, and an illegal one throws, so a turn always ends.
             turn.BonusAvailable &= GmOpportunities > 0;
-            var step = gm.NextStep(view, turn);
+            var step = queuedStep ?? gm.NextStep(view, turn);
+            queuedStep = null;
             turn.Steps++;
 
             switch (step)
@@ -1886,8 +1904,16 @@ namespace WoundBound.Game.Combat
                     Declare(actor, $"{(attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack).Name} at {attack.Target.Name}"
                                    + (attack.Manoeuvre is { } declaredManoeuvre ? $", to {declaredManoeuvre.Kind}" : string.Empty), attack.Target,
                         () => CanAttack(actor, attack.Target) && (attack.With is not { } with || PlanAttackWith(actor, with, actor.Position, attack.Target).CanAttack),
-                        () => ResolveAttack(actor, attack.Target, asReaction: false, attack.WithBonus,
-                            _ => FollowThrough(actor, attack.Target, attack.With, () => TakeStep(turn, done)), attack.With, manoeuvre: attack.Manoeuvre),
+                        () =>
+                        {
+                            var wasUp = attack.Target.Body > 0;
+                            ResolveAttack(actor, attack.Target, asReaction: false, attack.WithBonus,
+                                _ => FollowThrough(actor, attack.Target, attack.With, () =>
+                                {
+                                    OpenRampage(actor, attack.Target, wasUp);
+                                    TakeStep(turn, done);
+                                }), attack.With, manoeuvre: attack.Manoeuvre);
+                        },
                         () => TakeStep(turn, done));
                     return;
 
@@ -2037,6 +2063,32 @@ namespace WoundBound.Game.Combat
                     }
 
                     StandUp(actor);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.DuckBack:
+                    if (DuckBackRefusal(actor) is { } noDuck)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} duck back: {noDuck}");
+                    }
+
+                    DuckBack(actor);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Rampage rampage:
+                    if (RampageRefusal(actor, rampage.Target, rampage.With) is { } noRampage)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} Rampage at {rampage.Target.Name}: {noRampage}");
+                    }
+
+                    PayTacticalSpend(actor, CombatActionCatalog.ReactionStaminaCost);
+                    Write($"{actor.Name} Rampages: 1 Stamina ({actor.Stamina} left) buys a second attack, at {rampage.Target.Name}.");
+                    actor.HasRampagedThisRound = true;
+                    actor.RampageFrom = null;
+                    actor.ActionsRemaining++;
+                    rampageAttackFor = actor;
+                    queuedStep = new GmStep.Attack(rampage.Target, With: rampage.With);
                     TakeStep(turn, done);
                     return;
 
@@ -2632,6 +2684,14 @@ namespace WoundBound.Game.Combat
         /// <summary>Counts an adversary's attack — once a round, outside an extra turn — and pays the Stamina for a Solo's second.</summary>
         private void CountAttack(Combatant actor, GmTurn turn, bool withBonus = false)
         {
+            if (rampageAttackFor == actor)
+            {
+                // The second attack its Rampage bought: written on the statblock, so past the once-a-round rule (GM Reference §9).
+                rampageAttackFor = null;
+                actor.AttacksThisRound++;
+                return;
+            }
+
             if (withBonus && actor.IsSolo && actor.AttacksThisRound > 0 && BonusIsExtraAttack(actor))
             {
                 // The Solo's second attack this round, bought with the Opportunity, not Stamina (GM Reference §9).
@@ -2701,8 +2761,10 @@ namespace WoundBound.Game.Combat
                         break;
                     }
 
-                    if (!victim.OccupiesSquare || attacker.DistanceTo(victim) > squares)
+                    if (!victim.OccupiesSquare || attacker.DistanceTo(victim) > squares || !LineOpen(attacker.Position, victim.Position)
+                        || CoverFrom(attacker.Position, victim) == Cover.Full)
                     {
+                        // Something solid between them, or full cover: this one is spared (Core Rules §9, "Cover").
                         continue;
                     }
 
@@ -2762,6 +2824,7 @@ namespace WoundBound.Game.Combat
 
             target.HasBeenAttackedSinceTurnStart = true;
             attacker.HasMovedSinceLastAttack = false;
+            ShowFromCover(attacker, [target]);
             var patient = attacker.HoldsPatient;
             var precise = attacker.HoldsPrecise;
             attacker.HoldsPatient = false;
@@ -3103,7 +3166,7 @@ namespace WoundBound.Game.Combat
                     Write($"{holder.Name} moves {from.DistanceTo(arrivedAt)} square(s), hauling {held.Name}, for {paidWith}.");
 
                     var landing = SquaresAround(arrivedAt, holder.OwnReach)
-                        .Where(sq => sq == heldFrom || (At(sq) is null && !Setting.IsWall(sq)))
+                        .Where(sq => sq == heldFrom || (At(sq) is null && !Setting.IsSolid(sq)))
                         .OrderBy(sq => sq.DistanceTo(heldFrom))
                         .ThenBy(sq => (sq.X - heldFrom.X) * (sq.X - heldFrom.X) + (sq.Y - heldFrom.Y) * (sq.Y - heldFrom.Y))
                         .Select(sq => (GridPosition?)sq)
@@ -3383,7 +3446,7 @@ namespace WoundBound.Game.Combat
                     break;
                 }
 
-                if (Setting.IsWall(next))
+                if (Setting.IsSolid(next))
                 {
                     stoppedBy = "the wall";
                     break;
@@ -3784,6 +3847,7 @@ namespace WoundBound.Game.Combat
         {
             combatant.HasMove = false;
             combatant.ActionsRemaining = 0;
+            combatant.RampageFrom = null;
         }
 
         private bool CheckForEnd()
@@ -3905,7 +3969,7 @@ namespace WoundBound.Game.Combat
             var map = new MovementMap(
                 mover.Position,
                 radius: reach,
-                isWall: corner => AnyUnder(corner, Setting.IsWall),
+                isWall: corner => AnyUnder(corner, Setting.IsSolid),
                 isClosed: corner => !groundless && AnyUnder(corner, ClosedSquare),
                 canStop: corner => groundless || !AnyUnder(corner, standing.ContainsKey),
                 isBroken: corner => tables is not null && AnyUnder(corner, sq => GroundAt(sq) == Terrain.Broken),
@@ -3954,7 +4018,8 @@ namespace WoundBound.Game.Combat
                 : outcome.UsedOpportunity && outcome.Attacker.OpportunityBonus.Kind == OpportunityBonusKind.Advantage ? " (Advantage and Disadvantage cancel)"
                 : string.Empty;
             var sign = roll.Modifier >= 0 ? "+" : "−";
-            var range = outcome.Plan.RangeDodgeModifier > 0 ? $" (+{outcome.Plan.RangeDodgeModifier} for range)" : string.Empty;
+            var range = (outcome.Plan.RangeDodgeModifier > 0 ? $" (+{outcome.Plan.RangeDodgeModifier} for range)" : string.Empty)
+                        + (outcome.Plan.CoverDodgeModifier > 0 ? $" (+{outcome.Plan.CoverDodgeModifier} partial cover)" : string.Empty);
             var dodge = outcome.Dodged ? $" (+{outcome.Boost} {outcome.BoostedBy})" : string.Empty;
             var verb = outcome.AsReaction ? "strikes at" : "attacks";
             var line = $"{outcome.Attacker.Name} {verb} {outcome.Target.Name} with {(outcome.Plan.Profile ?? outcome.Attacker.Attack).Name}: " +

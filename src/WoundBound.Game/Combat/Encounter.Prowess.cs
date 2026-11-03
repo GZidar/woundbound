@@ -424,7 +424,7 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            var threshold = second.DodgeThreshold + VisibilityDodgeModifier(second, seer: attacker);
+            var threshold = second.DodgeThreshold + VisibilityDodgeModifier(second, seer: attacker) + CoverDodgeModifier(attacker.Position, second);
             second.HasBeenAttackedSinceTurnStart = true;
 
             void Resolve(bool dodged)

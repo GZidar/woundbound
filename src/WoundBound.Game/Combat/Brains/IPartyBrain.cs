@@ -153,6 +153,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Spend the action regaining the footing a hazard took.</summary>
         public sealed record RegainFooting : PartyStep;
 
+        /// <summary>Duck back into full cover after attacking out of it: 1 Stamina, tactical, an Immediate Opportunity for the GM (Core Rules §9, "Cover").</summary>
+        public sealed record DuckBack : PartyStep;
+
         /// <summary>Let go of whoever they're holding.</summary>
         public sealed record LetGo : PartyStep;
 

@@ -42,6 +42,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Nimble Exploits bought.</summary>
         public int Exploits { get; internal set; }
 
+        /// <summary>Ducks back into full cover after attacking out of it.</summary>
+        public int DuckBacks { get; internal set; }
+
         /// <summary>Interrupts taken.</summary>
         public int Interrupts { get; internal set; }
 
@@ -194,6 +197,7 @@ namespace WoundBound.Game.Combat.Brains
                     Tally.Manoeuvres += offHand.Manoeuvre is null ? 0 : 1;
                 }),
                 PartyStep.Exploit exploit => Count(encounter.TryExploit(exploit.Which), () => Tally.Exploits++),
+                PartyStep.DuckBack => Count(encounter.TryDuckBack(), () => Tally.DuckBacks++),
                 PartyStep.Cast cast => Count(encounter.TryCast(cast.Spell), () =>
                 {
                     Tally.Casts++;
@@ -243,6 +247,7 @@ namespace WoundBound.Game.Combat.Brains
                     PartyStep.OffHand offHand => encounter.OffHandRefusal(character, offHand.Target)
                         ?? (offHand.Manoeuvre is { } om ? Encounter.ManoeuvreRefusal(character, offHand.Target, om, offHand: true) : null),
                     PartyStep.Exploit exploit => Encounter.ExploitRefusal(character, exploit.Which),
+                    PartyStep.DuckBack => Encounter.DuckBackRefusal(character),
                     PartyStep.Cast cast => encounter.PlanCast(character, cast.Spell).Refusal,
                     _ => null,
                 });

@@ -868,6 +868,63 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
+        /// A gnoll following a rout — staged for the game: a Duskfang Gnoll (T2 Brute, GM Reference
+        /// §11, Rampage) come in behind a Tollroad Bandit and two Roadside Bandits, on open ground in
+        /// daylight. Rampage costs the party nothing until somebody drops, and then a great deal.
+        /// </summary>
+        public static Encounter GnollRaid(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+                CombatantFactory.FromAdversary(data.Adversary("Duskfang Gnoll"), "Duskfang Gnoll", new GridPosition(17, 9)),
+                CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(15, 7)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "First bandit", new GridPosition(15, 11)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Second bandit", new GridPosition(16, 13)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "The rout's tail" }, environment: data.Environment);
+        }
+
+        /// <summary>
+        /// A roadblock — staged for the game to show cover (Core Rules §9, "Cover"): two Ambushers
+        /// with crossbows crouched behind stacked crates (full cover; they lean out to shoot, then
+        /// pay to duck back), two Roadside Bandits behind overturned carts (partial), and the Tollroad
+        /// Bandit at the back. The party comes up the road behind a broken field wall of its own
+        /// (partial), with a gap in it. Daylight.
+        /// </summary>
+        public static Encounter Roadblock(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the crates", new GridPosition(18, 8)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Second ambusher", new GridPosition(18, 11)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit at the north cart", new GridPosition(18, 5)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit at the south cart", new GridPosition(18, 14)),
+                CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(21, 9)),
+            };
+
+            var cover = Setting.CoverOf(Cover.Full, (17, 7, 17, 9), (17, 10, 17, 12));
+            foreach (var (square, grade) in Setting.CoverOf(Cover.Partial, (17, 4, 17, 6), (17, 13, 17, 15), (9, 6, 9, 8), (9, 10, 9, 12)))
+            {
+                cover[square] = grade;
+            }
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "The roadblock", CoverPieces = cover }, environment: data.Environment);
+        }
+
+        /// <summary>
         /// Outriders on the road — staged for the game: three Tollroad Bandits on
         /// riding horses (Core Rules §9, "Mounts": Fast, a horse's hooves to borrow, a horse to strike
         /// instead), with an Ambusher and his crossbow on foot behind. Daylight, open ground. The

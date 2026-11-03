@@ -92,7 +92,7 @@ namespace WoundBound.Game.Combat
             rider.IsRiding = false;
             var from = rider.Position;
             var landing = Enumerable.Range(-1, 3).SelectMany(dx => Enumerable.Range(-1, 3).Select(dy => new GridPosition(from.X + dx, from.Y + dy)))
-                .Where(sq => sq != from && !Setting.IsWall(sq) && At(sq) is null)
+                .Where(sq => sq != from && !Setting.IsSolid(sq) && At(sq) is null)
                 .OrderBy(sq => Math.Abs(sq.X - from.X) + Math.Abs(sq.Y - from.Y))
                 .Cast<GridPosition?>()
                 .FirstOrDefault();

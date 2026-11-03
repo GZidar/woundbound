@@ -180,6 +180,7 @@ namespace WoundBound.Game.Combat
             IsMinion = info.Role == AdversaryRole.Minion,
             IsUnshakable = info.Traits?.Contains(AdversaryTrait.Unshakable) == true,
             StaminaEachRound = info.Features?.Any(f => f.Name == "Fitness") == true ? 1 : 0,
+            HasRampage = info.Features?.Any(f => f.Name == "Rampage") == true,
             StaminaMax = RuleTrials.StaminaFor(info.Role, info.Tier, info.Stamina),
             Stamina = RuleTrials.StaminaFor(info.Role, info.Tier, info.Stamina),
             TacticalSpendsPerRound = CharacterCalculator.TacticalSpendsPerRound(info.Tier),

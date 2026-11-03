@@ -22,6 +22,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         RegainFooting,
         Cast,
         Exploit,
+        DuckBack,
         Search,
         End,
     }
@@ -243,6 +244,32 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     {
                         options[i] = options[i] with { Score = options[i].Score + screen };
                     }
+                }
+            }
+
+            // Ducking back into full cover after shooting out of it: what it spares until its next
+            // turn, against the Stamina — and, for a character, the GM's Opportunity (Core Rules §9, "Cover").
+            if (actor.IsShowingFromCover && actor.MayDuckBack && (!real || BattleView.DuckBackRefusal(actor) is null)
+                && (actor.Side == Side.Party || actor.Stamina >= 2))
+            {
+                var showing = assess.Exposure(actor, here);
+                actor.IsShowingFromCover = false;
+                double hidden;
+                try
+                {
+                    hidden = assess.Exposure(actor, here);
+                }
+                finally
+                {
+                    actor.IsShowingFromCover = true;
+                }
+
+                var spared = care * (showing - hidden);
+                if (spared > 0)
+                {
+                    var holding = options.Where(o => o.Kind == OptionKind.End && o.Square is null).Select(o => o.Score).DefaultIfEmpty(0).Max();
+                    var price = Assessor.SpendPrice(actor, 0) + (actor.Side == Side.Party ? BonusPrice : 0);
+                    options.Add(new Option(OptionKind.DuckBack, holding + spared - price, "duck back into cover"));
                 }
             }
 

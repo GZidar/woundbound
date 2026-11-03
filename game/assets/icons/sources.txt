@@ -55,3 +55,4 @@ off-hand lorc/plain-dagger
 mount delapouite/horse-head
 dismount delapouite/walk
 hooves delapouite/horseshoe
+duck-back delapouite/brick-wall

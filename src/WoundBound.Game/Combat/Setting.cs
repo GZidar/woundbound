@@ -56,6 +56,25 @@ namespace WoundBound.Game.Combat
 
         public bool IsWall(GridPosition square) => Walls.Contains(square);
 
+        /// <summary>
+        /// Cover (Core Rules §9, "Cover"): the solid things on the map a creature crouches behind —
+        /// a low wall, a cart, a barrel (Partial), a pillar or a stack of crates taller than a man
+        /// (Full). Marked where they stand, like the ground. Nobody stands in or walks through one.
+        /// Unlike a <see cref="Walls">wall</see>, nothing here stops a shot or a look outright:
+        /// what it does is give cover to whoever stands right behind it.
+        /// </summary>
+        public IReadOnlyDictionary<GridPosition, Cover> CoverPieces { get; init; } = new Dictionary<GridPosition, Cover>();
+
+        /// <summary>The cover a piece on <paramref name="square"/> gives, or None where there is none.</summary>
+        public Cover CoverAt(GridPosition square) => CoverPieces.TryGetValue(square, out var grade) ? grade : Cover.None;
+
+        /// <summary>Whether anything solid stands on <paramref name="square"/> — a wall or a piece of cover: nobody stands in it or moves through it.</summary>
+        public bool IsSolid(GridPosition square) => Walls.Contains(square) || CoverPieces.ContainsKey(square);
+
+        /// <summary>Cover pieces of one grade over the given rectangles, inclusive, for writing a map.</summary>
+        public static Dictionary<GridPosition, Cover> CoverOf(Cover grade, params (int X0, int Y0, int X1, int Y1)[] areas) =>
+            Patches(Terrain.Firm, areas).Keys.ToDictionary(sq => sq, _ => grade);
+
         public bool IsDeepWater(GridPosition square) => Water.TryGetValue(square, out var depth) && depth == WaterDepth.Deep;
 
         /// <summary>The hazard covering <paramref name="square"/>, if any.</summary>
@@ -93,6 +112,7 @@ namespace WoundBound.Game.Combat
             $"Exposure {Exposure}" +
             (Ground.Count > 0 ? $", ground {string.Join(" and ", Ground.Values.Distinct().Select(g => g.ToString()))} in places" : string.Empty) +
             (Water.Count > 0 ? ", water" : string.Empty) +
+            (CoverPieces.Count > 0 ? $", cover ({string.Join(" and ", CoverPieces.Values.Distinct().Order().Select(g => g.ToString().ToLowerInvariant()))})" : string.Empty) +
             string.Concat(Hazards.Select(h => $", {h.Name}"));
     }
 

@@ -263,7 +263,7 @@ namespace WoundBound.Game.Combat
                     return CastPlan.Refused($"Beyond Long — the point of origin is {distance} squares off.");
                 }
 
-                if (distance > 1 && Setting.Walls.Count > 0 && !Sight.Clear(from, origin, Setting.IsWall))
+                if (distance > 1 && !LineOpen(from, origin))
                 {
                     return CastPlan.Refused("Something solid is in the way.");
                 }
@@ -289,6 +289,24 @@ namespace WoundBound.Game.Combat
             // Who it works on, by Type (Core Rules §11).
             MotionKind? motion = spell.SpellType == SpellType.Motion ? SpellArea.MotionOf(spell) : null;
             var willingOnly = spell.SpellType == SpellType.Buff || motion == MotionKind.Quicken;
+
+            // Cover (Core Rules §9): a Ray, Line or Cone is aimed, and full cover can't be targeted by
+            // it; a Volume fills the space and flows round, so it ignores cover. A spell laid on the
+            // willing, a Heal or a Utility isn't an attack at anybody.
+            if (!touch && shape != SpellShape.Volume && !willingOnly
+                && spell.SpellType is SpellType.Harm or SpellType.Control or SpellType.Bane or SpellType.Motion
+                && Setting.CoverPieces.Count > 0)
+            {
+                var exposed = caught.Where(c => c.Side == caster.Side || CoverFrom(from, c) != Cover.Full).ToList();
+                if (exposed.Count == 0 && caught.Count > 0)
+                {
+                    return CastPlan.Refused(caught.Count == 1
+                        ? $"{caught[0].Name} is behind full cover from here — only a Volume would reach them."
+                        : "Everybody it would catch is behind full cover from here.");
+                }
+
+                caught = exposed;
+            }
             if (willingOnly)
             {
                 caught = caught.Where(c => c.Side == caster.Side && !c.IsOutOfFight).ToList();
@@ -569,6 +587,12 @@ namespace WoundBound.Game.Combat
             Write($"{caster.Name} casts {spell.Name} {where} — {(paid.Count == 0 ? "free" : string.Join(", ", paid))}" +
                   (cast.Sustain ? ", declared Sustained." : "."));
 
+            // Casting a spell at somebody out of full cover shows the caster (Core Rules §9, "Popping out").
+            if (spell.SpellType is SpellType.Harm or SpellType.Control or SpellType.Bane or SpellType.Motion)
+            {
+                ShowFromCover(caster, plan.Targets.Where(t => t.Side != caster.Side));
+            }
+
             void Finish()
             {
                 if (caster.IsDazed)
@@ -692,7 +716,8 @@ namespace WoundBound.Game.Combat
                     return;
                 }
 
-                var threshold = target.DodgeThreshold + VisibilityDodgeModifier(target);
+                var threshold = target.DodgeThreshold + VisibilityDodgeModifier(target)
+                                + CoverDodgeModifier(caster.Position, target, SpellArea.ShapeOf(cast) == SpellShape.Volume || spell.Range == SpellRange.Touch);
                 target.HasBeenAttackedSinceTurnStart = true;
                 var advantage = cast.Sacrifice || helped || target.IsDefenceless;
                 var disadvantage = AttacksAtDisadvantage(caster) || harried;

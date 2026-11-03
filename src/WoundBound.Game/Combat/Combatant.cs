@@ -502,6 +502,18 @@ namespace WoundBound.Game.Combat
         /// <summary>Has had the extra attack its Opportunity bonus buys this round — a Solo's, once a round.</summary>
         public bool HasTakenBonusAttackThisRound { get; internal set; }
 
+        /// <summary>
+        /// Rampage (the Duskfang Gnoll, GM Reference §11): once a round, when its attack drops a
+        /// creature to 0 Body, 1 Stamina buys an extra action that is a second attack, at somebody else.
+        /// </summary>
+        public bool HasRampage { get; init; }
+
+        /// <summary>Who its attack this turn just dropped, while a Rampage is open to it; null otherwise.</summary>
+        public Combatant? RampageFrom { get; internal set; }
+
+        /// <summary>Has Rampaged this round — once a round.</summary>
+        public bool HasRampagedThisRound { get; internal set; }
+
         /// <summary>The round it last made an area attack rationed to every other round.</summary>
         public int? LastAreaAttackRound { get; internal set; }
 
@@ -725,6 +737,15 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Has been attacked since the start of its last turn: what Patient forbids.</summary>
         public bool HasBeenAttackedSinceTurnStart { get; internal set; }
+
+        /// <summary>
+        /// Attacked out of full cover and didn't duck back: full cover counts only as partial until
+        /// the start of its next turn (Core Rules §9, "Popping out").
+        /// </summary>
+        public bool IsShowingFromCover { get; internal set; }
+
+        /// <summary>Showed itself on this turn of its own, so 1 Stamina may still duck it back.</summary>
+        public bool MayDuckBack { get; internal set; }
 
         /// <summary>Bought Slip this round: leaving an enemy's reach draws no reaction attack, until the round ends.</summary>
         public bool IsSlipping { get; internal set; }

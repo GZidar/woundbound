@@ -130,22 +130,30 @@ namespace WoundBound.Game.Combat
         /// The rules count distance "around walls … never through them"; a shot or a light is held
         /// to the same.
         /// </summary>
-        public static bool Clear(GridPosition from, GridPosition to, Func<GridPosition, bool> isWall)
+        public static bool Clear(GridPosition from, GridPosition to, Func<GridPosition, bool> isWall) =>
+            !Between(from, to).Any(isWall);
+
+        /// <summary>
+        /// The squares the straight line between the centres of <paramref name="from"/> and
+        /// <paramref name="to"/> passes through, nearest <paramref name="from"/> first — the squares
+        /// at either end left out.
+        /// </summary>
+        public static IEnumerable<GridPosition> Between(GridPosition from, GridPosition to)
         {
             var steps = Math.Max(Math.Abs(to.X - from.X), Math.Abs(to.Y - from.Y)) * 4;
+            GridPosition? last = null;
             for (var i = 1; i < steps; i++)
             {
                 var t = (double)i / steps;
                 var square = new GridPosition(
                     (int)Math.Round(from.X + (to.X - from.X) * t, MidpointRounding.AwayFromZero),
                     (int)Math.Round(from.Y + (to.Y - from.Y) * t, MidpointRounding.AwayFromZero));
-                if (square != from && square != to && isWall(square))
+                if (square != from && square != to && square != last)
                 {
-                    return false;
+                    last = square;
+                    yield return square;
                 }
             }
-
-            return true;
         }
     }
 }

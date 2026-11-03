@@ -61,3 +61,4 @@ The action icons are from [game-icons.net](https://game-icons.net), used under [
 | mount | [horse-head](https://game-icons.net/1x1/delapouite/horse-head.html) | Delapouite |
 | dismount | [walk](https://game-icons.net/1x1/delapouite/walk.html) | Delapouite |
 | hooves | [horseshoe](https://game-icons.net/1x1/delapouite/horseshoe.html) | Delapouite |
+| duck-back | [brick-wall](https://game-icons.net/1x1/delapouite/brick-wall.html) | Delapouite |

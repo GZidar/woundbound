@@ -278,11 +278,24 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// on average — the chance the cast lands, times its dice after armour where it's Body. A
         /// caster's threat is its spells, however feeble the knife in its other hand.
         /// </summary>
-        private static double SpellHarm(Combatant c, Combatant e)
+        private static double SpellHarm(Combatant c, Combatant e) => SpellHarm(c, e, e.DodgeThreshold, Cover.None, AreaCatch);
+
+        /// <summary>
+        /// As <see cref="SpellHarm(Combatant, Combatant)"/>, on <paramref name="e"/> alone at
+        /// <paramref name="dodge"/>, behind <paramref name="cover"/>: an area spell, reckoned a Volume,
+        /// ignores it; one cast at one has partial to beat and can't be cast through full.
+        /// </summary>
+        private static double SpellHarm(Combatant c, Combatant e, int dodge, Cover cover, double areaCatch = 1)
         {
             double best = 0;
             foreach (var spell in c.Spells.Where(s => s.SpellType == SpellType.Harm))
             {
+                var area = spell.Target == SpellTarget.Many;
+                if (!area && cover == Cover.Full)
+                {
+                    continue;
+                }
+
                 var bonus = c.Build is { } build
                     ? c.MagicAccess.FirstOrDefault(a => a.Source == spell.Source) is { } access ? CharacterCalculator.CastBonus(build, access.CastAbility) : 0
                     : c.StatblockCastBonus;
@@ -292,8 +305,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     ? InventoryCalculator.ArmourAbsorbedAgainst(e.Armour, WoundType.Body, isDirect: false)
                     : 0;
                 // An area spell lands on more than one: about as many as a caster can count on catching.
-                var caught = spell.Target == SpellTarget.Many ? AreaCatch : 1;
-                best = Math.Max(best, Odds.Of(bonus, e.DodgeThreshold).Success * Math.Max(0, dice - absorbs) * caught);
+                var caught = area ? areaCatch : 1;
+                var against = dodge + (!area && cover == Cover.Partial ? 2 : 0);
+                best = Math.Max(best, Odds.Of(bonus, against).Success * Math.Max(0, dice - absorbs) * caught);
             }
 
             return best;
@@ -553,6 +567,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     {
                         best = Math.Max(best, Blow(enemy, attack, creature, die, dt + extraDodge).ExpectedDealt);
                     }
+                }
+
+                // A Harm spell from where it stands: a Ray is stopped by full cover and has partial to
+                // beat; a Volume flows round both (Core Rules §9, "Cover").
+                if (enemy.Spells.Count > 0 && enemy.DistanceTo(square) <= view.LongRangeSquares && view.LineOpen(enemy.Position, square))
+                {
+                    var cover = view.CoverFrom(enemy.Position, creature, square);
+                    var dodge = creature.DodgeThreshold + view.VisibilityDodgeModifier(creature, square) + extraDodge;
+                    best = Math.Max(best, SpellHarm(enemy, creature, dodge, cover));
                 }
 
                 if (best <= 0)

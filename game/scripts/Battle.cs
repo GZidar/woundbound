@@ -176,8 +176,10 @@ namespace WoundBoundGame
         private static readonly Color ShallowWater = new(0.25f, 0.45f, 0.65f, 0.55f);
         private static readonly Color DeepWater = new(0.10f, 0.22f, 0.45f, 0.85f);
         private static readonly Color Wall = new(0.42f, 0.40f, 0.38f);
+        private static readonly Color CoverWood = new(0.55f, 0.40f, 0.24f);
         private static readonly Color HazardEdge = new(0.95f, 0.75f, 0.2f, 0.55f);
         private Button regainFootingButton = null!;
+        private Button duckBackButton = null!;
         private static readonly Color SureGround = new(0.55f, 0.55f, 0.6f, 0.15f);
         private static readonly Color Gloom = new(0f, 0f, 0.03f, 0.35f);
         private static readonly Color Darkness = new(0f, 0f, 0.03f, 0.62f);
@@ -363,7 +365,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders", "glamour" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders", "glamour", "roadblock", "gnoll" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -734,6 +736,13 @@ namespace WoundBoundGame
                     {
                         DrawRect(rect, Wall);
                     }
+                    else if (encounter.Setting.CoverAt(square) is var cover && cover != Cover.None)
+                    {
+                        // Full cover stands the height of the square; partial is a half-height barrier.
+                        var piece = cover == Cover.Full ? rect.Grow(-2) : new Rect2(rect.Position + new Vector2(2, rect.Size.Y * 0.45f), new Vector2(rect.Size.X - 4, rect.Size.Y * 0.4f));
+                        DrawRect(piece, CoverWood);
+                        DrawRect(piece, CoverWood.Darkened(0.4f), filled: false, width: 1.5f);
+                    }
                     else if (!encounter.Setting.Water.ContainsKey(square))
                     switch (encounter.GroundAt(square))
                     {
@@ -1076,6 +1085,8 @@ namespace WoundBoundGame
                 14 => SampleEncounters.HollowStagInTheBirchwood(data, Dice(), PickedGm()),
                 15 => SampleEncounters.Outriders(data, Dice(), PickedGm()),
                 16 => SampleEncounters.GlamouredMill(data, Dice(), PickedGm()),
+                17 => SampleEncounters.Roadblock(data, Dice(), PickedGm()),
+                18 => SampleEncounters.GnollRaid(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
             };
             // Lines written while the fight was set up came before anyone was listening.
@@ -1335,6 +1346,9 @@ namespace WoundBoundGame
             var footingWhy = acting is null ? "Not your turn." : Encounter.RegainFootingRefusal(acting);
             regainFootingButton.Disabled = footingWhy is not null;
             regainFootingButton.TooltipText = footingWhy ?? "Spend your action getting your footing back — nothing else takes an action until you do.";
+            var duckWhy = acting is null ? "Not your turn." : Encounter.DuckBackRefusal(acting);
+            duckBackButton.Disabled = duckWhy is not null;
+            duckBackButton.TooltipText = duckWhy ?? "Duck back into full cover after attacking out of it: 1 Stamina, tactical — the GM gains an Immediate Opportunity.";
             var dropWhy = acting is null ? "Not your turn." : Encounter.DropLightRefusal(acting);
             dropLightButton.Disabled = dropWhy is not null;
             dropLightButton.TooltipText = dropWhy ?? "Let go of your light — free. It burns on where it falls, and you step out of it.";
@@ -1739,6 +1753,14 @@ namespace WoundBoundGame
             };
             buttons.AddChild(dragButton);
 
+            duckBackButton = new Button { Text = "Duck back" };
+            duckBackButton.Pressed += () =>
+            {
+                encounter.TryDuckBack();
+                Refresh();
+            };
+            buttons.AddChild(duckBackButton);
+
             regainFootingButton = new Button { Text = "Regain footing" };
             regainFootingButton.Pressed += () =>
             {
@@ -1908,6 +1930,8 @@ namespace WoundBoundGame
             fightPicker.AddItem("The Hollow Stag: a Solo in the birchwood");
             fightPicker.AddItem("Outriders: bandits on horseback");
             fightPicker.AddItem("The glamoured mill: bats and a glamourer");
+            fightPicker.AddItem("The roadblock: crossbows behind cover");
+            fightPicker.AddItem("A Duskfang Gnoll with bandits (Rampage)");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 

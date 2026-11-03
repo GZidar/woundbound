@@ -133,5 +133,8 @@ namespace WoundBound.Game.Combat
         AttackProfile? Profile = null)
     {
         public bool CanAttack => Refusal is null;
+
+        /// <summary>What partial cover added to <see cref="DodgeThreshold"/> (Core Rules §9, "Cover").</summary>
+        public int CoverDodgeModifier { get; init; }
     }
 }

@@ -158,6 +158,16 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Raise the shield in hand over itself, with the action.</summary>
         public sealed record RaiseShield : GmStep;
 
+        /// <summary>
+        /// Rampage (GM Reference §11, the Duskfang Gnoll): its attack has just dropped somebody, and
+        /// 1 Stamina buys an extra action that is a second attack, at <paramref name="Target"/> — a
+        /// different creature. A tactical spend; no Opportunity for anybody.
+        /// </summary>
+        public sealed record Rampage(Combatant Target, AttackProfile? With = null) : GmStep;
+
+        /// <summary>Duck back into full cover after attacking out of it: 1 Stamina, tactical, no Opportunity (Core Rules §9, "Cover").</summary>
+        public sealed record DuckBack : GmStep;
+
         /// <summary>Take up the weapon a Disarm knocked to its feet, with the action.</summary>
         public sealed record TakeUpWeapon : GmStep;
 

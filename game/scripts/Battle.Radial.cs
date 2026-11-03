@@ -105,7 +105,7 @@ namespace WoundBoundGame
                 .Where(b => b.Visible).Select(b => Mirror(b)).Concat(PackItems(acting)).ToList()));
 
             // What only applies now and then is offered only when it does.
-            foreach (var button in new[] { standUpButton, breakFreeButton, regainFootingButton })
+            foreach (var button in new[] { standUpButton, breakFreeButton, regainFootingButton, duckBackButton })
             {
                 if (!button.Disabled)
                 {
@@ -606,7 +606,7 @@ namespace WoundBoundGame
             var named = new (Button Button, string Icon)[]
             {
                 (raiseShieldButton, "raise-shield"), (swapButton, "swap"), (lightButton, "light"), (dropLightButton, "drop-light"),
-                (takeUpButton, "take-up"), (standUpButton, "stand-up"), (breakFreeButton, "break-free"), (regainFootingButton, "regain-footing"),
+                (takeUpButton, "take-up"), (standUpButton, "stand-up"), (breakFreeButton, "break-free"), (regainFootingButton, "regain-footing"), (duckBackButton, "duck-back"),
                 (extraActionButton, "extra-action"), (endTurnButton, "end-turn"), (dragButton, "drag"), (letGoButton, "let-go"),
             };
 

@@ -449,7 +449,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     foreach (var foe in enemies.Where(e => !e.IsPhantom && !e.IsBroken).OrderBy(e => e.DistanceTo(at)).Take(2))
                     {
                         foreach (var square in Aims.Select(d => new GridPosition(foe.Position.X + d.X, foe.Position.Y + d.Y))
-                                     .Where(sq => View.At(sq) is null && !View.Setting.IsWall(sq)).Take(3))
+                                     .Where(sq => View.At(sq) is null && !View.Setting.IsSolid(sq)).Take(3))
                         {
                             yield return (new SpellCast(spell) { Corner = square }, _ => DecoyWorth(actor, square, enemies));
                         }
@@ -720,7 +720,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             while (crossed < squares)
             {
                 var next = new GridPosition(at.X + step.Item1, at.Y + step.Item2);
-                if (View.At(next) is not null || View.Setting.IsWall(next))
+                if (View.At(next) is not null || View.Setting.IsSolid(next))
                 {
                     break;
                 }

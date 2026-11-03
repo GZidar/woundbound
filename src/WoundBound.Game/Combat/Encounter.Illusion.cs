@@ -199,8 +199,8 @@ namespace WoundBound.Game.Combat
 
             var squares = form == IllusionForm.Figure
                 ? [corner]
-                : SpellArea.Block(corner, spell.Size).Where(sq => !Setting.IsWall(sq) && At(sq) is null).ToList();
-            if (squares.Count == 0 || squares.Any(sq => Setting.IsWall(sq) || At(sq) is not null))
+                : SpellArea.Block(corner, spell.Size).Where(sq => !Setting.IsSolid(sq) && At(sq) is null).ToList();
+            if (squares.Count == 0 || squares.Any(sq => Setting.IsSolid(sq) || At(sq) is not null))
             {
                 return ("There's no open ground there for it to stand on.", default, [], [], false);
             }
