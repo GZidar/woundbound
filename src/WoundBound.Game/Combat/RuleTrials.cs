@@ -23,6 +23,13 @@ namespace WoundBound.Game.Combat
         public static bool IgnoreMorale { get; set; }
 
         /// <summary>
+        /// For measuring, never for play: creatures added to every fight as it is set up — what a
+        /// bigger budget does to a fight, for calibrating Threat Value (GM Reference §5). Handed the
+        /// fight's combatants and its setting; returns the newcomers.
+        /// </summary>
+        public static Func<IReadOnlyList<Combatant>, Setting, IEnumerable<Combatant>>? Reinforce { get; set; }
+
+        /// <summary>
         /// A statblock's Stamina under the trial floor: only a Minion stands on so little; everything
         /// else has at least Tier + 1 (the user, 2026-11-02, to go into the GM Reference). A creature
         /// that starts a turn on 0 falls unconscious, so 1 is a creature that can never spend.

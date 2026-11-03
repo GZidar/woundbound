@@ -147,3 +147,31 @@ public class MoraleCountTests
         Assert.True(kinOnly.Counts(tollroad));
     }
 }
+
+/// <summary>A caster dropped and brought back is no caster until they cast again (the user, 2026-11-03).</summary>
+public class DormantCasterTests
+{
+    private static readonly Game.Data.GameData Data = TestData.Load();
+
+    [Fact]
+    public void BroughtBack_IsNoCaster_UntilTheyCastAgain()
+    {
+        var encounter = SampleEncounters.SignpostWithCasters(Data, new ScriptedDice());
+        var mirella = encounter.Combatants.Single(c => c.Name == "Mirella Vask");
+        var gm = new Assessor(encounter.View, Knowledge.Sheets, Side.Adversaries);
+        mirella.HasCastSpell = true;
+        Assert.True(gm.KnownCaster(mirella));
+        var asCaster = new Assessor(encounter.View, Knowledge.Sheets, Side.Adversaries).Value(mirella);
+
+        mirella.HasBeenDropped = true;
+        mirella.HasCastSinceDropped = false;
+        mirella.Body = 1;
+        var dormant = new Assessor(encounter.View, Knowledge.Sheets, Side.Adversaries);
+        Assert.True(mirella.IsDormantCaster);
+        Assert.False(dormant.KnownCaster(mirella));
+        Assert.True(dormant.Value(mirella) < asCaster);
+
+        mirella.HasCastSinceDropped = true;
+        Assert.True(new Assessor(encounter.View, Knowledge.Sheets, Side.Adversaries).KnownCaster(mirella));
+    }
+}

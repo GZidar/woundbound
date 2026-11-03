@@ -499,6 +499,7 @@ namespace WoundBound.Game.Combat
             var spell = cast.Spell;
             caster.ActionsRemaining--;
             caster.HasCastSpell = true;
+            caster.HasCastSinceDropped = true;
 
             // Paid before anything is rolled; a cost never cancels the thing it paid for (Core Rules §4).
             var paid = new List<string>();
@@ -878,7 +879,11 @@ namespace WoundBound.Game.Combat
                 {
                     target.TendEligible[WoundType.Body] = true;
                     target.Body = target.IsMinion ? 0 : body;
-                    target.HasBeenDropped |= target.Body <= 0;
+                    if (target.Body <= 0)
+                    {
+                        target.HasBeenDropped = true;
+                        target.HasCastSinceDropped = false;
+                    }
                 }
 
                 var (now, max) = target.Track(type);

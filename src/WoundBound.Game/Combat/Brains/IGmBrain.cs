@@ -233,6 +233,12 @@ namespace WoundBound.Game.Combat.Brains
 
         public bool HasAttacked { get; internal set; }
 
+        /// <summary>An ambusher's surprise action before round 1: one action from where it lies, and nothing more.</summary>
+        public bool IsSurprise { get; internal init; }
+
+        /// <summary>The attacks — blows and Harm spells — made on this turn: one is all a turn has.</summary>
+        public int Attacks { get; internal set; }
+
         /// <summary>Has taken Dodge, Grounded or Resolute this turn.</summary>
         public bool HasStoodGround { get; internal set; }
 

@@ -165,7 +165,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// or been sensed — or, reading the other side's sheets, before they've cast at all.
         /// </summary>
         public bool KnownCaster(Combatant c) =>
-            c.ShowsAsCaster || (side is not null && Knows == Knowledge.Sheets && c.Side != side && c.Spells.Count > 0);
+            !c.IsDormantCaster && (c.ShowsAsCaster || (side is not null && Knows == Knowledge.Sheets && c.Side != side && c.Spells.Count > 0));
 
         /// <summary>
         /// How soft <paramref name="c"/> looks to somebody who hasn't read its sheet, 0 to 1: by the
@@ -191,7 +191,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// one it knows either way (its own side, a read sheet, a cast seen), otherwise by the look of them.
         /// </summary>
         public double SuspectedCaster(Combatant c) =>
-            Reads(c) || c.ShowsAsCaster ? 0 : 0.6 * Softness(c);
+            Reads(c) || c.ShowsAsCaster || c.IsDormantCaster ? 0 : 0.6 * Softness(c);
 
         /// <summary>Whether this brain knows what spells <paramref name="c"/> could cast at it.</summary>
         public bool KnowsSpells(Combatant c) => Reads(c) || c.ShowsAsCaster;
@@ -208,7 +208,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// sides are reckoned in the same currency, so a wound dealt and a wound taken trade evenly:
         /// the damage race that decides a fight.
         /// </summary>
-        public double Value(Combatant c)
+        /// <summary>
+        /// Whose eyes the options being scored are seen through: a phantom is worth to it only as
+        /// much as it believes the thing real. Null weighs everything as it seems.
+        /// </summary>
+        public Combatant? Observer { get; set; }
+
+        public double Value(Combatant c) =>
+            BaseValue(c) * (Observer is { } observer && c.IsPhantom ? view.BelievedReal(observer, c) : 1);
+
+        private double BaseValue(Combatant c)
         {
             if (values.TryGetValue(c, out var known))
             {
@@ -234,16 +243,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>
         /// A creature's worth before any exchange: its harm and help over the rounds it would last,
         /// in raw wounds. Casters first — but only for as long as they can still cast: a caster with
-        /// nothing left to pay for a spell is just another body, and one already dropped once, and
-        /// brought back on a wound or two, is no longer the threat that made them the target (the
-        /// user's direction, 2026-11-02 — for every brain, not only a Solo's).
+        /// nothing left to pay for a spell is just another body, and one dropped and brought back is
+        /// no caster at all until they cast again — downed, they're out, cleaned up at the end (the
+        /// user's direction, 2026-11-02 and 2026-11-03 — for every brain, not only a Solo's).
         /// </summary>
         private double RawValue(Combatant c)
         {
             var value = 0.5 + (Threat(c) + Support(c)) * Lasts(c);
             if (KnownCaster(c))
             {
-                value *= 1 + (c.HasBeenDropped ? 0.5 : 1.5) * CastingLeft(c) * Spread(c);
+                value *= 1 + 1.5 * CastingLeft(c) * Spread(c);
             }
             else if (SuspectedCaster(c) is var suspected and > 0)
             {
@@ -399,7 +408,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// on average — the chance the cast lands, times its dice after armour where it's Body. A
         /// caster's threat is its spells, however feeble the knife in its other hand.
         /// </summary>
-        private double SpellHarm(Combatant c, Combatant e) => KnowsSpells(c) ? SpellHarm(c, e, Dodge(e), Cover.None, AreaCatch) : 0;
+        private double SpellHarm(Combatant c, Combatant e) => KnowsSpells(c) && !c.IsDormantCaster ? SpellHarm(c, e, Dodge(e), Cover.None, AreaCatch) : 0;
 
         /// <summary>
         /// As <see cref="SpellHarm(Combatant, Combatant)"/>, on <paramref name="e"/> alone at

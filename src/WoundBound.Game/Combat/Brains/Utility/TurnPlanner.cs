@@ -70,6 +70,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public List<Option> Options(Combatant actor, bool hasMove, int actions, bool real,
             bool bonusAvailable = false, bool bankFull = false, IReadOnlyCollection<Combatant>? stillToAct = null, Interruption? interrupting = null)
         {
+            assess.Observer = actor;
             var options = SoloAttacks(actor, OptionsHere(actor, hasMove, actions, real, bonusAvailable, bankFull, stillToAct), real, bonusAvailable, bankFull);
             return interrupting is null ? options : options.Select(o => o with { Score = o.Score + Spared(actor, o, interrupting) }).ToList();
         }
@@ -367,6 +368,26 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public const double BonusPrice = 1.0;
 
+        /// <summary>
+        /// Testing an Illusion: no more than a nagging doubt for one it never saw made. One that
+        /// watched a figure appear as the other side cast weighs it as it should — the chance the
+        /// thing is false, times the chance the test sees through it, times the blow it would
+        /// otherwise waste on it: the best it could strike at anything real.
+        /// </summary>
+        private double SearchWorth(Combatant actor, Illusion illusion)
+        {
+            if (illusion.Phantom is not { } figure || !illusion.WasWitnessedBy(actor))
+            {
+                return 0.12;
+            }
+
+            var doubt = 1 - View.BelievedReal(actor, figure);
+            var seesThrough = Odds.Of(actor.SkillBonus("Search"), illusion.Deceit).Success;
+            var wasted = Math.Max(assess.BestAttack(actor, actor.Position, figure).Worth / Math.Max(0.01, View.BelievedReal(actor, figure)),
+                View.EnemiesOf(actor).Where(e => !e.IsPhantom && !e.IsOutOfFight).Select(e => assess.BestAttack(actor, actor.Position, e).Worth).DefaultIfEmpty(0).Max());
+            return Math.Max(0.12, doubt * seesThrough * wasted);
+        }
+
         /// <summary>What a cowardly creature adds to a blow at somebody who looks wholly soft, in wounds' worth.</summary>
         public const double CowardsPick = 0.6;
 
@@ -627,7 +648,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                              && (!checkRules || View.SearchRefusal(actor, i) is null)
                              && (i.Subject == actor || i.Squares.Any(sq => actor.DistanceTo(sq) <= 8))))
                 {
-                    yield return new Option(OptionKind.Search, 0.12, $"test {illusion.Spell}", Illusion: illusion);
+                    yield return new Option(OptionKind.Search, SearchWorth(actor, illusion), $"test {illusion.Spell}", Illusion: illusion);
                 }
             }
 

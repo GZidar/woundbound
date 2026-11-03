@@ -33,7 +33,8 @@ namespace WoundBound.Game.Combat
         {
             Write($"{actor.Name} declares: {what}.");
             lastDeclaredTarget = against;
-            OfferInterrupt(actor, new Queue<Combatant>(InterruptersFor(actor)), () =>
+            // Nobody Interrupts what they never saw coming (Core Rules §9, "Ambush").
+            OfferInterrupt(actor, new Queue<Combatant>(IsSurprise ? [] : InterruptersFor(actor)), () =>
             {
                 if (actor.IsOutOfFight)
                 {

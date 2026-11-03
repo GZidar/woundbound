@@ -8,6 +8,37 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// as its <see cref="BrainSkill"/> lets it. The default goal is to kill the party; a creature
     /// that has broken runs, as the simple GM's do.
     /// </summary>
+    /// <summary>
+    /// For tuning: where a brain's choices are written out — every option it weighed, best first,
+    /// and which it took. Null, as in play, writes nothing.
+    /// </summary>
+    public static class BrainTrace
+    {
+        public static Action<string>? Sink { get; set; }
+
+        /// <summary>How many of the best options each decision shows.</summary>
+        public static int Shown { get; set; } = 6;
+
+        internal static void Decision(Combatant actor, IReadOnlyList<Option> options, Option chosen)
+        {
+            if (Sink is not { } sink)
+            {
+                return;
+            }
+
+            sink($"    [{actor.Name} weighs {options.Count} options]");
+            foreach (var option in options.OrderByDescending(o => o.Score).Take(Shown))
+            {
+                sink($"    {(option == chosen ? "→" : " ")} {option.Score,6:0.00}  {option.Kind}: {option.Why}");
+            }
+
+            if (!options.OrderByDescending(o => o.Score).Take(Shown).Contains(chosen))
+            {
+                sink($"    → {chosen.Score,6:0.00}  {chosen.Kind}: {chosen.Why}");
+            }
+        }
+    }
+
     public class UtilityGmBrain : SimpleGmBrain, IGmBrain
     {
         private readonly Random random;
@@ -86,8 +117,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 .Select(a => (Adversary: a, Worth: FreshTurnWorth(view, a)))
                 .OrderByDescending(x => x.Worth)
                 .FirstOrDefault();
-            return best.Adversary is not null && best.Worth >= 1.0 ? best.Adversary : null;
+            // A banked Opportunity keeps, so it waits for a turn worth having; an Immediate one
+            // lapses before its spender's next turn, and a modest turn beats none at all.
+            var bar = view.ImmediateOpportunities > 0 ? ImmediateBar : 1.0;
+            return best.Adversary is not null && best.Worth >= bar ? best.Adversary : null;
         }
+
+        /// <summary>What a turn must be worth to spend an Immediate Opportunity on, which would otherwise lapse.</summary>
+        public const double ImmediateBar = 0.4;
 
         public override GmStep NextStep(BattleView view, GmTurn turn)
         {
@@ -98,7 +135,17 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             var planner = Planner(view, out _);
-            var attacked = Encounter.OnceARoundRefusal(actor, turn.IsExtraTurn) is not null;
+            if (turn.IsSurprise)
+            {
+                // One action from where it lies: the best blow, shot or spell it has, or nothing.
+                var surprise = Planner(view, out _).Options(actor, hasMove: false, actions: 1, real: true)
+                    .Where(o => o.Kind != OptionKind.Move && o.Then is null).ToList();
+                var pick = surprise.Count == 0 ? null : Choose.Pick(surprise, o => o.Score, Skill, random);
+                BrainTrace.Decision(actor, surprise, pick ?? new Option(OptionKind.End, 0, "keep hidden"));
+                return pick is null ? GmStep.End : StepFor(pick, turn);
+            }
+
+            var attacked = Encounter.OnceARoundRefusal(actor, turn) is not null;
             var options = WithoutAttacks(attacked, planner.Options(actor, actor.HasMove, actor.ActionsRemaining, real: true,
                 turn.BonusAvailable, view.BankedOpportunities >= view.MaxBankedOpportunities, StillToAct(view, actor)));
 
@@ -150,7 +197,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             var choice = Choose.Pick(options, o => o.Score, Skill, random);
-            return choice.Kind switch
+            BrainTrace.Decision(actor, options, choice);
+            return StepFor(choice, turn);
+        }
+
+        /// <summary>The step an option chosen on <paramref name="turn"/> asks the encounter for.</summary>
+        private static GmStep StepFor(Option choice, GmTurn turn) =>
+            choice.Kind switch
             {
                 OptionKind.Move => new GmStep.Move(choice.Square!.Value),
                 OptionKind.Attack => new GmStep.Attack(choice.Target!, choice.WithBonus && turn.BonusAvailable, choice.With, choice.Manoeuvre),
@@ -173,7 +226,6 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.RegainFooting => new GmStep.RegainFooting(),
                 _ => GmStep.End,
             };
-        }
 
         /// <summary>
         /// An Opportunity bonus that isn't spent on a blow or a spell (GM Reference §9): another move,

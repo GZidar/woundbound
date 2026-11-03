@@ -195,4 +195,23 @@ public class IllusionTests
         Assert.Empty(encounter.Illusions);
         Assert.Contains(encounter.Log, l => l.Contains("fades with Elthric"));
     }
+
+    [Fact]
+    public void WhoeverSawTheDoubleMade_IsTakenIn_ButSuspicious()
+    {
+        var (encounter, elthric, first, second) = Road([10, 5]);
+        Assert.True(encounter.TryCast(new SpellCast(Spell(elthric, "Phantom Double")) { Corner = new GridPosition(8, 4) }), Log(encounter));
+        var illusion = encounter.Illusions.Single();
+        var figure = illusion.Phantom!;
+
+        Assert.True(illusion.WasWitnessedBy(first) && illusion.WasWitnessedBy(second));
+        Assert.True(encounter.Fools(illusion, first)); // still taken in: it can't know
+        Assert.Equal(Combat.Brains.BattleView.WitnessedFigureReal, encounter.View.BelievedReal(first, figure));
+        Assert.Equal(1, encounter.View.BelievedReal(first, elthric));
+
+        // A blow at the figure is worth to the witness only what it believes the figure real.
+        var plain = new Combat.Brains.Utility.Assessor(encounter.View).Value(figure);
+        var suspicious = new Combat.Brains.Utility.Assessor(encounter.View) { Observer = first }.Value(figure);
+        Assert.Equal(plain * Combat.Brains.BattleView.WitnessedFigureReal, suspicious, 6);
+    }
 }

@@ -134,8 +134,10 @@ public class UtilityBrainTests
         (mirella.Soul, mirella.Body) = (0, 1);
         var spent = new Assessor(encounter.View).Value(mirella);
 
+        // Brought back and not casting again, or with nothing left to cast with: neither is the
+        // caster that made them the first to put down.
         Assert.True(dropped < fresh, $"dropped {dropped:0.00}, fresh {fresh:0.00}");
-        Assert.True(spent < dropped, $"spent {spent:0.00}, dropped {dropped:0.00}");
+        Assert.True(spent < fresh, $"spent {spent:0.00}, fresh {fresh:0.00}");
         Assert.Equal(0, Assessor.CastsLeft(mirella, mirella.Spells.Single(s => s.Name == "Vital Transfer")));
     }
 

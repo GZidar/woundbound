@@ -1084,12 +1084,12 @@ namespace WoundBoundGame
         {
             encounter = fightPicker.Selected switch
             {
-                1 => SampleEncounters.SignpostWithCasters(data, Dice(), PickedGm()),
-                2 => SampleEncounters.CampfireAmbush(data, Dice(), PickedGm()),
-                3 => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), fourPlayers: true),
-                4 => SampleEncounters.FerryShrineAmbush(data, Dice(), PickedGm()),
-                5 => SampleEncounters.FerryShrineWithCasters(data, Dice(), PickedGm()),
-                6 => SampleEncounters.PartyVersusAmbush(data, Dice(), PickedGm()),
+                1 => SampleEncounters.SignpostWithCasters(data, Dice(), PickedGm(), ambush: true),
+                2 => SampleEncounters.CampfireAmbush(data, Dice(), PickedGm(), ambush: true),
+                3 => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), fourPlayers: true, ambush: true),
+                4 => SampleEncounters.FerryShrineAmbush(data, Dice(), PickedGm(), ambush: true),
+                5 => SampleEncounters.FerryShrineWithCasters(data, Dice(), PickedGm(), ambush: true),
+                6 => SampleEncounters.PartyVersusAmbush(data, Dice(), PickedGm(), ambush: true),
                 7 => SampleEncounters.FighterVersusRatkin(data, Dice(), PickedGm()),
                 8 => SampleEncounters.HedgeWitchesToll(data, Dice(), PickedGm()),
                 9 => SampleEncounters.RivalBand(data, Dice(), PickedGm()),
@@ -1100,9 +1100,9 @@ namespace WoundBoundGame
                 14 => SampleEncounters.HollowStagInTheBirchwood(data, Dice(), PickedGm()),
                 15 => SampleEncounters.Outriders(data, Dice(), PickedGm()),
                 16 => SampleEncounters.GlamouredMill(data, Dice(), PickedGm()),
-                17 => SampleEncounters.Roadblock(data, Dice(), PickedGm()),
-                18 => SampleEncounters.GnollRaid(data, Dice(), PickedGm()),
-                _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm()),
+                17 => SampleEncounters.Roadblock(data, Dice(), PickedGm(), ambush: true),
+                18 => SampleEncounters.GnollRaid(data, Dice(), PickedGm(), ambush: true),
+                _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), ambush: true),
             };
             // Lines written while the fight was set up came before anyone was listening.
             battleLog = new BattleLog(ColourOf);

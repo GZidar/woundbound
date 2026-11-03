@@ -33,7 +33,41 @@ var which = Text("--fight", "signpost");
 var gmName = Text("--gm", "simple")!;
 var seats = Text("--party", "all");
 RuleTrials.MinionStamina = Option("--minion-stamina", 1);
+var data = GameData.Load(file => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", file)));
 RuleTrials.IgnoreMorale = args.Contains("--no-morale");
+
+// --extra N: N more of the fight's own adversaries, cycling through them, each on the nearest open
+// square to the one it copies — for calibrating Threat Value against what the brains can do.
+var extra = Option("--extra", 0);
+if (extra > 0)
+{
+    RuleTrials.Reinforce = (present, setting) =>
+    {
+        var copyable = present.Where(c => c.Side == Side.Adversaries && c.Statblock is not null && !c.IsSteed && !c.IsPhantom
+                                          && c.Role != WoundBound.Rules.Enums.AdversaryRole.Solo).ToList();
+        var added = new List<Combatant>();
+        if (copyable.Count == 0)
+        {
+            return added;
+        }
+
+        var taken = present.SelectMany(c => c.Footprint).ToHashSet();
+        for (var i = 0; i < extra; i++)
+        {
+            var original = copyable[i % copyable.Count];
+            var spot = Enumerable.Range(1, 12)
+                .SelectMany(r => Enumerable.Range(-r, 2 * r + 1).SelectMany(dx => Enumerable.Range(-r, 2 * r + 1)
+                    .Select(dy => new GridPosition(original.Position.X + dx, original.Position.Y + dy))))
+                .First(sq => sq.X >= 0 && sq.Y >= 0 && sq.X < 28 && sq.Y < 18 && !setting.IsSolid(sq)
+                             && Footprints.At(sq, original.Across).All(f => !taken.Contains(f) && !setting.IsSolid(f)));
+            var copy = CombatantFactory.FromAdversary(original.Statblock!, $"{original.Name} (more {i + 1})", spot, data.Spells);
+            taken.UnionWith(copy.Footprint);
+            added.Add(copy);
+        }
+
+        return added;
+    };
+}
 // The GM knowledge dial: sheets or seen; left out, it goes with the skill (Best reads the sheets).
 Knowledge? knowledge = Text("--knowledge", null) switch
 {
@@ -52,16 +86,15 @@ IGmBrain Gm() => gmName switch
     _ => new SimpleGmBrain(),
 };
 
-var data = GameData.Load(file => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", file)));
 Encounter Stage(IDiceRoller dice) => which switch
 {
     "solo" => SampleEncounters.FighterVersusRatkin(data, dice, Gm()),
-    "party" => SampleEncounters.PartyVersusAmbush(data, dice, Gm()),
-    "signpost4" => SampleEncounters.SignpostAmbush(data, dice, Gm(), fourPlayers: true),
-    "casters" => SampleEncounters.SignpostWithCasters(data, dice, Gm()),
-    "ford" => SampleEncounters.FerryShrineAmbush(data, dice, Gm()),
-    "fordcasters" => SampleEncounters.FerryShrineWithCasters(data, dice, Gm()),
-    "camp" => SampleEncounters.CampfireAmbush(data, dice, Gm()),
+    "party" => SampleEncounters.PartyVersusAmbush(data, dice, Gm(), ambush: true),
+    "signpost4" => SampleEncounters.SignpostAmbush(data, dice, Gm(), fourPlayers: true, ambush: true),
+    "casters" => SampleEncounters.SignpostWithCasters(data, dice, Gm(), ambush: true),
+    "ford" => SampleEncounters.FerryShrineAmbush(data, dice, Gm(), ambush: true),
+    "fordcasters" => SampleEncounters.FerryShrineWithCasters(data, dice, Gm(), ambush: true),
+    "camp" => SampleEncounters.CampfireAmbush(data, dice, Gm(), ambush: true),
     "witches" => SampleEncounters.HedgeWitchesToll(data, dice, Gm()),
     "rivals" => SampleEncounters.RivalBand(data, dice, Gm()),
     "swarm" => SampleEncounters.RatswarmOnTheCauseway(data, dice, Gm()),
@@ -69,11 +102,11 @@ Encounter Stage(IDiceRoller dice) => which switch
     "champion" => SampleEncounters.ChampionOnTheGreen(data, dice, Gm()),
     "outriders" => SampleEncounters.Outriders(data, dice, Gm()),
     "glamour" => SampleEncounters.GlamouredMill(data, dice, Gm()),
-    "roadblock" => SampleEncounters.Roadblock(data, dice, Gm()),
-    "gnoll" => SampleEncounters.GnollRaid(data, dice, Gm()),
+    "roadblock" => SampleEncounters.Roadblock(data, dice, Gm(), ambush: true),
+    "gnoll" => SampleEncounters.GnollRaid(data, dice, Gm(), ambush: true),
     "guardians" => SampleEncounters.ShrineGuardians(data, dice, Gm()),
     "stag" => SampleEncounters.HollowStagInTheBirchwood(data, dice, Gm()),
-    _ => SampleEncounters.SignpostAmbush(data, dice, Gm()),
+    _ => SampleEncounters.SignpostAmbush(data, dice, Gm(), ambush: true),
 };
 
 var tactics = PartyTactics.Presets;
@@ -108,6 +141,17 @@ if (Text("--show", null) is { } show && int.TryParse(show, out var shown))
 {
     var one = Stage(new RandomDiceRoller(new Random(shown)));
     var showAs = BrainSkill.Levels.FirstOrDefault(l => l.Name.Equals(Text("--show-as", "Best"), StringComparison.OrdinalIgnoreCase)) ?? BrainSkill.Best;
+    if (args.Contains("--trace"))
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        // Live, so the GM's weighing of each choice lands beside what came of it.
+        Console.WriteLine(string.Join(Environment.NewLine, one.Log));
+        one.Logged += Console.WriteLine;
+        BrainTrace.Sink = Console.WriteLine;
+        Simulator.PlayOne(one, new UtilityPartyBrain(showAs));
+        return;
+    }
+
     Simulator.PlayOne(one, new UtilityPartyBrain(showAs));
     Console.WriteLine(string.Join(Environment.NewLine, one.Log));
     return;

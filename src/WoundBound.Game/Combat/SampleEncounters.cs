@@ -302,13 +302,21 @@ namespace WoundBound.Game.Combat
             },
         };
 
+        /// <summary>A creature lying in wait for an ambush (Core Rules §9, "Ambush"): it may strike first, from hiding, if the party misses it.</summary>
+        /// <param name="ambush">Whether the fight is staged as an ambush, rolled before round 1; off, it opens with both sides in the open.</param>
+        private static Combatant Lurking(Combatant creature, bool ambush)
+        {
+            creature.LiesInWait = ambush;
+            return creature;
+        }
+
         /// <summary>
         /// Three characters — the Dumb Fighter, Salla and Drovan — ambushed on the road: a Tollroad
         /// Bandit, his Timber Wolf, and two Bramble Ratkin. 1.5 + 1 + 0.25 × 2 is a Threat Value
         /// of 3, a Standard fight's budget for a party of three (GM Reference §5), and the GM has
         /// three adversary turns a round for four creatures.
         /// </summary>
-        public static Encounter PartyVersusAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        public static Encounter PartyVersusAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
             var ratkin = data.Adversary("Bramble Ratkin");
 
@@ -319,8 +327,8 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(0, 6)),
                 CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(8, 4)),
                 CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "Timber Wolf", new GridPosition(8, 2)),
-                CombatantFactory.FromAdversary(ratkin, "Ratkin Biter", new GridPosition(7, 6)),
-                CombatantFactory.FromAdversary(ratkin, "Ratkin Shiv", new GridPosition(9, 7)),
+                Lurking(CombatantFactory.FromAdversary(ratkin, "Ratkin Biter", new GridPosition(7, 6)), ambush),
+                Lurking(CombatantFactory.FromAdversary(ratkin, "Ratkin Shiv", new GridPosition(9, 7)), ambush),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm);
@@ -388,27 +396,28 @@ namespace WoundBound.Game.Combat
         /// </param>
         /// <param name="setting">Where to stage it: the book's night by default; <see cref="Setting.Daylight"/> stages it with no
         /// lights needed, and the Dumb Fighter's torch stays in his pack.</param>
-        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool fourPlayers = false, Setting? setting = null)
+        public static Encounter SignpostAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool fourPlayers = false, Setting? setting = null, bool ambush = false)
         {
-            setting ??= SignpostNight;
+            setting ??= ambush ? SignpostAmbushNight : SignpostNight;
+            var dy = ambush ? 6 : 0;
             var dark = setting.IsUnlit;
-            var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4));
+            var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4 + dy));
             lanternBearer.StatblockLights = dark ? 1 : 0;
 
             var combatants = new List<Combatant>
             {
-                CombatantFactory.FromCharacter(DumbFighter(data, torch: dark), new GridPosition(1, 4)),
-                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(1, 3)),
-                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(1, 5)),
+                CombatantFactory.FromCharacter(DumbFighter(data, torch: dark), new GridPosition(1, 4 + dy)),
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(1, 3 + dy)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(1, 5 + dy)),
                 lanternBearer,
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", new GridPosition(7, 1)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", new GridPosition(7, 6)),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", ambush ? new GridPosition(3, 3) : new GridPosition(7, 1)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", ambush ? new GridPosition(3, 16) : new GridPosition(7, 6)), ambush),
             };
 
             if (fourPlayers)
             {
-                combatants.Insert(3, CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(2, 4)));
-                combatants.Add(CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3)));
+                combatants.Insert(3, CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(2, 4 + dy)));
+                combatants.Add(CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3 + dy)));
             }
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -422,25 +431,26 @@ namespace WoundBound.Game.Combat
         /// bandit round the corner, and three Bandit Ambushers. At night Mirella's lantern and
         /// Elthric's torch are the party's lights.
         /// </summary>
-        public static Encounter SignpostWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, Setting? setting = null)
+        public static Encounter SignpostWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, Setting? setting = null, bool ambush = false)
         {
-            setting ??= SignpostNight;
+            setting ??= ambush ? SignpostAmbushNight : SignpostNight;
+            var dy = ambush ? 6 : 0;
             var dark = setting.IsUnlit;
-            var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4));
+            var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4 + dy));
             lanternBearer.StatblockLights = dark ? 1 : 0;
 
             var combatants = new List<Combatant>
             {
-                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(1, 3)),
-                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(1, 5)),
-                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(2, 4)),
-                CombatantFactory.FromCharacter(MirellaVask(data, lantern: dark), new GridPosition(0, 4)),
-                CombatantFactory.FromCharacter(ElthricDane(data, torch: dark), new GridPosition(0, 3)),
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(1, 3 + dy)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(1, 5 + dy)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(2, 4 + dy)),
+                CombatantFactory.FromCharacter(MirellaVask(data, lantern: dark), new GridPosition(0, 4 + dy)),
+                CombatantFactory.FromCharacter(ElthricDane(data, torch: dark), new GridPosition(0, 3 + dy)),
                 lanternBearer,
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", new GridPosition(7, 1)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", new GridPosition(7, 6)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the stones", new GridPosition(9, 5)),
-                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3)),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", ambush ? new GridPosition(3, 3) : new GridPosition(7, 1)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", ambush ? new GridPosition(3, 16) : new GridPosition(7, 6)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the stones", new GridPosition(9, 5 + dy)), ambush),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3 + dy)),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -460,6 +470,19 @@ namespace WoundBound.Game.Combat
             Visibility = Visibility.None,
             Cause = VisibilityCause.Unlit,
             Ground = Setting.Patches(Terrain.Broken, (6, 0, 9, 1), (6, 7, 9, 8)),
+        };
+
+        /// <summary>
+        /// The signpost as the ambush is laid (the user's staging, 2026-11-03): the same night, the road
+        /// six rows further south, with bushes on the ridge to the north and in the trees to the south,
+        /// each between a crossbowman and the road at Middle range — partial cover, in the dark — and
+        /// a stone east down the road for the third.
+        /// </summary>
+        public static Setting SignpostAmbushNight { get; } = SignpostNight with
+        {
+            Name = "The signpost at night, the ambush laid",
+            Ground = Setting.Patches(Terrain.Broken, (6, 6, 9, 7), (6, 13, 9, 14)),
+            CoverPieces = Setting.CoverOf(Cover.Partial, (2, 4, 4, 4), (2, 15, 4, 15), (8, 11, 8, 11)),
         };
 
         /// <summary>
@@ -506,7 +529,7 @@ namespace WoundBound.Game.Combat
         /// −2 Stability and the Undertow underneath. Two Reedmarsh Skulkers and a Bandit Ambusher,
         /// a Standard fight for three (GM Reference §5).
         /// </summary>
-        public static Encounter FerryShrineAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        public static Encounter FerryShrineAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
             var skulker = data.Adversary("Reedmarsh Skulker");
             var combatants = new List<Combatant>
@@ -514,9 +537,9 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DumbFighter(data), new GridPosition(12, 8)),
                 CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(13, 7)),
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(11, 9)),
-                CombatantFactory.FromAdversary(skulker, "Skulker by the arch", new GridPosition(19, 5)),
-                CombatantFactory.FromAdversary(skulker, "Skulker in the reeds", new GridPosition(20, 11)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)),
+                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker by the arch", new GridPosition(19, 5)), ambush),
+                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker in the reeds", new GridPosition(20, 11)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)), ambush),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -528,7 +551,7 @@ namespace WoundBound.Game.Combat
         /// Joren, Mirella and Elthric — against one Skirmisher each: three Reedmarsh Skulkers and two
         /// Bandit Ambushers. The Skulkers have no Cowardice, so this one is fought out.
         /// </summary>
-        public static Encounter FerryShrineWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        public static Encounter FerryShrineWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
             var skulker = data.Adversary("Reedmarsh Skulker");
             var combatants = new List<Combatant>
@@ -538,11 +561,11 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(12, 9)),
                 CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(12, 8)),
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(11, 7)),
-                CombatantFactory.FromAdversary(skulker, "Skulker by the arch", new GridPosition(19, 5)),
-                CombatantFactory.FromAdversary(skulker, "Skulker in the reeds", new GridPosition(20, 11)),
-                CombatantFactory.FromAdversary(skulker, "Skulker on the bank", new GridPosition(17, 13)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the arch", new GridPosition(21, 9)),
+                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker by the arch", new GridPosition(19, 5)), ambush),
+                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker in the reeds", new GridPosition(20, 11)), ambush),
+                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker on the bank", new GridPosition(17, 13)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the arch", new GridPosition(21, 9)), ambush),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -573,7 +596,7 @@ namespace WoundBound.Game.Combat
         /// his two Timber Wolves, with two Bandit Ambushers on the rough ground to either side — about
         /// a Standard fight's budget for five (GM Reference §5). Elthric sits by the fire.
         /// </summary>
-        public static Encounter CampfireAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        public static Encounter CampfireAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
             var wolf = data.Adversary("Timber Wolf");
             var combatants = new List<Combatant>
@@ -586,8 +609,8 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(20, 9)),
                 CombatantFactory.FromAdversary(wolf, "Wolf from the north", new GridPosition(17, 6)),
                 CombatantFactory.FromAdversary(wolf, "Wolf from the south", new GridPosition(17, 12)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the rocks", new GridPosition(17, 3)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the gully", new GridPosition(17, 15)),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the rocks", new GridPosition(17, 3)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the gully", new GridPosition(17, 15)), ambush),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -869,10 +892,10 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// A gnoll following a rout — staged for the game: a Duskfang Gnoll (T2 Brute, GM Reference
-        /// §11, Rampage) come in behind a Tollroad Bandit and two Roadside Bandits, on open ground in
-        /// daylight. Rampage costs the party nothing until somebody drops, and then a great deal.
+        /// §11, Rampage) lying in wait in the brush five squares off the road, behind a Tollroad Bandit
+        /// and two Roadside Bandits, in daylight. Rampage costs the party nothing until somebody drops, and then a great deal.
         /// </summary>
-        public static Encounter GnollRaid(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        public static Encounter GnollRaid(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
             var combatants = new List<Combatant>
             {
@@ -881,7 +904,7 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
                 CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
-                CombatantFactory.FromAdversary(data.Adversary("Duskfang Gnoll"), "Duskfang Gnoll", new GridPosition(17, 9)),
+                Lurking(CombatantFactory.FromAdversary(data.Adversary("Duskfang Gnoll"), "Duskfang Gnoll", new GridPosition(11, 9)), ambush),
                 CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(15, 7)),
                 CombatantFactory.FromAdversary(RoadsideBandit, "First bandit", new GridPosition(15, 11)),
                 CombatantFactory.FromAdversary(RoadsideBandit, "Second bandit", new GridPosition(16, 13)),
@@ -898,7 +921,7 @@ namespace WoundBound.Game.Combat
         /// Bandit at the back. The party comes up the road behind a broken field wall of its own
         /// (partial), with a gap in it. Daylight.
         /// </summary>
-        public static Encounter Roadblock(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        public static Encounter Roadblock(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
             var combatants = new List<Combatant>
             {
@@ -907,8 +930,8 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
                 CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the crates", new GridPosition(18, 8)),
-                CombatantFactory.FromAdversary(BanditAmbusher, "Second ambusher", new GridPosition(18, 11)),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the crates", new GridPosition(18, 8)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Second ambusher", new GridPosition(18, 11)), ambush),
                 CombatantFactory.FromAdversary(RoadsideBandit, "Bandit at the north cart", new GridPosition(18, 5)),
                 CombatantFactory.FromAdversary(RoadsideBandit, "Bandit at the south cart", new GridPosition(18, 14)),
                 CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(21, 9)),

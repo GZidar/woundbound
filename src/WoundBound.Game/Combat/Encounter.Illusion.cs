@@ -55,6 +55,15 @@ namespace WoundBound.Game.Combat
 
         internal HashSet<Combatant> SeenThrough { get; } = new();
 
+        /// <summary>
+        /// The other side's creatures that saw it made — the caster casting, or the thing appearing
+        /// where nothing was. Taken in, but with reason to wonder (the user's ruling, 2026-11-03).
+        /// </summary>
+        internal HashSet<Combatant> Witnesses { get; } = new();
+
+        /// <summary>Whether <paramref name="creature"/> watched it being made.</summary>
+        public bool WasWitnessedBy(Combatant creature) => Witnesses.Contains(creature);
+
         /// <summary>Whether <paramref name="creature"/> has seen it for what it is.</summary>
         public bool IsSeenThroughBy(Combatant creature) => SeenThrough.Contains(creature);
     }
@@ -249,6 +258,16 @@ namespace WoundBound.Game.Combat
                 FeltWounds = felt,
             };
             illusions.Add(illusion);
+
+            // Whoever could see the caster cast, or the place it appeared, saw it made.
+            foreach (var watcher in combatants.Where(c => c.Side != caster.Side && !c.IsOutOfFight && !c.IsPhantom))
+            {
+                bool Sees(GridPosition at) => watcher.DistanceTo(at) <= LongRangeSquares && (watcher.DistanceTo(at) <= 1 || LineOpen(watcher.Position, at));
+                if (Sees(caster.Position) || illusion.Squares.Any(Sees))
+                {
+                    illusion.Witnesses.Add(watcher);
+                }
+            }
 
             Write($"{spell.Name}: {DescribeRoll(roll)} — Deceit {deceit}. " + form switch
             {

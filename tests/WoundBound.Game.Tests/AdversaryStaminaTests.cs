@@ -73,8 +73,17 @@ public class AdversaryStaminaTests
         var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
         bandit.AttacksThisRound = 1;
 
-        Assert.NotNull(Encounter.OnceARoundRefusal(bandit, extraTurn: false));
-        Assert.Null(Encounter.OnceARoundRefusal(bandit, extraTurn: true));
+        Assert.NotNull(Encounter.OnceARoundRefusal(bandit, new GmTurn(bandit, isExtraTurn: false, bonusAvailable: false)));
+        Assert.Null(Encounter.OnceARoundRefusal(bandit, new GmTurn(bandit, isExtraTurn: true, bonusAvailable: false)));
+    }
+
+    [Fact]
+    public void AnExtraTurn_HasOneAttack_StaminaBuysItNoSecond()
+    {
+        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
+        var extra = new GmTurn(bandit, isExtraTurn: true, bonusAvailable: false) { Attacks = 1 };
+
+        Assert.Contains("this extra turn's attack", Encounter.OnceARoundRefusal(bandit, extra));
     }
 
     [Theory]

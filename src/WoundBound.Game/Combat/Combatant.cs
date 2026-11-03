@@ -478,6 +478,21 @@ namespace WoundBound.Game.Combat
         /// <summary>Has been at 0 Body or below at some point this fight — dropped, if not kept down.</summary>
         public bool HasBeenDropped { get; internal set; }
 
+        /// <summary>
+        /// Lying in wait on purpose, for an ambush (Core Rules §9, "Ambush"): set by the scene, and
+        /// spent once the ambush has been rolled, sprung or not.
+        /// </summary>
+        public bool LiesInWait { get; set; }
+
+        /// <summary>Has cast since it last went down — a caster brought back is no threat again until it does.</summary>
+        public bool HasCastSinceDropped { get; internal set; }
+
+        /// <summary>
+        /// A caster who went down and has not cast since being brought back: reckoned spent, not a
+        /// caster, until they cast again (the user's direction, 2026-11-02 and 2026-11-03).
+        /// </summary>
+        public bool IsDormantCaster => HasBeenDropped && !HasCastSinceDropped;
+
         /// <summary>A Solo: one creature run against the whole party (GM Reference §3).</summary>
         public bool IsSolo => Role == Rules.Enums.AdversaryRole.Solo;
 

@@ -158,6 +158,11 @@ namespace WoundBound.Game.Combat
             Width = width;
             Height = height;
             this.combatants = combatants.ToList();
+            if (RuleTrials.Reinforce is { } reinforce)
+            {
+                this.combatants.AddRange(reinforce(this.combatants, Setting).ToList());
+            }
+
             this.bands = bands;
             this.dice = dice;
             this.gm = gm ?? new SimpleGmBrain();
@@ -165,7 +170,11 @@ namespace WoundBound.Game.Combat
             ApplySettingToCombatants();
             view = new BattleView(this);
 
-            StartRound();
+            // An ambush is rolled before the first round; if it is sprung, the surprise actions come first.
+            if (!SpringAmbush())
+            {
+                StartRound();
+            }
         }
 
         /// <summary>The fight as a brain sees it — for bots at either seat.</summary>
@@ -1384,6 +1393,12 @@ namespace WoundBound.Game.Combat
             Combatant actor;
             var extraTurn = false;
 
+            if (surprising.Count > 0)
+            {
+                TakeSurpriseAction();
+                return;
+            }
+
             if (owedInGap > 0)
             {
                 owedInGap--;
@@ -1819,6 +1834,16 @@ namespace WoundBound.Game.Combat
             var step = queuedStep ?? gm.NextStep(view, turn);
             queuedStep = null;
             turn.Steps++;
+
+            // A surprise action is one action from where it lies: a step, a dash or a bought action
+            // would give it away before it has struck, so asking for one ends it unspent.
+            if (turn.IsSurprise && step is GmStep.Move or GmStep.Drag or GmStep.BuyExtraAction or GmStep.BonusMove)
+            {
+                Write($"{actor.Name} keeps to its hiding place.");
+                FinishTurn(actor);
+                done();
+                return;
+            }
 
             switch (step)
             {
@@ -2646,12 +2671,15 @@ namespace WoundBound.Game.Combat
         /// Why <paramref name="actor"/> can't attack again this round, or null if it can: an adversary
         /// attacks once a round, and Stamina buys it the move, the reposition, the Grab or the spell
         /// around that attack — never a second one. Extra attacks come from the GM's Opportunities, an
-        /// extra turn (<paramref name="extraTurn"/>); a Solo buys its second with Stamina (GM Reference §3;
-        /// the user's ruling, 2026-11-02).
+        /// extra turn; a Solo buys its second with Stamina (GM Reference §3; the user's ruling,
+        /// 2026-11-02). An extra turn's own attack leaves the round's where it was, but within that
+        /// turn too Stamina buys anything but a second: one turn, one attack.
         /// </summary>
-        public static string? OnceARoundRefusal(Combatant actor, bool extraTurn) =>
-            actor.Side != Side.Adversaries || actor.IsSolo || extraTurn || actor.AttacksThisRound == 0
-                ? null
+        public static string? OnceARoundRefusal(Combatant actor, GmTurn turn) =>
+            actor.Side != Side.Adversaries || actor.IsSolo ? null
+            : turn.IsExtraTurn
+                ? turn.Attacks == 0 ? null : $"{actor.Name} has made this extra turn's attack — Stamina buys it anything but a second."
+                : actor.AttacksThisRound == 0 ? null
                 : $"{actor.Name} has made its attack this round — Stamina buys it anything but a second.";
 
         /// <summary>The +2 a Threshold-boost Opportunity bonus gives, as a bracing action does.</summary>
@@ -2703,10 +2731,12 @@ namespace WoundBound.Game.Combat
 
             if (!actor.IsSolo)
             {
-                if (OnceARoundRefusal(actor, turn.IsExtraTurn) is { } once)
+                if (OnceARoundRefusal(actor, turn) is { } once)
                 {
                     throw new InvalidOperationException($"The GM brain had {actor.Name} attack again: {once}");
                 }
+
+                turn.Attacks++;
 
                 // An extra turn's attack is the Opportunity's, bought by the party: it leaves the
                 // creature's own once-a-round attack where it was.
@@ -3798,7 +3828,11 @@ namespace WoundBound.Game.Combat
                 combatant.Body = combatant.IsMinion ? 0 : Math.Max(0, combatant.Body - amount);
             }
 
-            combatant.HasBeenDropped |= combatant.Body <= 0;
+            if (combatant.Body <= 0)
+            {
+                combatant.HasBeenDropped = true;
+                combatant.HasCastSinceDropped = false;
+            }
         }
 
         private static void PayTacticalSpend(Combatant spender, int stamina)

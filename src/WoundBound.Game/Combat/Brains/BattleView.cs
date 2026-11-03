@@ -169,6 +169,20 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Whether <paramref name="creature"/> is taken in by <paramref name="illusion"/>.</summary>
         public bool Fools(Illusion illusion, Combatant creature) => encounter.Fools(illusion, creature);
 
+        /// <summary>
+        /// How likely <paramref name="observer"/> reckons <paramref name="target"/> to be what it seems:
+        /// 1 for anything real, or a phantom it never saw made; less for a phantom figure it watched
+        /// appear just as the other side cast (the user's ruling, 2026-11-03: a witness has reason to
+        /// be suspicious). It can't know until it tests it or strikes it.
+        /// </summary>
+        public double BelievedReal(Combatant observer, Combatant target) =>
+            target.IsPhantom && encounter.Illusions.FirstOrDefault(i => i.Phantom == target) is { } made && made.WasWitnessedBy(observer)
+                ? WitnessedFigureReal
+                : 1;
+
+        /// <summary>What a witness reckons the chance that a figure it saw appear is real.</summary>
+        public const double WitnessedFigureReal = 0.35;
+
         /// <summary>The Body <paramref name="creature"/> believes it has, a felt wound counted.</summary>
         public int BelievedBody(Combatant creature) => encounter.BelievedBody(creature);
 
