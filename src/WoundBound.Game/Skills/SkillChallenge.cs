@@ -77,6 +77,18 @@ namespace WoundBound.Game.Skills
 
         public IReadOnlyList<string> Log => log;
 
+        /// <summary>Raised for every line written — on whatever thread the challenge is played on.</summary>
+        public event Action<string>? Logged;
+
+        /// <summary>The Skill Adversary being worked now; null before the first and after the last.</summary>
+        public AdversaryTemplate? Current { get; private set; }
+
+        /// <summary>Where the work on <see cref="Current"/> stands: hurdles cleared and needed, failures logged and allowed, the hurdle being worked (from 0).</summary>
+        public (int Successes, int Required, int Failures, int Allowed, int Hurdle, string? HurdleName) Progress { get; private set; }
+
+        /// <summary>The round of work on <see cref="Current"/>.</summary>
+        public int Round { get; private set; }
+
         /// <summary>Who can still act: on their feet, awake, and with Stamina to start a round on.</summary>
         private IEnumerable<Combatant> Able => party.Where(c => !c.IsOutOfFight && c.Body > 0 && c.Stamina > 0);
 
@@ -124,6 +136,8 @@ namespace WoundBound.Game.Skills
             var timing = TimingOf(obstacle);
             var revealed = new HashSet<int>();
             int successes = 0, failures = 0, raised = 0, rounds = 0;
+            Current = obstacle;
+            Progress = (0, required, 0, allowed, 0, null);
             Write($"— {obstacle.Name}: {obstacle.Type}, {obstacle.Behavior}, " + (moment ? "a Moment" : $"a Track of {required} before {allowed} failures") + " —");
 
             SkillThresholdOutcome Now() => SkillChallengeCalculator.Outcome(successes, failures, required, allowed);
@@ -131,6 +145,7 @@ namespace WoundBound.Game.Skills
             while (Now() == SkillThresholdOutcome.InProgress && Able.Any() && rounds < 30)
             {
                 rounds++;
+                Round = rounds;
                 foreach (var c in party)
                 {
                     c.TacticalSpendsThisRound = 0;
@@ -142,6 +157,7 @@ namespace WoundBound.Game.Skills
                 var named = hurdles.Count >= required;
                 var hurdleIndex = successes;
                 var hurdle = named ? hurdles[Math.Min(hurdleIndex, hurdles.Count - 1)] : null;
+                Progress = (successes, required, failures, allowed, hurdleIndex, hurdle?.Description);
                 if (!moment)
                 {
                     Write($"Hurdle {hurdleIndex + 1} of {required}" + (hurdle is not null ? $": {hurdle.Description}." : "."));
@@ -172,8 +188,10 @@ namespace WoundBound.Game.Skills
                 // An Active adversary's Opposition, declared against whoever it bears on this round.
                 var interruptedWell = false;
                 Combatant? attempter = null;
+                SkillPlan? decided = null;
                 if (active && timing == OppositionTiming.EachRound && brain.Plan(this, approaches, ramp + raised, acted) is { } planned)
                 {
+                    decided = planned;
                     var target = planned.Who;
                     Write($"{obstacle.Name} declares its Opposition against {target.Name}.");
                     if (Interrupter(planned, acted) is { } cutter)
@@ -194,10 +212,12 @@ namespace WoundBound.Game.Skills
                     Oppose(obstacle, target, disadvantage: interruptedWell);
                 }
 
-                // The round's Attempt — and another, if a Steady wiped the first away.
+                // The round's Attempt — the one already decided, if the Opposition was declared against
+                // its maker — and another, if a Steady wiped the first away.
                 while (attempter is null && Now() == SkillThresholdOutcome.InProgress
-                       && brain.Plan(this, approaches, ramp + raised, acted) is { } plan)
+                       && ((decided is { Who.Body: > 0 } ? decided : null) ?? brain.Plan(this, approaches, ramp + raised, acted)) is { } plan)
                 {
+                    decided = null;
                     var result = Attempt(plan, obstacle, ramp + raised, ref failures, acted, allowed);
                     raised = 0;
                     if (result == true)
@@ -244,6 +264,7 @@ namespace WoundBound.Game.Skills
                 }
             }
 
+            Progress = (successes, required, failures, allowed, successes, null);
             return (Now() == SkillThresholdOutcome.InProgress ? SkillThresholdOutcome.Failed : Now(), rounds);
         }
 
@@ -259,11 +280,13 @@ namespace WoundBound.Game.Skills
             return all.Where(a => revealed || !a.UnlockedByReveal).ToList();
         }
 
-        /// <summary>A Mind-secondary character yet to act, with the Mind to pay, worth putting in first.</summary>
-        private Combatant? Interrupter(SkillPlan planned, HashSet<Combatant> acted) =>
-            party.Where(c => c.HasInterrupt && !acted.Contains(c) && Able.Contains(c) && c.Mind >= 2)
-                .OrderByDescending(c => c == planned.Who ? 1 : 0)
-                .FirstOrDefault(c => c == planned.Who || brain.Chance(this, c, planned.Approach, planned.Skill, 0) >= 0.4);
+        /// <summary>Who may Interrupt the declared Opposition: Mind-secondary, yet to act, with the Mind to pay — and who, if anyone, does.</summary>
+        private Combatant? Interrupter(SkillPlan planned, HashSet<Combatant> acted)
+        {
+            var able = Able.ToList();
+            var may = party.Where(c => c.HasInterrupt && !acted.Contains(c) && able.Contains(c) && c.Mind >= 1).ToList();
+            return may.Count == 0 ? null : brain.Interrupts(this, planned, may);
+        }
 
         /// <summary>One Attempt: rolled, Pushed, Assisted, Steadied — true for a success, false for a logged failure, null for one Steadied away.</summary>
         private bool? Attempt(SkillPlan plan, AdversaryTemplate obstacle, int steps, ref int failures, HashSet<Combatant> acted, int allowed)
@@ -315,7 +338,7 @@ namespace WoundBound.Game.Skills
         }
 
         /// <summary>Whether <paramref name="who"/> could make a tactical spend now.</summary>
-        internal static bool CanSpend(Combatant who) =>
+        public static bool CanSpend(Combatant who) =>
             who.Stamina >= 2 && !TacticalSpendCalculator.IsAtLimit(who.TacticalSpendsThisRound, who.TacticalSpendsPerRound);
 
         /// <summary>What a failed check costs (Core Rules §8, "Failing Badly"): wounds, Stamina or a Story band, by how far it missed.</summary>
@@ -443,7 +466,11 @@ namespace WoundBound.Game.Skills
                 ? OppositionTiming.OnFailure
                 : OppositionTiming.EachRound;
 
-        private void Write(string line) => log.Add(line);
+        private void Write(string line)
+        {
+            log.Add(line);
+            Logged?.Invoke(line);
+        }
     }
 
     /// <summary>Who attempts a check, how, and with whose help.</summary>
@@ -513,6 +540,15 @@ namespace WoundBound.Game.Skills
             SkillChallenge.CanSpend(plan.Who)
             && (failures + 1 >= allowed || obstacle.StakesKind == SkillStakesKind.Wound)
             && Chance(challenge, plan.Who, plan.Approach, plan.Skill, steps, plan.Assist is not null) < 0.85;
+
+        /// <summary>
+        /// Who of <paramref name="may"/> Interrupts the declared Opposition — the one about to attempt
+        /// anyway, if they may, or another with a fair chance; null to let it come.
+        /// </summary>
+        public virtual Combatant? Interrupts(SkillChallenge challenge, SkillPlan planned, IReadOnlyList<Combatant> may) =>
+            may.Where(c => c.Mind >= 2)
+                .OrderByDescending(c => c == planned.Who ? 1 : 0)
+                .FirstOrDefault(c => c == planned.Who || Chance(challenge, c, planned.Approach, planned.Skill, 0) >= 0.4);
 
         /// <summary>Steady a failure that would end the obstacle, or cost two wounds or more.</summary>
         public virtual bool Steadies(SkillChallenge challenge, Combatant who, AdversaryTemplate obstacle, int band, int failures, int allowed) =>

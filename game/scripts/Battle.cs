@@ -75,10 +75,68 @@ namespace WoundBoundGame
 
         /// <summary>The centre of the square a token belongs on — pinned to the edge when it's off the map.</summary>
         private Vector2 SquareCentreOf(Combatant c) =>
-            SquareRect(new GridPosition(Mathf.Clamp(c.Position.X, 0, encounter.Width - 1), Mathf.Clamp(c.Position.Y, 0, encounter.Height - 1))).GetCenter()
+            In3D
+                ? Project(new Vector2(Mathf.Clamp(c.Position.X, 0, encounter.Width - 1) + c.Across / 2f, Mathf.Clamp(c.Position.Y, 0, encounter.Height - 1) + c.Across / 2f))
+                : SquareRect(new GridPosition(Mathf.Clamp(c.Position.X, 0, encounter.Width - 1), Mathf.Clamp(c.Position.Y, 0, encounter.Height - 1))).GetCenter()
             + Vector2.One * (CellSize * (c.Across - 1) / 2f);
 
-        private Vector2 TokenCentre(Combatant c) => tokenAt.TryGetValue(c, out var at) ? at : SquareCentreOf(c);
+        private Vector2 TokenCentre(Combatant c) =>
+            In3D && board3D!.FigureScreenOf(c) is { } shown ? BoardOrigin + shown
+            : tokenAt.TryGetValue(c, out var at) ? at : SquareCentreOf(c);
+
+        /// <summary>The board in three dimensions, under everything the screen draws; null until built.</summary>
+        private Board3D? board3D;
+
+        /// <summary>The flat board instead — the old top-down drawing, kept for a quick read.</summary>
+        private bool flatBoard;
+
+        private bool In3D => board3D is not null && !flatBoard;
+
+        /// <summary>Where a point on the board (in squares) shows on the screen, through the 3D camera.</summary>
+        private Vector2 Project(Vector2 boardPoint, float height = 0) => BoardOrigin + board3D!.ScreenOf(boardPoint, height);
+
+        /// <summary>
+        /// Paints one square: a rectangle on the flat board, the square's own outline as the camera
+        /// sees it on the 3D one — so every highlight sits where the ground is.
+        /// </summary>
+        private void DrawCell(GridPosition square, Color colour, bool filled = true, float width = 1, float inset = 0)
+        {
+            if (!In3D)
+            {
+                DrawRect(SquareRect(square).Grow(-inset), colour, filled, width);
+                return;
+            }
+
+            var i = inset / Mathf.Max(1, CellSize);
+            Vector2[] corners =
+            [
+                Project(new Vector2(square.X + i, square.Y + i)), Project(new Vector2(square.X + 1 - i, square.Y + i)),
+                Project(new Vector2(square.X + 1 - i, square.Y + 1 - i)), Project(new Vector2(square.X + i, square.Y + 1 - i)),
+            ];
+            if (filled)
+            {
+                DrawColoredPolygon(corners, colour);
+            }
+            else
+            {
+                DrawPolyline([.. corners, corners[0]], colour, width);
+            }
+        }
+
+        /// <summary>A ring round a creature: a circle on the flat board, laid on the ground in 3D.</summary>
+        private void DrawRing(Combatant c, Vector2 centre, float radius, Color colour, float width = 3)
+        {
+            if (!In3D)
+            {
+                DrawArc(centre, radius, 0, Mathf.Tau, 48, colour, width);
+                return;
+            }
+
+            var middle = new Vector2(Mathf.Clamp(c.Position.X, 0, encounter.Width - 1) + c.Across / 2f, Mathf.Clamp(c.Position.Y, 0, encounter.Height - 1) + c.Across / 2f);
+            var r = 0.42f * c.Across;
+            var points = Enumerable.Range(0, 33).Select(k => Project(middle + Vector2.FromAngle(Mathf.Tau * k / 32) * r)).ToArray();
+            DrawPolyline(points, colour, width);
+        }
 
         /// <summary>Where each character's avatar is drawn in the roster, eased towards where it belongs.</summary>
         private readonly Dictionary<Combatant, Vector2> rosterAt = new();
@@ -349,14 +407,38 @@ namespace WoundBoundGame
         /// <summary>How big a square is drawn: as big as fits the board area, up to <see cref="LargestCell"/>.</summary>
         private int CellSize => encounter is null
             ? LargestCell
+            : In3D
+                ? Mathf.Clamp(Mathf.RoundToInt(board3D!.ScreenOf(new Vector2(0, 0)).DistanceTo(board3D.ScreenOf(new Vector2(1, 0)))), 12, 96)
             : Mathf.Min(LargestCell, Mathf.Min((int)BoardArea.X / encounter.Width, (int)BoardArea.Y / encounter.Height));
 
         public override void _Ready()
         {
             data = GameData.Load(file => FileAccess.GetFileAsString($"res://data/rules/{file}"));
+            Build3D();
             BuildHud();
             ReadDemoArguments();
             StartEncounter();
+
+            // For checking the camera from the command line: --camera top,turn,zoom
+            if (OS.GetCmdlineUserArgs() is var cam && System.Array.IndexOf(cam, "--camera") is var ci and >= 0 && ci + 1 < cam.Length && board3D is not null)
+            {
+                foreach (var move in cam[ci + 1].Split(','))
+                {
+                    _ = move switch
+                    {
+                        "top" => Do(board3D.ToggleTopDown),
+                        "turn" => Do(() => board3D.Turn(1)),
+                        "zoom" => Do(() => board3D.Zoom(4)),
+                        _ => false,
+                    };
+                }
+            }
+
+            static bool Do(System.Action act)
+            {
+                act();
+                return true;
+            }
             if (OS.GetCmdlineUserArgs() is var args && System.Array.IndexOf(args, "--radial") is var at and >= 0 && at + 1 < args.Length)
             {
                 OpenRadialPath(args[at + 1]);
@@ -365,6 +447,81 @@ namespace WoundBoundGame
                     ClickRadial(args[c + 1]);
                 }
             }
+        }
+
+        /// <summary>
+        /// The 3D board, in a view filling the board's area on a layer beneath the screen, so the
+        /// highlights, rings, bubbles and menus this screen draws all land on top of it.
+        /// </summary>
+        private void Build3D()
+        {
+            flatBoard = OS.GetCmdlineUserArgs().Contains("--flat");
+            var layer = new CanvasLayer { Layer = -1 };
+            AddChild(layer);
+            var holder = new SubViewportContainer { Position = BoardOrigin, Size = BoardArea, Stretch = true, MouseFilter = Control.MouseFilterEnum.Ignore };
+            layer.AddChild(holder);
+            var view = new SubViewport { Size = (Vector2I)BoardArea, Msaa3D = Viewport.Msaa.Msaa4X, HandleInputLocally = false };
+            holder.AddChild(view);
+            board3D = new Board3D();
+            view.AddChild(board3D);
+            holder.Visible = !flatBoard;
+            boardView = holder;
+        }
+
+        private SubViewportContainer? boardView;
+
+        /// <summary>The camera's keys and mouse: wheel zooms, middle-drag or WASD pans, Q and E turn, T looks straight down, Home resets.</summary>
+        private bool HandleCamera(InputEvent @event)
+        {
+            if (!In3D)
+            {
+                return false;
+            }
+
+            switch (@event)
+            {
+                case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.WheelUp }:
+                    board3D!.Zoom(1);
+                    return true;
+                case InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.WheelDown }:
+                    board3D!.Zoom(-1);
+                    return true;
+                case InputEventMouseMotion { ButtonMask: MouseButtonMask.Middle } drag:
+                    board3D!.Pan(drag.Relative, BoardArea);
+                    return true;
+                case InputEventKey { Pressed: true } key:
+                    switch (key.Keycode)
+                    {
+                        case Key.Q:
+                            board3D!.Turn(1);
+                            return true;
+                        case Key.E:
+                            board3D!.Turn(-1);
+                            return true;
+                        case Key.T:
+                            board3D!.ToggleTopDown();
+                            return true;
+                        case Key.Home:
+                            board3D!.Reset();
+                            return true;
+                        case Key.W or Key.Up:
+                            board3D!.Pan(new Vector2(0, 40), BoardArea);
+                            return true;
+                        case Key.S or Key.Down:
+                            board3D!.Pan(new Vector2(0, -40), BoardArea);
+                            return true;
+                        case Key.A or Key.Left:
+                            board3D!.Pan(new Vector2(40, 0), BoardArea);
+                            return true;
+                        case Key.D or Key.Right:
+                            board3D!.Pan(new Vector2(-40, 0), BoardArea);
+                            return true;
+                    }
+
+                    break;
+            }
+
+            return false;
         }
 
         /// <summary>Reads <c>--demo</c>, <c>--fight</c>, <c>--seed</c> and <c>--gm</c> from the user arguments, after Godot's own <c>--</c>.</summary>
@@ -407,6 +564,12 @@ namespace WoundBoundGame
         public override void _Process(double delta)
         {
             var animating = false;
+            if (In3D)
+            {
+                board3D!.Sync(delta);
+                animating = true;
+            }
+
             foreach (var bubble in bubbles)
             {
                 bubble.Age += delta;
@@ -624,6 +787,12 @@ namespace WoundBoundGame
 
         public override void _UnhandledInput(InputEvent @event)
         {
+            if (HandleCamera(@event))
+            {
+                QueueRedraw();
+                return;
+            }
+
             // Escape with no ring open lets go of whatever action was armed.
             if (@event is InputEventKey { Pressed: true, Keycode: Key.Escape })
             {
@@ -738,6 +907,28 @@ namespace WoundBoundGame
                 for (var x = 0; x < encounter.Width; x++)
                 {
                     var square = new GridPosition(x, y);
+                    if (In3D)
+                    {
+                        // The ground, walls and cover are 3D; only what lies over them is drawn here.
+                        if (reachable.TryGetValue(square, out var moveCost))
+                        {
+                            DrawCell(square, moveCost == 1 ? OneMove : TwoMoves);
+                        }
+
+                        if (encounter.Setting.HazardAt(square) is not null)
+                        {
+                            DrawCell(square, HazardEdge, filled: false, width: 2, inset: 3);
+                        }
+
+                        var dim = encounter.VisibilityAtSquare(square);
+                        if (dim != Visibility.Good)
+                        {
+                            DrawCell(square, dim == Visibility.None ? Darkness : Gloom);
+                        }
+
+                        continue;
+                    }
+
                     var rect = SquareRect(square);
                     DrawRect(rect, (x + y) % 2 == 0 ? LightSquare : DarkSquare);
 
@@ -794,11 +985,11 @@ namespace WoundBoundGame
             // Lights burning where they were dropped, and built fires.
             foreach (var light in encounter.LightsOnTheGround.Concat(encounter.Fires))
             {
-                DrawCircle(SquareRect(light).GetCenter(), CellSize * 0.12f, new Color(1f, 0.7f, 0.25f));
+                DrawCircle(In3D ? Project(new Vector2(light.X + 0.5f, light.Y + 0.5f)) : SquareRect(light).GetCenter(), CellSize * 0.12f, new Color(1f, 0.7f, 0.25f));
             }
 
             // Mounts standing riderless, where their riders left them.
-            foreach (var steed in encounter.Steeds.Where(s => s.Rider is { IsRiding: false }))
+            foreach (var steed in encounter.Steeds.Where(s => s.Rider is { IsRiding: false } && !In3D))
             {
                 var at = SquareRect(steed.Position).GetCenter();
                 DrawCircle(at, CellSize * 0.3f, Saddle with { A = 0.7f });
@@ -809,7 +1000,7 @@ namespace WoundBoundGame
             // Weapons lying on the ground — dropped, thrown, or knocked from a hand: a short grey blade.
             var lying = encounter.GroundWeapons.Select(g => g.At)
                 .Concat(encounter.Combatants.Where(c => c.DroppedWeapon is not null && c.DroppedAt is not null).Select(c => c.DroppedAt!.Value));
-            foreach (var at in lying.Distinct())
+            foreach (var at in lying.Distinct().Where(_ => !In3D))
             {
                 var rect = SquareRect(at);
                 var from = rect.Position + new Vector2(rect.Size.X * 0.62f, rect.Size.Y * 0.62f);
@@ -822,13 +1013,13 @@ namespace WoundBoundGame
             {
                 foreach (var square in aimed.Area.Count > 0 ? aimed.Area : aimed.Targets.Select(t => t.Position))
                 {
-                    DrawRect(SquareRect(square), SpellArea);
+                    DrawCell(square, SpellArea);
                 }
             }
 
             if (hovered is { } hover)
             {
-                DrawRect(SquareRect(hover).Grow(-2), HoverOutline, filled: false, width: 2);
+                DrawCell(hover, HoverOutline, filled: false, width: 2, inset: 2);
             }
 
             // Illusions, as the party knows them: phantom walls hatched, phantom figures as ghosts.
@@ -839,13 +1030,13 @@ namespace WoundBoundGame
                 {
                     foreach (var square in illusion.Squares)
                     {
-                        DrawRect(SquareRect(square).Grow(-3), ghost);
-                        DrawRect(SquareRect(square).Grow(-3), ghost with { A = 0.8f }, filled: false, width: 2);
+                        DrawCell(square, ghost, inset: 3);
+                        DrawCell(square, ghost with { A = 0.8f }, filled: false, width: 2, inset: 3);
                     }
                 }
                 else if (illusion.Phantom is { } phantom)
                 {
-                    var centre = SquareRect(phantom.Position).GetCenter();
+                    var centre = In3D ? Project(new Vector2(phantom.Position.X + 0.5f, phantom.Position.Y + 0.5f)) : SquareRect(phantom.Position).GetCenter();
                     DrawCircle(centre, CellSize * 0.36f, ColourOf(illusion.Caster) with { A = 0.3f });
                     DrawArc(centre, CellSize * 0.36f, 0, Mathf.Tau, 32, ghost with { A = 0.9f }, 2);
                     DrawString(ThemeDB.FallbackFont, new Vector2(centre.X - CellSize / 2f, centre.Y + 6), "?", HorizontalAlignment.Center,
@@ -855,7 +1046,7 @@ namespace WoundBoundGame
                 {
                     foreach (var square in illusion.Squares)
                     {
-                        DrawRect(SquareRect(square).Grow(-6), ghost, filled: false, width: 2);
+                        DrawCell(square, ghost, filled: false, width: 2, inset: 6);
                     }
                 }
             }
@@ -991,6 +1182,11 @@ namespace WoundBoundGame
                 return;
             }
 
+            if (combatant.IsOutOfFight && !combatant.IsDefenceless && In3D)
+            {
+                return; // the figure lies where it fell
+            }
+
             if (combatant.IsOutOfFight && !combatant.IsDefenceless)
             {
                 // Left where it fell, so the board remembers the fight.
@@ -1000,31 +1196,35 @@ namespace WoundBoundGame
             }
 
             // In the saddle: the horse under them, a brown disc a little wider than the rider.
-            if (combatant.IsRiding)
+            if (combatant.IsRiding && !In3D)
             {
                 DrawCircle(centre, radius + 6, Saddle);
             }
 
             // A character dying or stable lies there, faded, still to be reached.
             var colour = ColourOf(combatant);
-            DrawCircle(centre, radius, combatant.IsDefenceless ? colour with { A = 0.35f } : combatant.IsSwarm ? colour with { A = 0.5f } : colour);
+            // Flat, a disc is the token; looking straight down at the 3D board, it keeps a figure readable.
+            if (!In3D || board3D!.TopDown)
+            {
+                DrawCircle(centre, radius, combatant.IsDefenceless ? colour with { A = 0.35f } : combatant.IsSwarm ? colour with { A = 0.5f } : colour with { A = In3D ? 0.55f : 1f });
+            }
 
             DrawMarkers(combatant, rect);
 
             if (combatant == encounter.Active)
             {
-                DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, ActiveRing, 3);
+                DrawRing(combatant, centre, radius + 4, ActiveRing);
             }
             else if (encounter.Phase == EncounterPhase.ChoosingCharacter && encounter.PartyStillToAct.Contains(combatant))
             {
-                DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, ChoosableRing, 3);
+                DrawRing(combatant, centre, radius + 4, ChoosableRing);
             }
             else if (active is not null && armedSpell is not null)
             {
                 if (CastAt(active, combatant.Position) is { } aimAt && encounter.PlanCast(active, aimAt) is { CanCast: true } aimedAt
                     && aimedAt.Targets.Contains(combatant))
                 {
-                    DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, new Color(0.75f, 0.5f, 1f), 3);
+                    DrawRing(combatant, centre, radius + 4, new Color(0.75f, 0.5f, 1f));
                 }
             }
             else if (active is not null && (armed is { } action
@@ -1033,7 +1233,7 @@ namespace WoundBoundGame
                              ? ArmedRefusal(active, combatAction, combatant) is null
                              : encounter.CanAttack(active, combatant)))
             {
-                DrawArc(centre, radius + 4, 0, Mathf.Tau, 48, TargetRing, 3);
+                DrawRing(combatant, centre, radius + 4, TargetRing);
             }
 
             DrawString(font, new Vector2(rect.Position.X, centre.Y + 6), Initials(combatant.Name), HorizontalAlignment.Center,
@@ -1105,6 +1305,8 @@ namespace WoundBoundGame
                 19 => SampleEncounters.WoodlandClearing(data, Dice(), PickedGm(), seed: System.Environment.TickCount),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), ambush: true),
             };
+            board3D?.Build(encounter, ColourOf);
+
             // Lines written while the fight was set up came before anyone was listening.
             battleLog = new BattleLog(ColourOf);
             formattedLog.Clear();
@@ -1953,6 +2155,24 @@ namespace WoundBoundGame
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 
+            var flat = new CheckButton { Text = "Flat board", ButtonPressed = flatBoard, TooltipText = "The old top-down drawing instead of the 3D board. In 3D: wheel zooms, middle-drag or WASD pans, Q/E turn, T looks straight down, Home resets." };
+            flat.Toggled += on =>
+            {
+                flatBoard = on;
+                if (boardView is not null)
+                {
+                    boardView.Visible = !on;
+                }
+
+                tokenAt.Clear();
+                QueueRedraw();
+            };
+            botRow.AddChild(flat);
+
+            var skills = new Button { Text = "Skill challenges…", TooltipText = "Play a Skill Challenge (Core Rules §8): the Quickstart wagon, or an obstacle that fights back." };
+            skills.Pressed += () => GetTree().ChangeSceneToFile("res://scenes/SkillChallenge.tscn");
+            botRow.AddChild(skills);
+
             botToggle = new CheckButton { Text = "Bot plays the party" };
             botToggle.Toggled += _ =>
             {
@@ -2120,6 +2340,11 @@ namespace WoundBoundGame
 
         private GridPosition SquareAt(Vector2 point)
         {
+            if (In3D)
+            {
+                return board3D!.SquareAtScreen(point - BoardOrigin);
+            }
+
             var local = (point - BoardOrigin) / CellSize;
             return new GridPosition(Mathf.FloorToInt(local.X), Mathf.FloorToInt(local.Y));
         }
