@@ -61,6 +61,17 @@ public class LightPoolTests
     }
 
     [Fact]
+    public void AWallBetweenTwoLights_KeepsThemFromPooling()
+    {
+        var e = Field([new GridPosition(10, 5), new GridPosition(13, 5)]);
+        var walled = new Encounter(30, 10, e.Combatants, Data.RangeBands, new ScriptedDice(),
+            setting: Dark with { Walls = Setting.Squares((11, 0, 11, 9)) }, environment: Data.Environment);
+
+        Assert.Equal(Visibility.Good, e.VisibilityAtSquare(new GridPosition(7, 5)));
+        Assert.Equal(Visibility.Poor, walled.VisibilityAtSquare(new GridPosition(7, 5)));
+    }
+
+    [Fact]
     public void PoolsChain_FromEndToEnd()
     {
         // Each four from the next: the ends are eight apart, but one pool through the middle.

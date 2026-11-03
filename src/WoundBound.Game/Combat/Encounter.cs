@@ -312,7 +312,8 @@ namespace WoundBound.Game.Combat
 
             // Lights pool (Core Rules §9, "Lights together"): a light within one light's reach of
             // another counts with it, and through it with every light the other is pooled with — a
-            // chain of torchbearers is one pool from end to end. Whose light it is doesn't matter.
+            // chain of torchbearers is one pool from end to end. Whose light it is doesn't matter;
+            // a wall between two lights keeps them apart, as it keeps their light apart.
             // A conjured light joins the pool at the nearest square of its block, counting as its
             // grade's worth of carried lights; only one casting counts in any pool.
             var conjured = workings.Where(w => w.Lever == Lever.Light && w.Holds).ToList();
@@ -324,7 +325,8 @@ namespace WoundBound.Game.Combat
             {
                 for (var j = i + 1; j < nodes.Count; j++)
                 {
-                    if (nodes[i].Any(x => nodes[j].Any(y => x.DistanceTo(y) <= reach)))
+                    if (nodes[i].Any(x => nodes[j].Any(y => x.DistanceTo(y) <= reach
+                            && (Setting.Walls.Count == 0 || Sight.Clear(x, y, Setting.IsWall)))))
                     {
                         pool[Root(i)] = Root(j);
                     }
