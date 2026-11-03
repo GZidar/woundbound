@@ -285,8 +285,10 @@ namespace WoundBound.Game.Combat
             }
         }
 
-        private int AlliesDown(Combatant creature) =>
-            combatants.Count(c => c.Side == creature.Side && c != creature && c.IsOutOfFight && !c.HasFled && !c.HasSurrendered);
+        /// <summary>How many of <paramref name="creature"/>'s side are down that its Morale counts — all of them, or only its kin.</summary>
+        internal int AlliesDown(Combatant creature) =>
+            combatants.Count(c => c.Side == creature.Side && c != creature && c.IsOutOfFight && !c.HasFled && !c.HasSurrendered
+                                  && creature.Morale?.Counts(c) != false);
 
         /// <summary>
         /// <paramref name="creature"/> sees through <paramref name="illusion"/> — and every other

@@ -33,6 +33,7 @@ var which = Text("--fight", "signpost");
 var gmName = Text("--gm", "simple")!;
 var seats = Text("--party", "all");
 RuleTrials.MinionStamina = Option("--minion-stamina", 1);
+RuleTrials.IgnoreMorale = args.Contains("--no-morale");
 // The GM knowledge dial: sheets or seen; left out, it goes with the skill (Best reads the sheets).
 Knowledge? knowledge = Text("--knowledge", null) switch
 {
@@ -40,12 +41,14 @@ Knowledge? knowledge = Text("--knowledge", null) switch
     "seen" => Knowledge.Seen,
     _ => null,
 };
+// --gm-caution: what share of its skill's Care the GM spends on its own creatures — for tuning.
+var caution = double.TryParse(Text("--gm-caution", null), System.Globalization.CultureInfo.InvariantCulture, out var c) ? c : UtilityGmBrain.GmCaution;
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),
-    "best" => new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge),
-    "balanced" => new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge),
-    "poor" => new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge),
+    "best" => new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution),
+    "balanced" => new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution),
+    "poor" => new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution),
     _ => new SimpleGmBrain(),
 };
 
@@ -108,6 +111,28 @@ if (Text("--show", null) is { } show && int.TryParse(show, out var shown))
     Simulator.PlayOne(one, new UtilityPartyBrain(showAs));
     Console.WriteLine(string.Join(Environment.NewLine, one.Log));
     return;
+}
+
+// What the fight costs (GM Reference §5): Threat Value against the party's budget.
+{
+    var staged = Stage(new RandomDiceRoller(new Random(1)));
+    var party = staged.Combatants.Where(c => c.Side == Side.Party && !c.IsSteed).ToList();
+    var foes = staged.Combatants.Where(c => c.Side == Side.Adversaries && !c.IsSteed && !c.IsPhantom).ToList();
+    var partyTier = party.Max(c => c.Tier);
+    if (foes.Any(f => f.Role == WoundBound.Rules.Enums.AdversaryRole.Solo))
+    {
+        Console.WriteLine($"Cost: a Solo — the whole budget, by its sizing (GM Reference §3), {party.Count} PCs.");
+    }
+    else
+    {
+        var spend = foes.Sum(f => f.Role is { } role
+            ? WoundBound.Rules.Calculation.ChallengeCalculator.ThreatValue(role, f.Tier, partyTier)
+            : 1.0);
+        var multiplier = spend / party.Count;
+        var named = new[] { (0.75, "Easy"), (1.0, "Standard"), (1.5, "Hard"), (2.0, "Deadly") }
+            .FirstOrDefault(d => multiplier <= d.Item1 + 1e-9, (99, "over Deadly")).Item2;
+        Console.WriteLine($"Cost: Threat {spend:0.##} for {party.Count} PCs = {multiplier:0.##}× ({named}).");
+    }
 }
 
 var parties = new List<Func<IPartyBrain>>();

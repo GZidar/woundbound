@@ -173,8 +173,7 @@ namespace WoundBound.Game.Combat.Brains
         public int BelievedBody(Combatant creature) => encounter.BelievedBody(creature);
 
         /// <summary>How many of <paramref name="creature"/>'s own side are down — what its Morale counts.</summary>
-        public int AlliesDown(Combatant creature) =>
-            encounter.Combatants.Count(c => c.Side == creature.Side && c != creature && c.IsOutOfFight && !c.HasFled && !c.HasSurrendered);
+        public int AlliesDown(Combatant creature) => encounter.AlliesDown(creature);
 
         /// <summary>One step from breaking: help seen coming for the other side would do it.</summary>
         public bool IsWavering(Combatant creature) =>

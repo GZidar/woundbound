@@ -12,14 +12,26 @@ namespace WoundBound.Game.Combat.Brains.Utility
     {
         private readonly Random random;
 
-        public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null)
+        public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null, double caution = GmCaution)
         {
             Skill = skill ?? BrainSkill.Best;
+            planning = Skill with { Care = Skill.Care * caution };
             this.random = random ?? new Random(1);
             Knowledge = knowledge ?? KnowledgeFor(Skill);
         }
 
         public BrainSkill Skill { get; }
+
+        /// <summary>
+        /// How much of its skill's Care the GM spends on its own creatures. A player guards a
+        /// character they have carried for a campaign; a GM's bandit is there to make the fight, and
+        /// one that hangs back to keep its own skin whole loses it — sims (2026-11-03) put the GM's
+        /// best around four-tenths of the party's caution.
+        /// </summary>
+        public const double GmCaution = 0.4;
+
+        /// <summary>The skill it plans with: the same eye for a choice, its own creatures held less dear.</summary>
+        private readonly BrainSkill planning;
 
         /// <summary>What it knows of the party: the sheets at Best, what it has seen below that.</summary>
         public Knowledge Knowledge { get; }
@@ -33,7 +45,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private TurnPlanner Planner(BattleView view, out Assessor assess)
         {
             assess = Assess(view);
-            return new TurnPlanner(assess, Skill);
+            return new TurnPlanner(assess, planning);
         }
 
         /// <summary>What a fresh turn would be worth to this adversary — its best plan from where it stands.</summary>
@@ -57,8 +69,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>The GM's other creatures that may yet act this round — the ones a Trip would set up.</summary>
+        /// <remarks>A creature that has broken runs on its turn: no blow of its follows a Trip, and no Help would be spent.</remarks>
         private static IReadOnlyCollection<Combatant> StillToAct(BattleView view, Combatant actor) =>
-            view.Adversaries.Where(a => a != actor && a.HasTurnLeftThisRound).ToList();
+            view.Adversaries.Where(a => a != actor && a.HasTurnLeftThisRound && !a.IsBroken).ToList();
 
         public override Combatant ChooseOwedTurn(BattleView view)
         {

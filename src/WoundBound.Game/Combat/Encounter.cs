@@ -2901,6 +2901,7 @@ namespace WoundBound.Game.Combat
 
             var advantage = bonusAdvantage || helped || target.IsDefenceless || sacrifice || patient || pack is not null;
             var disadvantage = AttacksAtDisadvantage(attacker) || harried;
+            disadvantageWhy[attacker] = DisadvantageReason(attacker, harried);
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
                 .ToList();
@@ -4011,13 +4012,13 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private int? PriceOfMove(Combatant mover, GridPosition square) => PlanMove(mover, square)?.Cost;
 
-        private static string Describe(AttackOutcome outcome)
+        private string Describe(AttackOutcome outcome)
         {
             var roll = outcome.Roll;
             var dice = string.Join("+", roll.CountedDice);
             var dropped = RollCalculator.DroppedDice(roll);
             var advantage = roll.AppliedAdvantage ? $" (Advantage, dropped {string.Join(", ", dropped)})"
-                : roll.AppliedDisadvantage ? $" (Disadvantage for {DisadvantageReason(outcome.Attacker)}, dropped {string.Join(", ", dropped)})"
+                : roll.AppliedDisadvantage ? $" (Disadvantage for {(disadvantageWhy.TryGetValue(outcome.Attacker, out var why) ? why : DisadvantageReason(outcome.Attacker, harried: false))}, dropped {string.Join(", ", dropped)})"
                 : outcome.UsedOpportunity && outcome.Attacker.OpportunityBonus.Kind == OpportunityBonusKind.Advantage ? " (Advantage and Disadvantage cancel)"
                 : string.Empty;
             var sign = roll.Modifier >= 0 ? "+" : "−";
@@ -4061,11 +4062,14 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void CheckMorale()
         {
+            if (RuleTrials.IgnoreMorale)
+            {
+                return;
+            }
+
             foreach (var creature in Fighting(Side.Adversaries).Where(a => !a.IsBroken && a.Morale is not null).ToList())
             {
-                var alliesDown = combatants.Count(c => c.Side == Side.Adversaries && c != creature
-                    && c.IsOutOfFight && !c.HasFled && !c.HasSurrendered);
-                if (creature.Morale!.IsBroken(creature, alliesDown, BelievedBody(creature)))
+                if (creature.Morale!.IsBroken(creature, AlliesDown(creature), BelievedBody(creature)))
                 {
                     creature.IsBroken = true;
                     Write($"{creature.Name} has had enough ({creature.Morale.Trait}) — it breaks, and looks for a way out.");
@@ -4102,12 +4106,40 @@ namespace WoundBound.Game.Combat
             }
         }
 
-        private static string DisadvantageReason(Combatant attacker) => (attacker.IsStandingGround, attacker.IsOffGuard) switch
+        /// <summary>Why an attacker's blow was rolled at Disadvantage, as it stood when the roll was made — for the log.</summary>
+        private readonly Dictionary<Combatant, string> disadvantageWhy = new();
+
+        /// <summary>Every reason <paramref name="attacker"/> rolls at Disadvantage, in words.</summary>
+        private string DisadvantageReason(Combatant attacker, bool harried)
         {
-            (true, true) => "standing their ground and being Off-guard",
-            (true, false) => "standing their ground",
-            _ => "being Off-guard",
-        };
+            var reasons = new List<string>();
+            if (attacker.IsStandingGround)
+            {
+                reasons.Add("standing their ground");
+            }
+
+            if (attacker.IsOffGuard)
+            {
+                reasons.Add("being Off-guard");
+            }
+
+            if (attacker.Conditions.Contains(CharacterCondition.Frightened))
+            {
+                reasons.Add("being Frightened");
+            }
+
+            if (attacker == caughtMidMotion)
+            {
+                reasons.Add("being caught mid-motion");
+            }
+
+            if (harried)
+            {
+                reasons.Add("being Harried");
+            }
+
+            return reasons.Count == 0 ? "something in the way" : string.Join(" and ", reasons);
+        }
 
         private void Write(string line)
         {

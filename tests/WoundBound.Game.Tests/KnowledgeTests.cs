@@ -120,3 +120,30 @@ public class KnowledgeTests
         Assert.Equal(Knowledge.Sheets, new Combat.Brains.Utility.UtilityGmBrain(BrainSkill.Poor, knowledge: Knowledge.Sheets).Knowledge);
     }
 }
+
+/// <summary>Morale's breaking points by whose fall counts: Not a Fanatic's "second bandit" means a second ally (the user's ruling, 2026-11-03).</summary>
+public class MoraleCountTests
+{
+    private static readonly Game.Data.GameData Data = TestData.Load();
+
+    [Fact]
+    public void NotAFanatic_CountsAnyAlly_AndAKinLine_OnlyItsKind()
+    {
+        var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(1, 1));
+        var tollroad = CombatantFactory.FromAdversary(Data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(8, 1));
+        var ratkin = Enumerable.Range(0, 2).Select(i => CombatantFactory.FromAdversary(Data.Adversary("Bramble Ratkin"), $"Ratkin {i}", new GridPosition(8, 3 + i))).ToArray();
+        var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [fighter, tollroad, .. ratkin], Data.RangeBands, new ScriptedDice());
+
+        foreach (var r in ratkin)
+        {
+            r.Body = 0;
+        }
+
+        Assert.Equal(2, encounter.View.AlliesDown(tollroad));
+        Assert.True(tollroad.Morale!.IsBroken(tollroad, encounter.View.AlliesDown(tollroad)));
+
+        var kinOnly = Morale.NotAFanatic with { Kin = "Bandit" };
+        Assert.False(kinOnly.Counts(ratkin[0]));
+        Assert.True(kinOnly.Counts(tollroad));
+    }
+}

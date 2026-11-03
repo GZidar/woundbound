@@ -5,18 +5,28 @@ namespace WoundBound.Game.Combat
     /// <summary>
     /// When a creature stops being willing to fight (GM Reference §1, "Know why each adversary is
     /// there"; §8, "Let non-Solo adversaries break"). The statblock says it: Cowardice —
-    /// "reduced below half its Body pool, or watching another of its side go down, it looks for a
-    /// chance to break and run" — and Not a Fanatic, the same but at a second ally down. A creature
-    /// with no such line fights to the last wound.
+    /// "reduced below half its Body pool, or watching an ally go down, it looks for a chance to
+    /// break and run" — and Not a Fanatic, the same but at a second ally down. The words are the
+    /// standard ones (GM Reference §9, "Who a trait counts"): an ally is anyone on its side, its
+    /// kin another of the same statblock. A creature with no such line fights to the last wound.
     /// </summary>
     /// <param name="Trait">The statblock line it comes from, for the log.</param>
     /// <param name="BreaksBelowHalfBody">Breaks once its Body is below half its pool.</param>
     /// <param name="BreaksWhenAlliesDown">Breaks once this many of its own side have gone down (not fled); 0 never.</param>
-    public sealed record Morale(string Trait, bool BreaksBelowHalfBody, int BreaksWhenAlliesDown)
+    /// <param name="Kin">
+    /// Whose fall counts, where the line names its kin: a statblock with this in its name. Null for
+    /// an ally — anyone on its side.
+    /// </param>
+    public sealed record Morale(string Trait, bool BreaksBelowHalfBody, int BreaksWhenAlliesDown, string? Kin = null)
     {
         public static Morale Cowardice { get; } = new("Cowardice", BreaksBelowHalfBody: true, BreaksWhenAlliesDown: 1);
 
+        /// <summary>"Watching a second ally go down" (GM Reference §11, the Tollroad Bandit).</summary>
         public static Morale NotAFanatic { get; } = new("Not a Fanatic", BreaksBelowHalfBody: true, BreaksWhenAlliesDown: 2);
+
+        /// <summary>Whether <paramref name="fallen"/> going down counts towards this breaking point.</summary>
+        public bool Counts(Combatant fallen) =>
+            Kin is null || (fallen.Kind ?? fallen.Name).Contains(Kin, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>The breaking point a statblock writes down, read off its Features by name; null for a creature that won't break.</summary>
         public static Morale? FromStatblock(StartingAdversaryInfo info) =>
