@@ -40,6 +40,9 @@ namespace WoundBound.Game.Simulation
     /// <summary>One adventuring day: fights back to back, a short rest between, wounds carried.</summary>
     public sealed record DayResult(IReadOnlyList<FightResult> Fights, int FightsPlanned)
     {
+        /// <summary>The Skill Challenge the day opened with, if it had one.</summary>
+        public Skills.SkillChallengeResult? Opening { get; init; }
+
         /// <summary>The party came through every fight of the day.</summary>
         public bool Survived => Fights.Count == FightsPlanned && Fights.All(f => f.Won || f.Withdrew);
 
@@ -146,12 +149,16 @@ namespace WoundBound.Game.Simulation
         /// fresh wound tended once — a Heal, a Meditate, a Pray. Anyone still down is stabilised; the
         /// dead stay dead. A day ends early if the party is beaten.
         /// </summary>
-        public static IReadOnlyList<DayResult> RunDays(Func<IDiceRoller, Encounter> stage, Func<IPartyBrain> party, int days, int fightsPerDay, int seed = 1, int maxRounds = 50)
+        /// <param name="opening">A Skill Challenge the day opens with, played by the first fight's party before that fight
+        /// begins: what it costs them, they carry into it — no rest between (Core Rules §8, "Failing Badly").</param>
+        public static IReadOnlyList<DayResult> RunDays(Func<IDiceRoller, Encounter> stage, Func<IPartyBrain> party, int days, int fightsPerDay, int seed = 1, int maxRounds = 50,
+            Func<IReadOnlyList<Combatant>, IDiceRoller, Skills.SkillChallengeResult>? opening = null)
         {
             var results = new List<DayResult>(days);
             for (var day = 0; day < days; day++)
             {
                 var fights = new List<FightResult>();
+                Skills.SkillChallengeResult? opened = null;
                 Dictionary<string, Carried>? carried = null;
                 for (var k = 0; k < fightsPerDay; k++)
                 {
@@ -173,6 +180,11 @@ namespace WoundBound.Game.Simulation
                         }
                     }
 
+                    if (k == 0 && opening is not null)
+                    {
+                        opened = opening(encounter.Combatants.Where(c => c.Side == Side.Party).ToList(), new RandomDiceRoller(new Random(seed * 7919 + day)));
+                    }
+
                     var result = PlayOne(encounter, party(), maxRounds);
                     fights.Add(result);
                     if (!(result.Won || result.Withdrew))
@@ -183,7 +195,7 @@ namespace WoundBound.Game.Simulation
                     carried = encounter.Combatants.Where(c => c.Side == Side.Party).ToDictionary(c => c.Name, ShortRest);
                 }
 
-                results.Add(new DayResult(fights, fightsPerDay));
+                results.Add(new DayResult(fights, fightsPerDay) { Opening = opened });
             }
 
             return results;

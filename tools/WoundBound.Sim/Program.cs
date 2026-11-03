@@ -143,6 +143,63 @@ Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed
 Console.WriteLine();
 
 // --show N: play the one fight on seed N with the best utility party (or --show-as balanced|poor), and print its log.
+// The sample Skill Challenges, by name.
+static IReadOnlyList<WoundBound.Game.Skills.SkillNode> SkillSequence(string name) => name switch
+{
+    "stair" => WoundBound.Game.Skills.SampleSkillChallenges.TheStair(),
+    "snare" => WoundBound.Game.Skills.SampleSkillChallenges.TheSnare(),
+    "vent" => WoundBound.Game.Skills.SampleSkillChallenges.TheVent(),
+    _ => WoundBound.Game.Skills.SampleSkillChallenges.TheWagon(),
+};
+
+// --skill wagon|stair|snare|vent: a Skill Challenge, played by the Quickstart five, many times over.
+if (Text("--skill", null) is { } skillName)
+{
+    IReadOnlyList<WoundBound.Game.Skills.SkillNode> Sequence() => SkillSequence(skillName);
+    List<Combatant> Five() =>
+    [
+        CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(data), new GridPosition(0, 0)),
+        CombatantFactory.FromCharacter(SampleEncounters.DrovanThale(data), new GridPosition(1, 0)),
+        CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(data), new GridPosition(2, 0)),
+        CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(data), new GridPosition(3, 0)),
+        CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(data), new GridPosition(4, 0)),
+    ];
+
+    if (Text("--show", null) is { } one && int.TryParse(one, out var which1))
+    {
+        var crew = Five();
+        var run = new WoundBound.Game.Skills.SkillChallenge(crew, Sequence(), new RandomDiceRoller(new Random(which1))).Run();
+        Console.WriteLine(string.Join(Environment.NewLine, run.Log));
+        Console.WriteLine($"Ending: {run.Ending}. Rounds: {run.Rounds}.");
+        foreach (var member in crew)
+        {
+            Console.WriteLine($"  {member.Name}: Body {member.Body}/{member.BodyMax}, Mind {member.Mind}/{member.MindMax}, Soul {member.Soul}/{member.SoulMax}, Stamina {member.Stamina}/{member.StaminaMax}");
+        }
+
+        return;
+    }
+
+    var runs = Enumerable.Range(0, fights).Select(i =>
+    {
+        var crew = Five();
+        var start = crew.Sum(c => c.Stamina);
+        var result = new WoundBound.Game.Skills.SkillChallenge(crew, Sequence(), new RandomDiceRoller(new Random(seed + i))).Run();
+        return (result, Body: crew.Sum(c => c.BodyMax - Math.Max(0, c.Body)) / (double)crew.Sum(c => c.BodyMax),
+            MindSoul: crew.Sum(c => c.MindMax + c.SoulMax - c.Mind - c.Soul) / (double)crew.Sum(c => c.MindMax + c.SoulMax),
+            Stamina: (start - crew.Sum(c => c.Stamina)) / (double)start, Down: crew.Count(c => c.Body <= 0));
+    }).ToList();
+    Console.WriteLine($"{skillName} — {fights} runs by the Quickstart five.");
+    Console.WriteLine($"Cleared {runs.Count(r => r.result.Cleared) / (double)runs.Count:P0}  Rounds {runs.Average(r => r.result.Rounds):0.0}  " +
+                      $"Body lost {runs.Average(r => r.Body):P0}  Mind+Soul lost {runs.Average(r => r.MindSoul):P0}  Stamina spent {runs.Average(r => r.Stamina):P0}  " +
+                      $"Down {runs.Average(r => r.Down):0.00}  Story bands {runs.Average(r => r.result.StoryBands.Sum()):0.0}");
+    foreach (var ending in runs.GroupBy(r => r.result.Ending).OrderByDescending(g => g.Count()))
+    {
+        Console.WriteLine($"  {ending.Count() / (double)runs.Count,4:P0}  {ending.Key}");
+    }
+
+    return;
+}
+
 if (Text("--show", null) is { } show && int.TryParse(show, out var shown))
 {
     var one = Stage(new RandomDiceRoller(new Random(shown)));
@@ -217,11 +274,14 @@ if (seats is "all" or "utility")
 // --day N: N fights of this kind back to back, wounds carried, a short rest between — one row per party.
 if (Option("--day", 0) is var perDay and > 0)
 {
-    Console.WriteLine($"{fights} days of {perDay} fights each, a short rest between (Stamina back, each fresh wound tended once).");
+    Console.WriteLine($"{fights} days of {perDay} fights each, a short rest between (Stamina back, each fresh wound tended once)"
+                      + (Text("--with-skill", null) is { } opener ? $", opening with the {opener} Skill Challenge (no rest before the first fight)." : "."));
     Console.WriteLine($"{"Party",-24}  Survived  Fights won  Dead at day's end  Body left at day's end");
     foreach (var p in parties)
     {
-        var days = Simulator.RunDays(Stage, p, fights, perDay, seed);
+        var withSkill = Text("--with-skill", null);
+        var days = Simulator.RunDays(Stage, p, fights, perDay, seed, opening: withSkill is null ? null
+            : (crew, dice) => new WoundBound.Game.Skills.SkillChallenge(crew, SkillSequence(withSkill), dice).Run());
         var name = p().Name;
         var lasted = days.Where(d => d.Survived).ToList();
         var bodyLeft = lasted.Count == 0 ? 0 : lasted.Average(d => 1 - d.Fights.Sum(f => f.Cost?.BodyLost ?? 0));
