@@ -214,8 +214,27 @@ if (seats is "all" or "utility")
     parties.AddRange(BrainSkill.Levels.Select(level => (Func<IPartyBrain>)(() => new UtilityPartyBrain(level))));
 }
 
+// --day N: N fights of this kind back to back, wounds carried, a short rest between — one row per party.
+if (Option("--day", 0) is var perDay and > 0)
+{
+    Console.WriteLine($"{fights} days of {perDay} fights each, a short rest between (Stamina back, each fresh wound tended once).");
+    Console.WriteLine($"{"Party",-24}  Survived  Fights won  Dead at day's end  Body left at day's end");
+    foreach (var p in parties)
+    {
+        var days = Simulator.RunDays(Stage, p, fights, perDay, seed);
+        var name = p().Name;
+        var lasted = days.Where(d => d.Survived).ToList();
+        var bodyLeft = lasted.Count == 0 ? 0 : lasted.Average(d => 1 - d.Fights.Sum(f => f.Cost?.BodyLost ?? 0));
+        Console.WriteLine($"{name,-24}  {(double)lasted.Count / days.Count,8:P0}  {days.Average(d => d.Fights.Count(f => f.Won)),10:0.00}  {days.Average(d => d.Dead),17:0.00}  {bodyLeft,22:P0}");
+    }
+
+    return;
+}
+
 var reports = parties.Select(p => Simulator.Run(Stage, p, fights, seed)).ToList();
 Console.WriteLine(Simulator.Table(reports));
+Console.WriteLine();
+Console.WriteLine(Simulator.AttritionTable(reports));
 Console.WriteLine();
 Console.WriteLine("Obj% is fights with every objective met. Body left and Up (characters still standing) are averaged over wins only.");
 Console.WriteLine("Foes = dropped, Fled = got away. Attacks to Leavers (reactions to a foe leaving reach) are per fight, across the party.");

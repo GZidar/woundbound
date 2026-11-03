@@ -1140,6 +1140,7 @@ namespace WoundBoundGame
             UpdateHud();
             QueueRedraw();
             UpdatePrompts();
+            UpdateIntent();
 
             // The GM's turns always play themselves; with Bot v Bot on, so does the party.
             var gmToAct = encounter.Phase == EncounterPhase.AdversaryTurn;

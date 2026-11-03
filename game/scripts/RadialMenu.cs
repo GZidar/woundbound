@@ -60,6 +60,32 @@ namespace WoundBoundGame
         private Vector2 anchor;
         private (int Ring, int Item)? hover;
 
+        /// <summary>
+        /// An adversary's declared intent, shown as its own ring (the user's direction, 2026-11-03):
+        /// around <paramref name="At"/>, the path its declaration takes lit in turn — the action,
+        /// what it is done with, and who it is aimed at — joined to <paramref name="Target"/> on the
+        /// board. Read-only: it is there so a player can judge an Interrupt or a reaction.
+        /// </summary>
+        public sealed record Intent(Vector2 At, Vector2? Target, string Title, IReadOnlyList<RadialItem> Path);
+
+        private Intent? intent;
+
+        /// <summary>Shows <paramref name="shown"/>, or clears it with null.</summary>
+        public void ShowIntent(Intent? shown)
+        {
+            var same = shown is null
+                ? intent is null
+                : intent is not null && shown.At == intent.At && shown.Target == intent.Target && shown.Title == intent.Title
+                  && shown.Path.Select(i => i.Label).SequenceEqual(intent.Path.Select(i => i.Label));
+            if (same)
+            {
+                return;
+            }
+
+            intent = shown;
+            QueueRedraw();
+        }
+
         /// <summary>Raised after any choice is made, so the board can redraw.</summary>
         public event Action? Changed;
 
@@ -448,6 +474,11 @@ namespace WoundBoundGame
             {
                 DrawArc(anchor, 15, 0, Mathf.Tau, 32, lit, 2);
             }
+
+            if (intent is { } declared)
+            {
+                DrawIntent(declared);
+            }
             for (var r = 0; r < rings.Count; r++)
             {
                 var ring = rings[r];
@@ -504,6 +535,80 @@ namespace WoundBoundGame
                 {
                     DrawHint(text, rings[h.Ring].Pills[h.Item]);
                 }
+            }
+        }
+
+        /// <summary>
+        /// The declared intent: a hub on the adversary, its path fanned out on the side away from its
+        /// target, each step joined to the last, and a line from the last step to whoever it is aimed at.
+        /// </summary>
+        private void DrawIntent(Intent declared)
+        {
+            var rust = Color.FromHtml("#c04a10");
+            var deep = new Color(0.22f, 0.08f, 0.03f);
+            var count = declared.Path.Count;
+            var away = declared.Target is { } t && t.DistanceTo(declared.At) > 1 ? (declared.At - t).Angle() : -Mathf.Pi / 2;
+
+            // A chain of steps, each laid after the last by its own size, leading away from the target —
+            // or round to whichever side keeps it on the screen.
+            List<Vector2> Chain(float angle)
+            {
+                var dir = Vector2.FromAngle(angle);
+                var along = Hub;
+                var chain = new List<Vector2>();
+                foreach (var item in declared.Path)
+                {
+                    var size = IsDisc(item) ? new Vector2(Disc, Disc) : new Vector2(WidthOf(item), PillHeight);
+                    var half = Math.Abs(dir.X) * size.X / 2 + Math.Abs(dir.Y) * size.Y / 2;
+                    along += 10 + half;
+                    chain.Add(declared.At + dir * along);
+                    along += half;
+                }
+
+                return chain;
+            }
+
+            var screen = GetViewportRect().Grow(-30);
+            var points = new[] { 0f, 0.6f, -0.6f, 1.57f, -1.57f, 3.14f }
+                .Select(turn => Chain(away + turn))
+                .FirstOrDefault(chain => chain.All(screen.HasPoint)) ?? Chain(away);
+
+            if (declared.Target is { } target)
+            {
+                var from = points.Count > 0 ? points[^1] : declared.At;
+                DrawLine(from, target, new Color(rust, 0.85f), 3);
+                var d = (target - from).Normalized();
+                var tip = target - d * 24;
+                var side = new Vector2(-d.Y, d.X);
+                DrawColoredPolygon([tip, tip - d * 14 + side * 8, tip - d * 14 - side * 8], rust);
+                DrawArc(target, 22, 0, Mathf.Tau, 40, rust, 3);
+            }
+
+            var previous = declared.At;
+            foreach (var point in points)
+            {
+                DrawLine(previous, point, new Color(rust, 0.7f), 2);
+                previous = point;
+            }
+
+            DrawCircle(declared.At, Hub - 4, deep);
+            DrawArc(declared.At, Hub - 4, 0, Mathf.Tau, 40, rust, 2.5f);
+            DrawCentred(declared.Title, declared.At, 11, new Color(1, 0.85f, 0.75f), 60);
+
+            for (var i = 0; i < count; i++)
+            {
+                var item = declared.Path[i];
+                if (IsDisc(item))
+                {
+                    DrawDisc(item, points[i], deep, rust, Colors.White, isHover: false);
+                    continue;
+                }
+
+                var size = new Vector2(WidthOf(item), PillHeight);
+                var pill = new Rect2(points[i] - size / 2, size);
+                DrawRect(pill, deep);
+                DrawRect(pill, rust, filled: false, width: 1.5f);
+                DrawCentred(Text(item), pill.GetCenter(), (int)FontSize, Colors.White, size.X);
             }
         }
 

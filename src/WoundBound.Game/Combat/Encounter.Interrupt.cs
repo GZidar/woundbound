@@ -29,8 +29,9 @@ namespace WoundBound.Game.Combat
         /// about to do before rolling for it", the moment a Mind-secondary character can Interrupt.
         /// If an Interrupt has left the action nothing to do, it is spent.
         /// </summary>
-        private void Declare(Combatant actor, string what, Combatant? against, Func<bool> stillPossible, Action resolve, Action spent)
+        private void Declare(Combatant actor, string what, Combatant? against, Func<bool> stillPossible, Action resolve, Action spent, Declaration? intent = null)
         {
+            Declared = intent ?? new Declaration(actor, IntentKind.Other, what, against);
             Write($"{actor.Name} declares: {what}.");
             lastDeclaredTarget = against;
             // Nobody Interrupts what they never saw coming (Core Rules §9, "Ambush").
@@ -113,6 +114,13 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Who the action being declared is aimed at, for the Interrupt prompt.</summary>
         private Combatant? lastDeclaredTarget;
+
+        /// <summary>
+        /// What the adversary acting has declared, from its declaration until its action is done —
+        /// for the table to see before anybody answers it (Core Rules §9, "The GM declares before
+        /// rolling"). Null between declarations.
+        /// </summary>
+        public Declaration? Declared { get; private set; }
 
         /// <summary>
         /// Takes <paramref name="interrupter"/>'s turn now, inside the GM's: 1 Mind, then the whole of

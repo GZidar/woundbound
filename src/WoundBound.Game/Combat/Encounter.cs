@@ -1810,6 +1810,12 @@ namespace WoundBound.Game.Combat
                 bonusAvailable: allowOpportunityBonus && GmOpportunities > 0
                                 && (!actor.HasActedThisRound || (actor.IsSolo && actor.OpportunityBonus.Kind == OpportunityBonusKind.ExtraAttack && !actor.HasTakenBonusAttackThisRound)));
 
+            var finished = done;
+            done = () =>
+            {
+                Declared = null;
+                finished();
+            };
             OfferSustain(actor, () => TakeControlledTurn(actor, () => TakeStep(turn, done), () =>
             {
                 FinishTurn(actor);
@@ -1821,6 +1827,7 @@ namespace WoundBound.Game.Combat
         {
             var actor = turn.Actor;
             caughtMidMotion = null;
+            Declared = null;
 
             if (CheckForEnd() || actor.IsOutOfFight)
             {
@@ -1926,7 +1933,9 @@ namespace WoundBound.Game.Combat
 
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !attack.WithBonus;
-                    Declare(actor, $"{(attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack).Name} at {attack.Target.Name}"
+                    var weapon = attack.With ?? PlanAttack(actor, attack.Target).Profile ?? actor.Attack;
+                    var blowIntent = new Declaration(actor, weapon.IsRanged ? IntentKind.Shot : IntentKind.Strike, weapon.Name, attack.Target, attack.Manoeuvre?.Kind);
+                    Declare(actor, $"{weapon.Name} at {attack.Target.Name}"
                                    + (attack.Manoeuvre is { } declaredManoeuvre ? $", to {declaredManoeuvre.Kind}" : string.Empty), attack.Target,
                         () => CanAttack(actor, attack.Target) && (attack.With is not { } with || PlanAttackWith(actor, with, actor.Position, attack.Target).CanAttack),
                         () =>
@@ -1939,7 +1948,7 @@ namespace WoundBound.Game.Combat
                                     TakeStep(turn, done);
                                 }), attack.With, manoeuvre: attack.Manoeuvre);
                         },
-                        () => TakeStep(turn, done));
+                        () => TakeStep(turn, done), blowIntent);
                     return;
 
                 case GmStep.Cast cast:
@@ -1972,7 +1981,8 @@ namespace WoundBound.Game.Combat
 
                             Cast(actor, cast.Spell, PlanCast(actor, cast.Spell), () => TakeStep(turn, done), free: cast.WithBonus);
                         },
-                        () => TakeStep(turn, done));
+                        () => TakeStep(turn, done),
+                        new Declaration(actor, IntentKind.Cast, cast.Spell.Spell.Name, cast.Spell.Target, Spell: cast.Spell.Spell.SpellType));
                     return;
 
                 case GmStep.OffHand offHandStep:
@@ -2036,7 +2046,13 @@ namespace WoundBound.Game.Combat
                     Declare(actor, $"{control.Action} {control.Target.Name}", control.Target,
                         () => ControlRefusal(actor, control.Action, control.Target) is null,
                         () => ResolveControl(actor, control.Action, control.Target, control.WithBonus, () => TakeStep(turn, done)),
-                        () => TakeStep(turn, done));
+                        () => TakeStep(turn, done),
+                        new Declaration(actor, control.Action switch
+                        {
+                            ControlAction.Grab => IntentKind.Grab,
+                            ControlAction.Shove => IntentKind.Shove,
+                            _ => IntentKind.Trip,
+                        }, control.Action.ToString(), control.Target));
                     return;
 
                 case GmStep.Aid aid:

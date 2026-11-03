@@ -16,6 +16,9 @@ namespace WoundBound.Game.Simulation
         int ObjectivesSet,
         BotTally Tally)
     {
+        /// <summary>What the fight cost the party (null where nobody measured it).</summary>
+        public Attrition? Cost { get; init; }
+
         public bool Won => Outcome == EncounterPhase.Victory;
 
         public bool Lost => Outcome == EncounterPhase.Defeat;
@@ -24,6 +27,23 @@ namespace WoundBound.Game.Simulation
         public bool Withdrew => Outcome == EncounterPhase.Withdrew;
 
         public bool Stalemate => !Won && !Lost && !Withdrew;
+    }
+
+    /// <summary>
+    /// What a fight cost the party, whatever its outcome: wounds on each track as a share of what
+    /// the party had going in, Stamina spent, characters dropped along the way, still down at the
+    /// end, and dead.
+    /// </summary>
+    public sealed record Attrition(
+        double BodyLost, double MindSoulLost, double StaminaSpent, int Dropped, int DownAtEnd, int Dead, int Characters);
+
+    /// <summary>One adventuring day: fights back to back, a short rest between, wounds carried.</summary>
+    public sealed record DayResult(IReadOnlyList<FightResult> Fights, int FightsPlanned)
+    {
+        /// <summary>The party came through every fight of the day.</summary>
+        public bool Survived => Fights.Count == FightsPlanned && Fights.All(f => f.Won || f.Withdrew);
+
+        public int Dead => Fights.Count == 0 ? 0 : Fights[^1].Cost?.Dead ?? 0;
     }
 
     /// <summary>A tactic's record over many fights: how often it wins, how fast, at what cost, and what it actually did.</summary>
@@ -57,6 +77,10 @@ namespace WoundBound.Game.Simulation
         public double AverageStandingOnWin => Wins == 0 ? 0 : Fights.Where(f => f.Won).Average(f => f.CharactersStanding);
 
         public double Per(Func<BotTally, int> count) => Fights.Average(f => count(f.Tally));
+
+        private IEnumerable<Attrition> Costs => Fights.Select(f => f.Cost).OfType<Attrition>();
+
+        public double AverageCost(Func<Attrition, double> of) => Costs.Select(of).DefaultIfEmpty(0).Average();
     }
 
     /// <summary>
@@ -87,10 +111,19 @@ namespace WoundBound.Game.Simulation
 
         public static FightResult PlayOne(Encounter encounter, IPartyBrain party, int maxRounds = 50)
         {
+            var before = encounter.Combatants.Where(c => c.Side == Side.Party).ToDictionary(c => c, c => (c.Body, c.Mind, c.Soul, c.Stamina));
             var driver = new BotDriver(encounter, party);
             driver.PlayToEnd(maxRounds);
 
             var members = encounter.Combatants.Where(c => c.Side == Side.Party).ToList();
+            var cost = new Attrition(
+                BodyLost: Share(members.Sum(c => Math.Max(0, before[c].Body) - Math.Max(0, c.Body)), members.Sum(c => c.BodyMax)),
+                MindSoulLost: Share(members.Sum(c => before[c].Mind + before[c].Soul - c.Mind - c.Soul), members.Sum(c => c.MindMax + c.SoulMax)),
+                StaminaSpent: Share(members.Sum(c => before[c].Stamina - c.Stamina), members.Sum(c => before[c].Stamina)),
+                Dropped: members.Count(c => c.HasBeenDropped),
+                DownAtEnd: members.Count(c => c.Body <= 0 && c.BodyStatus != Rules.Enums.BodyStatus.Dead),
+                Dead: members.Count(c => c.BodyStatus == Rules.Enums.BodyStatus.Dead),
+                Characters: members.Count);
             return new FightResult(
                 encounter.Phase,
                 encounter.Round,
@@ -101,7 +134,97 @@ namespace WoundBound.Game.Simulation
                 encounter.Combatants.Count(c => c.Side == Side.Adversaries && c.HasFled),
                 encounter.Objectives.Count(o => o.StatusIn(encounter) == ObjectiveStatus.Achieved),
                 encounter.Objectives.Count,
-                driver.Tally);
+                driver.Tally) { Cost = cost };
+
+            static double Share(double part, double whole) => whole <= 0 ? 0 : part / whole;
+        }
+
+        /// <summary>
+        /// Plays <paramref name="days"/> adventuring days of <paramref name="fightsPerDay"/> fights each,
+        /// back to back: the party's wounds carry from one fight to the next, with a short rest
+        /// between (Core Rules §4, "Recovery"): Stamina back to full, and each track that has taken a
+        /// fresh wound tended once — a Heal, a Meditate, a Pray. Anyone still down is stabilised; the
+        /// dead stay dead. A day ends early if the party is beaten.
+        /// </summary>
+        public static IReadOnlyList<DayResult> RunDays(Func<IDiceRoller, Encounter> stage, Func<IPartyBrain> party, int days, int fightsPerDay, int seed = 1, int maxRounds = 50)
+        {
+            var results = new List<DayResult>(days);
+            for (var day = 0; day < days; day++)
+            {
+                var fights = new List<FightResult>();
+                Dictionary<string, Carried>? carried = null;
+                for (var k = 0; k < fightsPerDay; k++)
+                {
+                    var encounter = stage(new RandomDiceRoller(new Random(seed + day * fightsPerDay + k)));
+                    if (carried is not null)
+                    {
+                        foreach (var member in encounter.Combatants.Where(c => c.Side == Side.Party))
+                        {
+                            if (carried.TryGetValue(member.Name, out var was))
+                            {
+                                (member.Body, member.Mind, member.Soul, member.IsStable) = (was.Body, was.Mind, was.Soul, was.Stable);
+                                foreach (var (track, eligible) in was.Tend)
+                                {
+                                    member.TendEligible[track] = eligible;
+                                }
+
+                                member.IsUnconscious = member.Body <= 0;
+                            }
+                        }
+                    }
+
+                    var result = PlayOne(encounter, party(), maxRounds);
+                    fights.Add(result);
+                    if (!(result.Won || result.Withdrew))
+                    {
+                        break;
+                    }
+
+                    carried = encounter.Combatants.Where(c => c.Side == Side.Party).ToDictionary(c => c.Name, ShortRest);
+                }
+
+                results.Add(new DayResult(fights, fightsPerDay));
+            }
+
+            return results;
+        }
+
+        private sealed record Carried(int Body, int Mind, int Soul, bool Stable, Dictionary<Rules.Enums.WoundType, bool> Tend);
+
+        /// <summary>A short rest between fights: Stamina comes back with the next fight; each track with a fresh wound is tended once.</summary>
+        private static Carried ShortRest(Combatant c)
+        {
+            var tend = new Dictionary<Rules.Enums.WoundType, bool>(c.TendEligible);
+            if (c.BodyStatus == Rules.Enums.BodyStatus.Dead)
+            {
+                return new Carried(c.Body, c.Mind, c.Soul, false, tend);
+            }
+
+            int Tended(Rules.Enums.WoundType track, int now, int max)
+            {
+                if (now < max && tend[track])
+                {
+                    tend[track] = false;
+                    return now + 1;
+                }
+
+                return now;
+            }
+
+            var body = Tended(Rules.Enums.WoundType.Body, c.Body, c.BodyMax);
+            return new Carried(body, Tended(Rules.Enums.WoundType.Mind, c.Mind, c.MindMax), Tended(Rules.Enums.WoundType.Soul, c.Soul, c.SoulMax), body <= 0, tend);
+        }
+
+        /// <summary>What each way of playing paid for its fights, all of them counted, won or lost.</summary>
+        public static string AttritionTable(IEnumerable<TacticReport> reports)
+        {
+            var rows = reports.ToList();
+            var width = Math.Max("Tactic".Length, rows.Count == 0 ? 0 : rows.Max(r => r.Tactic.Length));
+            var lines = new List<string> { $"{"Tactic".PadRight(width)}  Win%   Body lost  Mind+Soul lost  Stamina spent  Dropped  Down at end  Dead" };
+            lines.AddRange(rows.Select(r =>
+                $"{r.Tactic.PadRight(width)}  {r.WinRate,5:P0}  {r.AverageCost(c => c.BodyLost),9:P0}  {r.AverageCost(c => c.MindSoulLost),14:P0}  {r.AverageCost(c => c.StaminaSpent),13:P0}  " +
+                $"{r.AverageCost(c => c.Dropped),7:0.00}  {r.AverageCost(c => c.DownAtEnd),11:0.00}  {r.AverageCost(c => c.Dead),4:0.00}"));
+            return string.Join(Environment.NewLine, lines);
         }
 
         /// <summary>The reports side by side, best win rate first, as a plain-text table.</summary>
