@@ -92,6 +92,19 @@ namespace WoundBoundGame
 
         private bool In3D => board3D is not null && !flatBoard;
 
+        /// <summary>The party's fog of war, or null with it turned off (Options, or <c>--nofog</c>).</summary>
+        private FogOfWar? fog;
+
+        private bool fogOn = !OS.GetCmdlineUserArgs().Contains("--nofog");
+
+        /// <summary>Whether <paramref name="c"/> is drawn: the party's own, or a foe the party sees now.</summary>
+        private bool Shown(Combatant c) => fog?.Shows(c) ?? true;
+
+        private FogState FogAt(GridPosition square) => fog?.StateOf(square) ?? FogState.Seen;
+
+        private static readonly Color Unexplored = new(0.09f, 0.09f, 0.11f);
+        private static readonly Color Remembered = new(0.02f, 0.02f, 0.04f, 0.55f);
+
         /// <summary>Where a point on the board (in squares) shows on the screen, through the 3D camera.</summary>
         private Vector2 Project(Vector2 boardPoint, float height = 0) => BoardOrigin + board3D!.ScreenOf(boardPoint, height);
 
@@ -757,7 +770,7 @@ namespace WoundBoundGame
         {
             var font = ThemeDB.FallbackFont;
             const int size = 13;
-            foreach (var group in bubbles.GroupBy(b => b.Who))
+            foreach (var group in bubbles.GroupBy(b => b.Who).Where(g => Shown(g.Key)))
             {
                 var who = group.Key;
                 var anchor = TokenCentre(who) - new Vector2(0, CellSize * 0.45f);
@@ -921,7 +934,7 @@ namespace WoundBoundGame
                         }
 
                         var dim = encounter.VisibilityAtSquare(square);
-                        if (dim != Visibility.Good)
+                        if (dim != Visibility.Good && FogAt(square) == FogState.Seen)
                         {
                             DrawCell(square, dim == Visibility.None ? Darkness : Gloom);
                         }
@@ -973,9 +986,21 @@ namespace WoundBoundGame
                     }
 
                     var seen = encounter.VisibilityAtSquare(square);
-                    if (seen != Visibility.Good)
+                    switch (FogAt(square))
                     {
-                        DrawRect(rect, seen == Visibility.None ? Darkness : Gloom);
+                        case FogState.Unseen:
+                            DrawRect(rect, Unexplored);
+                            continue;
+                        case FogState.Remembered:
+                            DrawRect(rect, Remembered);
+                            break;
+                        default:
+                            if (seen != Visibility.Good)
+                            {
+                                DrawRect(rect, seen == Visibility.None ? Darkness : Gloom);
+                            }
+
+                            break;
                     }
 
                     DrawRect(rect, GridLine, filled: false, width: 1);
@@ -1052,7 +1077,7 @@ namespace WoundBoundGame
             }
 
             // A Swarm first, beneath: whoever stands in the mass is drawn on top of it.
-            foreach (var combatant in encounter.Combatants.OrderBy(c => c.HoldsGround))
+            foreach (var combatant in encounter.Combatants.OrderBy(c => c.HoldsGround).Where(Shown))
             {
                 DrawToken(combatant, active);
             }
@@ -1306,6 +1331,8 @@ namespace WoundBoundGame
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), ambush: true),
             };
             board3D?.Build(encounter, ColourOf);
+            fog = fogOn ? new FogOfWar(encounter) : null;
+            board3D?.ApplyFog(fog);
 
             // Lines written while the fight was set up came before anyone was listening.
             battleLog = new BattleLog(ColourOf);
@@ -1332,6 +1359,11 @@ namespace WoundBoundGame
 
         private void Refresh()
         {
+            if (fog?.Update() == true)
+            {
+                board3D?.ApplyFog(fog);
+            }
+
             foreach (var line in formattedLog.Skip(linesShown))
             {
                 logLabel.AppendText(line);
@@ -1775,7 +1807,7 @@ namespace WoundBoundGame
                     : $"{candidate.Name} has already acted this round.";
             }
 
-            if (encounter.AnyAt(square) is { Side: Side.Adversaries } foe)
+            if (encounter.AnyAt(square) is { Side: Side.Adversaries } foe && Shown(foe))
             {
                 var stats = $"{foe.Name}: Body {foe.Body}/{foe.BodyMax} · DT {foe.DodgeThreshold} · " +
                             $"{foe.Attack.Name} +{foe.Attack.AttackModifier}, {foe.Attack.DamageDiceCount}d{foe.Attack.DamageDieSides}" +
@@ -2168,6 +2200,16 @@ namespace WoundBoundGame
                 QueueRedraw();
             };
             botRow.AddChild(flat);
+
+            var fogBox = new CheckButton { Text = "Fog of war", ButtonPressed = fogOn, TooltipText = "Show only what the party can see now; ground seen before stays, dimmed, without whoever stands on it." };
+            fogBox.Toggled += on =>
+            {
+                fogOn = on;
+                fog = on ? new FogOfWar(encounter) : null;
+                board3D?.ApplyFog(fog);
+                Refresh();
+            };
+            botRow.AddChild(fogBox);
 
             var skills = new Button { Text = "Skill challenges…", TooltipText = "Play a Skill Challenge (Core Rules §8): the Quickstart wagon, or an obstacle that fights back." };
             skills.Pressed += () => GetTree().ChangeSceneToFile("res://scenes/SkillChallenge.tscn");

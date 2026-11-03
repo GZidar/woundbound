@@ -31,6 +31,9 @@ namespace WoundBoundGame
         private Node3D pitch = null!;
         private Node3D terrain = null!;
         private readonly Dictionary<Combatant, Figure> figures = new();
+        private readonly Dictionary<GridPosition, (MeshInstance3D Box, Color Colour)> blocks = new();
+        private Node3D? fogLayer;
+        private FogOfWar? fog;
 
         private float yawTarget = 45;
         private float pitchTarget = IsoPitch;
@@ -80,6 +83,9 @@ namespace WoundBoundGame
             }
 
             figures.Clear();
+            blocks.Clear();
+            fog = null;
+            fogLayer = null;
             BuildGround(fight);
 
             // Open over the party, close enough to see who is who; the rest is a pan or a zoom away.
@@ -151,7 +157,13 @@ namespace WoundBoundGame
             }
 
             var move = (-right.Normalized() * screen.X + up.Normalized() * screen.Y) * perPixel;
-            focusTarget = new Vector3(Mathf.Clamp(focusTarget.X + move.X, 0, fight.Width), 0, Mathf.Clamp(focusTarget.Z + move.Z, 0, fight.Height));
+
+            // Kept over ground the party has seen: nothing to look at in the fog but fog.
+            var (x0, y0, x1, y1) = fog?.ExploredBounds is { } known
+                ? (known.X0 - 1, known.Y0 - 1, known.X1 + 2, known.Y1 + 2)
+                : (0, 0, fight.Width, fight.Height);
+            focusTarget = new Vector3(Mathf.Clamp(focusTarget.X + move.X, Math.Max(0, x0), Math.Min(fight.Width, x1)), 0,
+                Mathf.Clamp(focusTarget.Z + move.Z, Math.Max(0, y0), Math.Min(fight.Height, y1)));
         }
 
         // ---- Between the board and the screen ----
@@ -209,7 +221,16 @@ namespace WoundBoundGame
                     figure.Position = Where(creature);
                 }
 
+                // A foe out of sight isn't drawn; one coming into sight appears where it is, not
+                // gliding there from where it was last seen.
+                var shown = fog?.Shows(creature) ?? true;
+                if (shown && !figure.Visible)
+                {
+                    figure.Position = Where(creature);
+                }
+
                 figure.Follow(Where(creature), FacingOf(creature, fight), ease);
+                figure.Visible = shown && !creature.HasFled;
             }
         }
 
@@ -337,6 +358,89 @@ namespace WoundBoundGame
                 Position = new Vector3(square.X + 0.5f, height / 2, square.Y + 0.5f),
             };
             terrain.AddChild(box);
+            blocks[square] = (box, colour);
+        }
+
+        // ---- The fog of war ----
+
+        private static readonly Color Void = new(0.09f, 0.09f, 0.11f);
+
+        /// <summary>
+        /// Draws <paramref name="sight"/> over the board: never-seen ground blacked out, walls and
+        /// cover on it gone; remembered ground dimmed, its walls and cover darkened. Null lifts it.
+        /// Called whenever what the party sees may have changed.
+        /// </summary>
+        public void ApplyFog(FogOfWar? sight)
+        {
+            fog = sight;
+            fogLayer?.QueueFree();
+            fogLayer = null;
+            if (encounter is not { } fight)
+            {
+                return;
+            }
+
+            foreach (var (square, (box, colour)) in blocks)
+            {
+                var state = sight?.StateOf(square) ?? FogState.Seen;
+                box.Visible = state != FogState.Unseen;
+                ((StandardMaterial3D)box.MaterialOverride).AlbedoColor = state == FogState.Remembered ? colour.Darkened(0.55f) : colour;
+            }
+
+            if (sight is null)
+            {
+                return;
+            }
+
+            fogLayer = new Node3D();
+            AddChild(fogLayer);
+            var unseen = new SurfaceTool();
+            var remembered = new SurfaceTool();
+            unseen.Begin(Mesh.PrimitiveType.Triangles);
+            remembered.Begin(Mesh.PrimitiveType.Triangles);
+            int unseenCount = 0, rememberedCount = 0;
+            for (var y = 0; y < fight.Height; y++)
+            {
+                for (var x = 0; x < fight.Width; x++)
+                {
+                    switch (sight.StateOf(new GridPosition(x, y)))
+                    {
+                        case FogState.Unseen:
+                            Quad(unseen, x, y, 0.03f, Void);
+                            unseenCount++;
+                            break;
+                        case FogState.Remembered:
+                            Quad(remembered, x, y, 0.03f, new Color(0.02f, 0.02f, 0.04f, 0.55f));
+                            rememberedCount++;
+                            break;
+                    }
+                }
+            }
+
+            if (unseenCount > 0)
+            {
+                fogLayer.AddChild(new MeshInstance3D
+                {
+                    Mesh = unseen.Commit(),
+                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                    MaterialOverride = new StandardMaterial3D { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, VertexColorUseAsAlbedo = true },
+                });
+            }
+
+            if (rememberedCount > 0)
+            {
+                fogLayer.AddChild(new MeshInstance3D
+                {
+                    Mesh = remembered.Commit(),
+                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                    MaterialOverride = new StandardMaterial3D
+                    {
+                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                        VertexColorUseAsAlbedo = true,
+                        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                    },
+                });
+            }
         }
 
         /// <summary>
@@ -436,7 +540,6 @@ namespace WoundBoundGame
                 var down = creature.IsOutOfFight || creature.IsProne;
                 var lie = down ? 85f : 0f;
                 body.RotationDegrees = new Vector3(Mathf.Lerp(body.RotationDegrees.X, lie, ease), Mathf.RadToDeg(facing), 0);
-                Visible = !creature.HasFled;
             }
         }
     }

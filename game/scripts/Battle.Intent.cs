@@ -15,7 +15,7 @@ namespace WoundBoundGame
     {
         private void UpdateIntent()
         {
-            if (encounter.Declared is not { } declared || declared.Actor.Side != Side.Adversaries || declared.Actor.IsOutOfFight)
+            if (encounter.Declared is not { } declared || declared.Actor.Side != Side.Adversaries || declared.Actor.IsOutOfFight || !Shown(declared.Actor))
             {
                 radial.ShowIntent(null);
                 return;
