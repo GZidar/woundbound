@@ -79,14 +79,21 @@ Knowledge? knowledge = Text("--knowledge", null) switch
     "seen" => Knowledge.Seen,
     _ => null,
 };
+// The fog dial: peer (knows where every character stands) or fog (only what its creatures have seen); left out, it goes with the skill (Best peers).
+bool? peers = Text("--sight", null) switch
+{
+    "peer" => true,
+    "fog" => false,
+    _ => null,
+};
 // --gm-caution: what share of its skill's Care the GM spends on its own creatures — for tuning.
 var caution = double.TryParse(Text("--gm-caution", null), System.Globalization.CultureInfo.InvariantCulture, out var c) ? c : UtilityGmBrain.GmCaution;
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),
-    "best" => new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution),
-    "balanced" => new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution),
-    "poor" => new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution),
+    "best" => new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers),
+    "balanced" => new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers),
+    "poor" => new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers),
     _ => new SimpleGmBrain(),
 };
 
@@ -139,7 +146,7 @@ var fight = which switch
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 
-Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}" : string.Empty)}.");
+Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}, {(u.PeersThroughFog ? "peering through the fog" : "in the fog")}" : string.Empty)}.");
 Console.WriteLine();
 
 // --show N: play the one fight on seed N with the best utility party (or --show-as balanced|poor), and print its log.

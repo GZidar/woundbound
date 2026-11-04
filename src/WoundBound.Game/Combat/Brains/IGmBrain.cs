@@ -80,6 +80,14 @@ namespace WoundBound.Game.Combat.Brains
         /// Soul — a foe built with the rule (GM Reference §2). By default, none.
         /// </summary>
         int ShelterAmount(BattleView view, PendingReaction reaction) => 0;
+
+        /// <summary>
+        /// Whether the GM plays its creatures knowing where every character stands, as a GM at the
+        /// table sees the whole map (the user's direction, 2026-11-04: not cheating, a skill). One
+        /// that doesn't is handed a <see cref="BattleView"/> fogged to what its creatures have seen.
+        /// Either way, no creature can aim at somebody it can't see: the rules refuse it.
+        /// </summary>
+        bool PeersThroughFog => true;
     }
 
     /// <summary>One thing an adversary does on its turn.</summary>

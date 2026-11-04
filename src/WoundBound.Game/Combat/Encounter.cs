@@ -170,6 +170,13 @@ namespace WoundBound.Game.Combat
             ApplySettingToCombatants();
             view = new BattleView(this);
 
+            // A GM that doesn't peer through the fog plays its creatures on what they have seen.
+            gmView = this.gm.PeersThroughFog ? view : new BattleView(this, fogFor: Side.Adversaries);
+            if (!this.gm.PeersThroughFog)
+            {
+                TrackSightings(Side.Adversaries);
+            }
+
             // An ambush is rolled before the first round; if it is sprung, the surprise actions come first.
             if (!SpringAmbush())
             {
@@ -179,6 +186,18 @@ namespace WoundBound.Game.Combat
 
         /// <summary>The fight as a brain sees it — for bots at either seat.</summary>
         internal BattleView View => view;
+
+        /// <summary>The fight as the GM's brain sees it: all of it, or — where it doesn't peer through the fog — what its creatures have seen.</summary>
+        private BattleView GmView
+        {
+            get
+            {
+                LookAround();
+                return gmView;
+            }
+        }
+
+        private readonly BattleView gmView;
 
         public int Width { get; }
 
@@ -574,7 +593,9 @@ namespace WoundBound.Game.Combat
 
         private void Raise(Happening happening)
         {
+            LookAround();
             ReportMoves();
+            GiveAway(happening);
             happened?.Invoke(happening);
         }
 
@@ -1530,7 +1551,7 @@ namespace WoundBound.Game.Combat
             {
                 owedInGap--;
                 adversaryTurnsRemaining--;
-                actor = CheckAdversary(gm.ChooseOwedTurn(view), "an owed turn");
+                actor = CheckAdversary(gm.ChooseOwedTurn(GmView), "an owed turn");
                 if (!actor.HasTurnLeftThisRound)
                 {
                     throw new InvalidOperationException($"The GM brain gave {actor.Name} more owed turns this round than it takes; only an Opportunity buys another.");
@@ -1748,7 +1769,7 @@ namespace WoundBound.Game.Combat
                 owedInGap = 0;
             }
 
-            extraTurnChosen = owedInGap == 0 && GmOpportunities > 0 && view.Adversaries.Any(a => a.CanTakeExtraTurn) && gm.ChooseExtraTurn(view) is { } bought
+            extraTurnChosen = owedInGap == 0 && GmOpportunities > 0 && view.Adversaries.Any(a => a.CanTakeExtraTurn) && gm.ChooseExtraTurn(GmView) is { } bought
                 ? CheckAdversary(bought, "an extra turn")
                 : null;
             if (extraTurnChosen is { CanTakeExtraTurn: false } again)
@@ -1788,7 +1809,7 @@ namespace WoundBound.Game.Combat
         {
             // A creature a Control spell holds does what the spell says, not what the GM would.
             idle.RemoveAll(a => a.IsOutOfFight || IsControlled(a));
-            if (IsOver || idle.Count == 0 || gm.NextCloseIn(view, idle) is not { } closeIn)
+            if (IsOver || idle.Count == 0 || gm.NextCloseIn(GmView, idle) is not { } closeIn)
             {
                 done();
                 return;
@@ -1965,7 +1986,7 @@ namespace WoundBound.Game.Combat
 
             // Every step spends a move or an action, and an illegal one throws, so a turn always ends.
             turn.BonusAvailable &= GmOpportunities > 0;
-            var step = queuedStep ?? gm.NextStep(view, turn);
+            var step = queuedStep ?? gm.NextStep(GmView, turn);
             queuedStep = null;
             turn.Steps++;
 
@@ -2610,7 +2631,7 @@ namespace WoundBound.Game.Combat
                         continue;
                     }
 
-                    if (!gm.StrikesAtLeaver(view, enemy, mover))
+                    if (!gm.StrikesAtLeaver(GmView, enemy, mover))
                     {
                         Write($"{mover.Name} leaves {enemy.Name}'s reach, and it lets them go.");
                         continue;
@@ -3454,13 +3475,13 @@ namespace WoundBound.Game.Combat
             {
                 var takes = offer.Kind switch
                 {
-                    ReactionKind.PanicDodge or ReactionKind.RaiseShield => gm.PanicDodges(view, offer),
-                    ReactionKind.StandFirm or ReactionKind.BraceResolve => gm.StandsFirm(view, offer),
-                    ReactionKind.Backlash => gm.Backlashes(view, offer),
-                    ReactionKind.Sustain => gm.Sustains(view, offer),
-                    ReactionKind.Shelter => (shelterTaking = Math.Clamp(gm.ShelterAmount(view, offer), 0, offer.ImpactWounds)) > 0,
+                    ReactionKind.PanicDodge or ReactionKind.RaiseShield => gm.PanicDodges(GmView, offer),
+                    ReactionKind.StandFirm or ReactionKind.BraceResolve => gm.StandsFirm(GmView, offer),
+                    ReactionKind.Backlash => gm.Backlashes(GmView, offer),
+                    ReactionKind.Sustain => gm.Sustains(GmView, offer),
+                    ReactionKind.Shelter => (shelterTaking = Math.Clamp(gm.ShelterAmount(GmView, offer), 0, offer.ImpactWounds)) > 0,
                     ReactionKind.Interrupt => false,
-                    _ => gm.ArrestsShove(view, offer),
+                    _ => gm.ArrestsShove(GmView, offer),
                 };
 
                 if (takes && !IsFreeChoice(offer.Kind))
@@ -4337,6 +4358,7 @@ namespace WoundBound.Game.Combat
 
         private void Write(string line)
         {
+            LookAround();
             ReportMoves();
             log.Add(line);
             Logged?.Invoke(line);

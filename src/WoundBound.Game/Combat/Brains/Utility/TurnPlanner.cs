@@ -1007,7 +1007,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         private double Position(Combatant actor, GridPosition square)
         {
-            var nearest = View.EnemiesOf(actor).Select(e => actor.DistanceFrom(square, e)).DefaultIfEmpty(int.MaxValue).Min();
+            var nearest = View.EnemiesOf(actor).Select(e => actor.DistanceFrom(square, e))
+                .Concat(Hunted(actor, square)).DefaultIfEmpty(int.MaxValue).Min();
 
             // Out past Long of every enemy is out of the fight: for a creature that means to win,
             // that's walking away from it — the party getting clear, or the GM's quarry escaping.
@@ -1065,7 +1066,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             best = Math.Max(best, spells.BestHarmFrom(actor, square, Pursued(actor)));
-            var nearest = Pursued(actor).Select(e => actor.DistanceFrom(square, e)).DefaultIfEmpty(0).Min();
+            var nearest = Pursued(actor).Select(e => actor.DistanceFrom(square, e))
+                .Concat(Hunted(actor, square)).DefaultIfEmpty(0).Min();
             return best - 0.05 * nearest;
         }
 
@@ -1081,6 +1083,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </remarks>
         private IEnumerable<Combatant> Pursued(Combatant actor) =>
             View.EnemiesOf(actor).Where(e => !e.IsBroken || (View.MustNotEscape(e) && View.QuietRounds < GiveUpTheChaseAfter));
+
+        /// <summary>
+        /// In a view fogged for the actor's side, how far <paramref name="square"/> is from where each
+        /// foe out of sight was last seen — the hunt, for a creature that can't see who it's after.
+        /// </summary>
+        private IEnumerable<int> Hunted(Combatant actor, GridPosition square) =>
+            actor.Side != View.FoggedFor
+                ? []
+                : View.Remembered.Where(r => !r.Foe.IsBroken || View.MustNotEscape(r.Foe))
+                    .Select(r => Footprints.Distance(square, actor.Across, r.At, r.Foe.Across));
 
         /// <summary>Quiet rounds of chasing after which a fleeing quarry is let go.</summary>
         private const int GiveUpTheChaseAfter = 4;

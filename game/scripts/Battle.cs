@@ -185,11 +185,11 @@ namespace WoundBoundGame
         /// <summary>The GM for a new fight, from the picker: the utility GM at each skill, or the simple placeholder.</summary>
         private IGmBrain PickedGm() => gmPicker.Selected switch
         {
-            1 => new UtilityGmBrain(BrainSkill.Balanced, new System.Random(), PickedKnowledge()),
-            2 => new UtilityGmBrain(BrainSkill.Poor, new System.Random(), PickedKnowledge()),
+            1 => new UtilityGmBrain(BrainSkill.Balanced, new System.Random(), PickedKnowledge(), peers: PickedSight()),
+            2 => new UtilityGmBrain(BrainSkill.Poor, new System.Random(), PickedKnowledge(), peers: PickedSight()),
             3 => new SimpleGmBrain(),
             4 => new TrippingGmBrain(),
-            _ => new UtilityGmBrain(BrainSkill.Best, new System.Random(), PickedKnowledge()),
+            _ => new UtilityGmBrain(BrainSkill.Best, new System.Random(), PickedKnowledge(), peers: PickedSight()),
         };
 
         /// <summary>The GM knowledge dial from its picker: with the skill, the sheets, or only what it has seen.</summary>
@@ -201,6 +201,16 @@ namespace WoundBoundGame
         };
 
         private OptionButton knowledgePicker = null!;
+
+        /// <summary>The GM fog dial from its picker: with the skill, peering through the fog, or only what its creatures have seen.</summary>
+        private bool? PickedSight() => sightPicker.Selected switch
+        {
+            1 => true,
+            2 => false,
+            _ => null,
+        };
+
+        private OptionButton sightPicker = null!;
         private OptionButton fightPicker = null!;
         private HFlowContainer chooseRow = null!;
         private Label partyLabel = null!;
@@ -565,6 +575,11 @@ namespace WoundBoundGame
             if (Value("--knowledge") is { } knows)
             {
                 knowledgePicker.Select(knows switch { "sheets" => 1, "seen" => 2, _ => 0 });
+            }
+
+            if (Value("--sight") is { } sight)
+            {
+                sightPicker.Select(sight switch { "peer" => 1, "fog" => 2, _ => 0 });
             }
 
             if (demo)
@@ -2269,6 +2284,20 @@ namespace WoundBoundGame
             knowledgePicker.AddItem("What it has seen — rolls, casts, the look of them");
             knowledgePicker.ItemSelected += _ => StartEncounter();
             knowsRow.AddChild(knowledgePicker);
+
+            // The third: whether the GM sees the whole map, or only what its creatures have seen.
+            var sightRow = new HBoxContainer();
+            sightRow.AddThemeConstantOverride("separation", 8);
+            column.AddChild(sightRow);
+            sightRow.AddChild(new Label { Text = "GM sees:" });
+            sightPicker = new OptionButton { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, TooltipText = "Whether the GM knows where every character stands, or plays its creatures on what they have seen. No creature ever aims at somebody it can't see. Takes effect from the next fight." };
+            sightPicker.FitToLongestItem = false;
+            sightPicker.ClipText = true;
+            sightPicker.AddItem("With its skill — the whole map at Best, the fog below");
+            sightPicker.AddItem("The whole map — peers through the fog");
+            sightPicker.AddItem("The fog — what its creatures see, and where they last saw you");
+            sightPicker.ItemSelected += _ => StartEncounter();
+            sightRow.AddChild(sightPicker);
 
             reactionBox = new PanelContainer { Visible = false };
             reactionBox.AddThemeStyleboxOverride("panel", new StyleBoxFlat

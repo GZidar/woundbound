@@ -11,10 +11,34 @@ namespace WoundBound.Game.Combat.Brains
     {
         private readonly Encounter encounter;
 
-        internal BattleView(Encounter encounter)
+        internal BattleView(Encounter encounter, Side? fogFor = null)
         {
             this.encounter = encounter;
+            FoggedFor = fogFor;
         }
+
+        /// <summary>
+        /// The side this view is fogged for, or null for a view of the whole board. A fogged view
+        /// shows that side's own creatures, and of the other side only those it sees now; the rest
+        /// are where <see cref="Remembered"/> says it last saw them, if anywhere.
+        /// </summary>
+        public Side? FoggedFor { get; }
+
+        /// <summary>Whether <paramref name="creature"/> is known to be where it is: always, but for a foe out of sight in a fogged view.</summary>
+        public bool Sees(Combatant creature) =>
+            FoggedFor is not { } side || creature.Side == side || creature.IsPhantom || encounter.Sighted(side, creature);
+
+        /// <summary>The foes of the fogged side out of its sight that it remembers, and where it last saw each; none in an unfogged view.</summary>
+        public IEnumerable<(Combatant Foe, GridPosition At)> Remembered =>
+            FoggedFor is { } side ? encounter.Remembered(side).Where(r => !r.Foe.IsOutOfFight) : [];
+
+        /// <summary>
+        /// Where <paramref name="seeker"/> believes its foes are: each one in sight, and the last-seen
+        /// square of each out of it — what a hunter closes on and a runner gets away from.
+        /// </summary>
+        public IEnumerable<GridPosition> BelievedFoeSquares(Combatant seeker) =>
+            EnemiesOf(seeker).Select(e => e.Position)
+                .Concat(seeker.Side == FoggedFor ? Remembered.Select(r => r.At) : []);
 
         public int Width => encounter.Width;
 
@@ -25,7 +49,8 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Whole rounds gone by with nobody hurt or healed.</summary>
         public int QuietRounds => encounter.QuietRounds;
 
-        public IReadOnlyList<Combatant> Combatants => encounter.Combatants;
+        /// <summary>Everybody in the fight — in a fogged view, foes out of sight left out.</summary>
+        public IReadOnlyList<Combatant> Combatants => FoggedFor is null ? encounter.Combatants : encounter.Combatants.Where(Sees).ToList();
 
         /// <summary>The GM's creatures still fighting.</summary>
         public IEnumerable<Combatant> Adversaries => encounter.Fighting(Side.Adversaries);
@@ -35,7 +60,7 @@ namespace WoundBound.Game.Combat.Brains
         public IEnumerable<Combatant> YetToAct => Adversaries.Where(a => a.HasTurnLeftThisRound);
 
         /// <summary>The party still fighting.</summary>
-        public IEnumerable<Combatant> Characters => encounter.Fighting(Side.Party);
+        public IEnumerable<Combatant> Characters => encounter.Fighting(Side.Party).Where(Sees);
 
         /// <summary>The party members yet to take a turn this round.</summary>
         public IReadOnlyList<Combatant> PartyStillToAct => encounter.PartyStillToAct;
@@ -89,8 +114,11 @@ namespace WoundBound.Game.Combat.Brains
         public int SquaresFor(Speed speed, int moves) => encounter.SquaresFor(speed, moves);
 
         /// <summary>Squares from <paramref name="square"/> to the nearest character still fighting.</summary>
+        /// <remarks>In a view fogged for the GM, a character out of sight counts from where it was last seen.</remarks>
         public int DistanceToNearestCharacter(GridPosition square) =>
-            Characters.Select(c => c.DistanceTo(square)).DefaultIfEmpty(int.MaxValue).Min();
+            Characters.Select(c => c.DistanceTo(square))
+                .Concat(FoggedFor == Side.Adversaries ? Remembered.Select(r => r.At.DistanceTo(square)) : [])
+                .DefaultIfEmpty(int.MaxValue).Min();
 
         /// <summary>Whether a character still fighting has <paramref name="square"/> within Long. An adversary nobody does has left the board.</summary>
         public bool IsWithinLongOfParty(GridPosition square) => encounter.IsWithinLongOfParty(square);
@@ -203,7 +231,7 @@ namespace WoundBound.Game.Combat.Brains
         public IEnumerable<Combatant> Steeds => encounter.Steeds;
 
         public IEnumerable<Combatant> EnemySteeds(Combatant combatant) =>
-            encounter.Steeds.Where(s => s.Side != combatant.Side && s.Rider is { IsOutOfFight: false });
+            encounter.Steeds.Where(s => s.Side != combatant.Side && s.Rider is { IsOutOfFight: false } && Sees(s.Rider));
 
         public string? MountRefusal(Combatant rider) => encounter.MountRefusal(rider);
 
@@ -222,7 +250,7 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Everybody still fighting on the other side from <paramref name="combatant"/>.</summary>
         /// <remarks>As <paramref name="combatant"/> believes it: a phantom figure it is taken in by is one of them.</remarks>
         public IEnumerable<Combatant> EnemiesOf(Combatant combatant) =>
-            encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party).Concat(encounter.PhantomsSeenBy(combatant));
+            encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party).Where(Sees).Concat(encounter.PhantomsSeenBy(combatant));
 
         /// <summary>Everybody still fighting on <paramref name="combatant"/>'s own side, themselves included.</summary>
         public IEnumerable<Combatant> AlliesOf(Combatant combatant) => encounter.Fighting(combatant.Side);
@@ -266,7 +294,7 @@ namespace WoundBound.Game.Combat.Brains
         public static string? ShieldRefusal(Combatant bearer, Combatant? ally = null) => Encounter.ShieldRefusal(bearer, ally);
 
         /// <summary>The party, the dying and the stable among them included — everyone a Heal could still reach.</summary>
-        public IEnumerable<Combatant> PartyOnBoard => encounter.Combatants.Where(c => c.Side == Side.Party && c.OccupiesSquare);
+        public IEnumerable<Combatant> PartyOnBoard => encounter.Combatants.Where(c => c.Side == Side.Party && c.OccupiesSquare && Sees(c));
 
         /// <summary>Why <paramref name="combatant"/> can't regain the footing a hazard took, or null if they can.</summary>
         public static string? RegainFootingRefusal(Combatant combatant) => Encounter.RegainFootingRefusal(combatant);

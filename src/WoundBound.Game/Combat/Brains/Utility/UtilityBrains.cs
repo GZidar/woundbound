@@ -43,13 +43,24 @@ namespace WoundBound.Game.Combat.Brains.Utility
     {
         private readonly Random random;
 
-        public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null, double caution = GmCaution)
+        public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null, double caution = GmCaution, bool? peers = null)
         {
             Skill = skill ?? BrainSkill.Best;
             planning = Skill with { Care = Skill.Care * caution };
             this.random = random ?? new Random(1);
             Knowledge = knowledge ?? KnowledgeFor(Skill);
+            PeersThroughFog = peers ?? PeersFor(Skill);
         }
+
+        /// <summary>
+        /// Whether it knows where every character stands, out of its creatures' sight or not — a GM
+        /// at the table sees the whole map. Below that, it plays them on what they've seen: the
+        /// characters in sight, and where the rest were last seen.
+        /// </summary>
+        public bool PeersThroughFog { get; }
+
+        /// <summary>Whether a GM of <paramref name="skill"/> peers through the fog when nobody says: at Best, as it reads the sheets.</summary>
+        public static bool PeersFor(BrainSkill skill) => skill.Name == BrainSkill.Best.Name;
 
         public BrainSkill Skill { get; }
 
