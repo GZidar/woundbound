@@ -113,12 +113,26 @@ namespace WoundBoundGame
             }
 
             lastLeftOut = false;
-            foreach (var foe in unseen)
+            return Veiled(line, unseen);
+        }
+
+        /// <summary>
+        /// <paramref name="text"/> with every foe the party can't see now named only as "something
+        /// unseen" — in the Players' view; the GM's shows it as it is.
+        /// </summary>
+        private string Veil(string text) =>
+            fogOn ? Veiled(text, encounter.Combatants.Where(c => c.Side != Side.Party && text.Contains(c.Name) && !PartySees(c))) : text;
+
+        private static string Veiled(string text, IEnumerable<Combatant> unseen)
+        {
+            foreach (var foe in unseen.OrderByDescending(c => c.Name.Length))
             {
-                line = line.Replace(foe.Name, Unseen);
+                text = text.Replace(foe.Name, Unseen);
             }
 
-            return char.ToUpperInvariant(line[0]) + line[1..];
+            // A sentence that now opens on it starts with a capital.
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"(^|[.!?\n]\s*)something unseen", m => m.Value[..^Unseen.Length] + BattleLog.UnseenActor);
+            return text;
         }
 
         /// <summary>Whether the party sees <paramref name="c"/> now, standing or lying where it fell.</summary>

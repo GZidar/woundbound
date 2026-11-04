@@ -1027,6 +1027,8 @@ namespace WoundBoundGame
                 DrawFlatCrumbs();
             }
 
+            DrawGhosts();
+
             // A Swarm first, beneath: whoever stands in the mass is drawn on top of it.
             foreach (var combatant in encounter.Combatants.OrderBy(c => c.HoldsGround).Where(Shown))
             {
@@ -1298,8 +1300,14 @@ namespace WoundBoundGame
 
             StartLogs();
             encounter.Logged += OnLogged;
+            lastSeen.Clear();
             encounter.Happened += happening =>
             {
+                if (happening is Moved walked)
+                {
+                    NoteWalk(walked);
+                }
+
                 if (In3D)
                 {
                     board3D!.Play(happening);
@@ -1334,6 +1342,8 @@ namespace WoundBoundGame
             {
                 board3D?.ApplyFog(fog);
             }
+
+            UpdateLastSeen();
 
             foreach (var line in ShownLog.Skip(linesShown))
             {
@@ -1410,7 +1420,7 @@ namespace WoundBoundGame
                 return;
             }
 
-            reactionExplained = pending.Prompt +
+            reactionExplained = Veil(pending.Prompt) +
                 (pending.WouldRiposte ? "\nIt's a critical, so the miss would be a Riposte: the attacker takes the wound." : string.Empty) +
                 pending.Kind switch
                 {
@@ -1522,7 +1532,7 @@ namespace WoundBoundGame
                 (character.IsDazed ? $"\n{(character.IsStunned ? "Stunned" : "Numbed")}: no actions until an ally Meditates, Prays or heals the track." : string.Empty) +
                 (character.Sustaining is { } holding ? $"\nSustaining {holding}: 1 Stamina at the start of each turn to keep it." : string.Empty) +
                 string.Concat(encounter.SpellsInPlay.Where(e => e.Target == character)
-                    .Select(e => $"\nUnder {e.Caster.Name}'s {e.Spell}" + (e.Threshold is { } t ? $" ({e.Amount:+0;−0} {t})" : e.Condition is { } c ? $" ({c})" : string.Empty)
+                    .Select(e => $"\nUnder {Veil(e.Caster.Name)}'s {e.Spell}" + (e.Threshold is { } t ? $" ({e.Amount:+0;−0} {t})" : e.Condition is { } c ? $" ({c})" : string.Empty)
                                  + (e.Sustained ? ", held" : string.Empty)));
 
             static string Threshold(string name, int? now, int? baseValue) =>

@@ -24,14 +24,14 @@ namespace WoundBoundGame
 
         /// <summary>The foes on the roster: every one in the GM's view; in the Players' view, only those the party sees now.</summary>
         private List<Combatant> RosterFoes() =>
-            encounter.Combatants.Where(c => c.Side == Side.Adversaries && !c.HasFled && Shown(c)).ToList();
+            encounter.Combatants.Where(c => c.Side == Side.Adversaries && !c.HasFled && (Shown(c) || GhostOf(c) is not null)).ToList();
 
         /// <summary>The roster's second row: the foes in rust, the one acting ringed, those down faded.</summary>
         private void DrawFoeStrip()
         {
             var font = ThemeDB.FallbackFont;
             var dim = new Color(0.75f, 0.75f, 0.8f);
-            DrawString(font, new Vector2(BoardOrigin.X + 10, FoeRowY + 5), fogOn ? "In sight" : "All foes", HorizontalAlignment.Left, -1, 12, dim);
+            DrawString(font, new Vector2(BoardOrigin.X + 10, FoeRowY + 5), fogOn ? "Seen" : "All foes", HorizontalAlignment.Left, -1, 12, dim);
             var foes = RosterFoes();
             if (foes.Count == 0)
             {
@@ -46,6 +46,14 @@ namespace WoundBoundGame
                 {
                     DrawString(font, at + new Vector2(-10, 5), $"+{foes.Count - i}", HorizontalAlignment.Left, -1, 11, dim);
                     break;
+                }
+
+                if (GhostOf(foe) is { } ghost)
+                {
+                    // Out of sight: hollow, with where it was last seen behind the click.
+                    DrawArc(at, 10, 0, Mathf.Tau, 24, AdversaryToken with { A = ghost.Down ? 0.3f : 0.8f }, 2);
+                    DrawString(font, at + new Vector2(-12, 4), "?", HorizontalAlignment.Center, 24, 11, Colors.White with { A = 0.6f });
+                    continue;
                 }
 
                 var down = foe.IsOutOfFight;
@@ -85,9 +93,8 @@ namespace WoundBoundGame
         /// <summary>Brings the camera to <paramref name="who"/> and rings them for a moment.</summary>
         private void CentreOn(Combatant who)
         {
-            var middle = new Vector2(
-                Mathf.Clamp(who.Position.X, 0, encounter.Width - 1) + who.Across / 2f,
-                Mathf.Clamp(who.Position.Y, 0, encounter.Height - 1) + who.Across / 2f);
+            // A foe out of sight is looked for where it was last seen, never where it is.
+            var middle = PlaceOf(who);
             if (In3D)
             {
                 board3D!.FocusOn(middle);
@@ -124,18 +131,30 @@ namespace WoundBoundGame
         /// <summary>Two rings closing in on whoever was picked from the roster.</summary>
         private void DrawSpotlight()
         {
-            if (spotlight is not { } lit || !Shown(lit.Who))
+            if (spotlight is not { } lit || (!Shown(lit.Who) && GhostOf(lit.Who) is null))
             {
                 return;
             }
 
             var k = (float)(lit.Age / SpotlightLife);
-            var centre = TokenCentre(lit.Who);
+            var ghost = !Shown(lit.Who);
+            var centre = ghost ? ScreenOfSquares(PlaceOf(lit.Who)) : TokenCentre(lit.Who);
             var radius = CellSize * lit.Who.Across * 0.36f;
             for (var i = 0; i < 2; i++)
             {
                 var u = (k * 2 + i * 0.5f) % 1;
-                DrawRing(lit.Who, centre, radius + 4 + (1 - u) * CellSize * 0.8f, ActiveRing with { A = (1 - k) * u }, 3);
+                var colour = ActiveRing with { A = (1 - k) * u };
+                if (ghost)
+                {
+                    // Round the ghost, laid on the ground in 3D, so the ring never gives the foe's real square away.
+                    var r = lit.Who.Across * 0.42f + (1 - u) * 0.8f;
+                    var middle = PlaceOf(lit.Who);
+                    DrawPolyline(Enumerable.Range(0, 33).Select(n => ScreenOfSquares(middle + Vector2.FromAngle(Mathf.Tau * n / 32) * r)).ToArray(), colour, 3);
+                }
+                else
+                {
+                    DrawRing(lit.Who, centre, radius + 4 + (1 - u) * CellSize * 0.8f, colour, 3);
+                }
             }
         }
     }
