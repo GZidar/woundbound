@@ -872,11 +872,11 @@ namespace WoundBoundGame
             /// <summary>A leg swept forward — a trip.</summary>
             public float Kick { get; set; }
 
-            public Vector3 Chest => Anchor + Vector3.Up * 0.68f * BodyScale;
+            public Vector3 Chest => Anchor + Vector3.Up * (chestHeight + hover) * BodyScale;
 
             private float BodyScale => body.Scale.Y;
 
-            public Vector3 Hand(Vector3 forward) => Anchor + Vector3.Up * 0.75f * BodyScale + forward * 0.25f * BodyScale;
+            public Vector3 Hand(Vector3 forward) => Anchor + Vector3.Up * (handHeight + hover) * BodyScale + forward * handReach * BodyScale;
 
             public void Place(Vector3 at)
             {

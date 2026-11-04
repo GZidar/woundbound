@@ -473,6 +473,9 @@ namespace WoundBoundGame
             private readonly Node3D body = new();
             private float facing;
 
+            /// <summary>The body's lean and roll as last laid on, in degrees.</summary>
+            private Vector3 tilt;
+
             public Figure()
             {
                 creature = null!;
@@ -483,77 +486,12 @@ namespace WoundBoundGame
                 this.creature = creature;
                 Colour = colour;
                 AddChild(body);
-                arm.Position = Shoulder;
-                body.AddChild(arm);
-                var scale = creature.Across * 1.35f;
-                body.Scale = Vector3.One * (creature.IsTiny ? 0.7f : scale);
-                var cloth = Material(colour);
-                var skin = Material(new Color(0.91f, 0.86f, 0.78f));
-                var metal = Material(new Color(0.62f, 0.64f, 0.68f), metallic: 0.6f);
-                var wood = Material(new Color(0.48f, 0.33f, 0.2f));
-
-                if (creature.IsSteed)
-                {
-                    Part(new BoxMesh { Size = new Vector3(0.35f, 0.38f, 0.85f) }, new Vector3(0, 0.45f, 0), Material(new Color(0.45f, 0.3f, 0.18f)));
-                    Part(new BoxMesh { Size = new Vector3(0.2f, 0.32f, 0.28f) }, new Vector3(0, 0.72f, 0.42f), Material(new Color(0.4f, 0.27f, 0.16f)));
-                    return;
-                }
-
-                if (creature.IsSwarm)
-                {
-                    var random = new Random(creature.Name.GetHashCode());
-                    for (var i = 0; i < 9; i++)
-                    {
-                        Part(new SphereMesh { Radius = 0.07f, Height = 0.12f }, new Vector3((float)random.NextDouble() - 0.5f, 0.06f, (float)random.NextDouble() - 0.5f) * 0.8f, cloth);
-                    }
-
-                    return;
-                }
-
-                var bulk = creature.Armour switch { ArmourWeight.Heavy => 0.34f, ArmourWeight.Medium => 0.3f, ArmourWeight.Light => 0.27f, _ => 0.24f };
-                // Two legs and two arms, each hung from its joint so a walk can swing them.
-                foreach (var (hip, x) in new[] { (leftHip, -0.065f), (rightHip, 0.065f) })
-                {
-                    hip.Position = new Vector3(x, 0.45f, 0);
-                    body.AddChild(hip);
-                    Part(new CylinderMesh { TopRadius = 0.05f, BottomRadius = 0.04f, Height = 0.45f }, new Vector3(0, -0.225f, 0), cloth, parent: hip);
-                }
-
-                offArm.Position = Shoulder with { X = -Shoulder.X };
-                body.AddChild(offArm);
-                Part(new CylinderMesh { TopRadius = 0.035f, BottomRadius = 0.03f, Height = 0.3f }, new Vector3(0, -0.15f, 0), cloth, parent: offArm);
-                Part(new CylinderMesh { TopRadius = 0.035f, BottomRadius = 0.03f, Height = 0.3f }, new Vector3(0, -0.13f, 0.04f), cloth, new Vector3(15, 0, 0), parent: arm);
-                Part(new CapsuleMesh { Radius = bulk / 2, Height = 0.5f }, new Vector3(0, 0.66f, 0), cloth);                                       // torso
-                if (creature.Armour is ArmourWeight.Medium or ArmourWeight.Heavy)
-                {
-                    Part(new CapsuleMesh { Radius = bulk / 2 + 0.02f, Height = 0.36f }, new Vector3(0, 0.7f, 0), metal);                         // mail or plate over it
-                }
-
-                Part(new SphereMesh { Radius = 0.12f, Height = 0.24f }, new Vector3(0, 1.03f, 0), skin);                                         // head
-                if (creature.Armour == ArmourWeight.Heavy)
-                {
-                    Part(new SphereMesh { Radius = 0.13f, Height = 0.16f, IsHemisphere = true }, new Vector3(0, 1.06f, 0), metal);              // helm
-                }
-
-                // What's in hand hangs from the shoulder, so a blow can swing it and a cast raise it.
-                var hand = new Vector3(0.2f, 0.6f, 0.08f) - Shoulder;
-                if (creature.HasRangedAttack && creature.Attacks.All(a => a.IsRanged || a.Name == "Unarmed"))
-                {
-                    Part(new BoxMesh { Size = new Vector3(0.03f, 0.65f, 0.05f) }, hand + new Vector3(0, 0.1f, 0.06f), wood, parent: arm);                    // bow stave
-                }
-                else if (creature.Spells.Count > 0 && creature.Attacks.All(a => a.Name == "Unarmed"))
-                {
-                    Part(new CylinderMesh { TopRadius = 0.02f, BottomRadius = 0.02f, Height = 0.9f }, hand + new Vector3(0, 0.05f, 0), wood, parent: arm);    // a caster's staff
-                }
-                else if (creature.Attacks.Any(a => a.Name != "Unarmed"))
-                {
-                    Part(new BoxMesh { Size = new Vector3(0.04f, 0.04f, 0.55f) }, hand + new Vector3(0, 0.02f, 0.28f), metal, parent: arm);                  // a blade, held forward
-                }
-
-                if (creature.InHandShield is not null)
-                {
-                    Part(new CylinderMesh { TopRadius = 0.17f, BottomRadius = 0.17f, Height = 0.04f }, new Vector3(-0.2f, 0.66f, 0.1f), wood, new Vector3(90, 0, 0));
-                }
+                // Small creatures stand shorter than a person on the same square.
+                var small = creature.Statblock?.Size == AdversarySize.Small ? 0.8f : 1f;
+                // A bat's wingspan is most of it: drawn at a person's scale, it still fits its square.
+                var tiny = WoundBound.Game.Figures.BodyShape.Of(creature).Plan == WoundBound.Game.Figures.BodyPlan.Winged ? 1.1f : 0.7f;
+                body.Scale = Vector3.One * (creature.IsTiny ? tiny : creature.Across * 1.35f * small);
+                Build(creature, colour);
             }
 
             private void Part(Mesh mesh, Vector3 at, Material material, Vector3? turn = null, Node3D? parent = null) =>
@@ -591,16 +529,17 @@ namespace WoundBoundGame
                     shownDown = creature.IsOutOfFight || creature.IsProne;
                 }
 
-                var lie = shownDown ? 85f : Lean;
-                body.RotationDegrees = new Vector3(Mathf.Lerp(body.RotationDegrees.X, lie, Holds > 0 && !shownDown ? 1 : ease), Mathf.RadToDeg(facing), 0);
+                // Standing, it leans as the act has it, over its own stoop; down, it lies as its body does.
+                var standing = new Vector3(Lean + stoop, 0, 0);
+                var pose = shownDown ? DownTilt : standing;
+                var blend = Holds > 0 && !shownDown ? 1 : ease;
+                // Kept here rather than read back off the node: Godot may hand the same turn back as
+                // other angles, and blending from those swings the body through nonsense.
+                tilt = tilt.Lerp(pose, blend);
+                body.RotationDegrees = new Vector3(tilt.X, Mathf.RadToDeg(facing), tilt.Z);
                 var step = Mathf.Sin(stridePhase) * walking;
-                leftHip.RotationDegrees = new Vector3(32 * step, 0, 0);
-                rightHip.RotationDegrees = new Vector3(-32 * step - Kick, 0, 0);
-                // A hand kept on whoever it holds, for as long as the hold lasts.
-                var holding = creature.Holding is not null && !shownDown ? -70f : 0f;
-                offArm.RotationDegrees = new Vector3(OffSwing + holding - 22 * step, 0, 0);
-                arm.RotationDegrees = new Vector3(Swing + 12 * step, 0, 0);
-                body.Position = Vector3.Up * 0.035f * Mathf.Abs(Mathf.Cos(stridePhase)) * walking;
+                PoseLimbs(step, -Mathf.Log(Mathf.Max(1e-4f, 1 - ease)) / 8, shownDown);
+                body.Position = Vector3.Up * (0.035f * Mathf.Abs(Mathf.Cos(stridePhase)) * walking + (HoverNow(shownDown) + Seat) * BodyScale);
             }
         }
     }
