@@ -25,6 +25,23 @@ namespace WoundBound.Game.Combat
             }
         }
 
+        /// <summary>Whether any square of the block at <paramref name="corner"/> is in <paramref name="squares"/>.</summary>
+        public static bool AnyIn(GridPosition corner, int across, IReadOnlySet<GridPosition> squares)
+        {
+            for (var dx = 0; dx < across; dx++)
+            {
+                for (var dy = 0; dy < across; dy++)
+                {
+                    if (squares.Contains(new GridPosition(corner.X + dx, corner.Y + dy)))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
         public static bool Contains(GridPosition corner, int across, GridPosition square) =>
             square.X >= corner.X && square.X < corner.X + across && square.Y >= corner.Y && square.Y < corner.Y + across;
 

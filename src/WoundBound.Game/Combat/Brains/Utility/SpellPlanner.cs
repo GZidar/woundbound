@@ -173,9 +173,17 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 ways.AddRange(ways.Select(w => w with { Overclock = true }).ToList());
             }
 
+            // Where it lands is the same however it is paid for: worked out once, and nowhere to put it is nothing to pay for.
+            var from = checkRules ? actor.Position : at;
+            var placed = View.PlaceCast(actor, from, cast);
+            if (placed.Refusal is not null)
+            {
+                return null;
+            }
+
             foreach (var way in ways)
             {
-                var plan = checkRules ? View.PlanCast(actor, way) : View.PlanCastFrom(actor, at, way);
+                var plan = View.PlanCastFrom(actor, from, way, checkTurn: checkRules, placed);
                 if (!plan.CanCast)
                 {
                     continue;

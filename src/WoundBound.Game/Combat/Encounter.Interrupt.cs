@@ -252,7 +252,7 @@ namespace WoundBound.Game.Combat
         {
             var distance = shelterer.DistanceTo(hurt);
             return distance <= ShortRangeSquares
-                   || (shelterer.IsFieldMedic && (Setting.Walls.Count == 0 || Sight.Clear(shelterer.Position, hurt.Position, Setting.IsWall))
+                   || (shelterer.IsFieldMedic && (Setting.Walls.Count == 0 || Sight.Clear(shelterer.Position, hurt.Position, Setting.WallTest))
                        && CanBeTargeted(hurt, hurt.Position, distance, shelterer));
         }
 

@@ -72,7 +72,7 @@ namespace WoundBound.Game.Combat.Brains
             {
                 // An extra turn is usually worth more than Advantage, so the bonus only gets an
                 // Opportunity when the bank is full and the next one would be wasted.
-                var advantage = turn.BonusAvailable && view.BankedOpportunities >= view.MaxBankedOpportunities;
+                var advantage = turn.BonusAvailable && view.BankedOpportunities >= view.MaxBankedOpportunities && Encounter.BonusAttackRefusal(turn.Actor, null) is null;
                 return new GmStep.Attack(target, advantage);
             }
 

@@ -345,7 +345,7 @@ namespace WoundBound.Game.Combat
                 for (var j = i + 1; j < nodes.Count; j++)
                 {
                     if (nodes[i].Any(x => nodes[j].Any(y => x.DistanceTo(y) <= reach
-                            && (Setting.Walls.Count == 0 || Sight.Clear(x, y, Setting.IsWall)))))
+                            && (Setting.Walls.Count == 0 || Sight.Clear(x, y, Setting.WallTest)))))
                     {
                         pool[Root(i)] = Root(j);
                     }
@@ -366,7 +366,7 @@ namespace WoundBound.Game.Combat
             {
                 var from = nodes[i].MinBy(sq => sq.DistanceTo(square));
                 if (RangeBandCalculator.BandForSquares(bands, from.DistanceTo(square)) is not { } band
-                    || (Setting.Walls.Count > 0 && !Sight.Clear(from, square, Setting.IsWall)))
+                    || (Setting.Walls.Count > 0 && !Sight.Clear(from, square, Setting.WallTest)))
                 {
                     continue;
                 }
@@ -378,7 +378,7 @@ namespace WoundBound.Game.Combat
             foreach (var fire in Fires)
             {
                 if (RangeBandCalculator.BandForSquares(bands, fire.DistanceTo(square)) is { } band
-                    && (Setting.Walls.Count == 0 || Sight.Clear(fire, square, Setting.IsWall)))
+                    && (Setting.Walls.Count == 0 || Sight.Clear(fire, square, Setting.WallTest)))
                 {
                     var grade = EnvironmentCalculator.VisibilityFromLight(tables, 0, builtFire: true, band);
                     best = grade < best ? grade : best;
@@ -1986,7 +1986,24 @@ namespace WoundBound.Game.Combat
 
             // Every step spends a move or an action, and an illegal one throws, so a turn always ends.
             turn.BonusAvailable &= GmOpportunities > 0;
-            var step = queuedStep ?? gm.NextStep(GmView, turn);
+            GmStep step;
+            if (queuedStep is { } queued)
+            {
+                step = queued;
+            }
+            else
+            {
+                stepAwaited = (turn, done);
+                try
+                {
+                    step = gm.NextStep(GmView, turn);
+                }
+                finally
+                {
+                    stepAwaited = null;
+                }
+            }
+
             queuedStep = null;
             turn.Steps++;
 
@@ -4185,14 +4202,18 @@ namespace WoundBound.Game.Combat
             var groundless = !mover.HoldsGround;
             bool AnyUnder(GridPosition corner, Func<GridPosition, bool> test) =>
                 across == 1 ? test(corner) : Footprints.At(corner, across).Any(test);
+
+            // Each test made once for the map, not once for every square it is put to.
+            Func<GridPosition, bool> solid = Setting.IsSolid, closed = ClosedSquare, taken = standing.ContainsKey,
+                broken = sq => GroundAt(sq) == Terrain.Broken, deep = Setting.IsDeepWater;
             var map = new MovementMap(
                 mover.Position,
                 radius: reach,
-                isWall: corner => AnyUnder(corner, Setting.IsSolid),
-                isClosed: corner => !groundless && AnyUnder(corner, ClosedSquare),
-                canStop: corner => groundless || !AnyUnder(corner, standing.ContainsKey),
-                isBroken: corner => tables is not null && AnyUnder(corner, sq => GroundAt(sq) == Terrain.Broken),
-                isDeep: corner => AnyUnder(corner, Setting.IsDeepWater),
+                isWall: corner => AnyUnder(corner, solid),
+                isClosed: corner => !groundless && AnyUnder(corner, closed),
+                canStop: corner => groundless || !AnyUnder(corner, taken),
+                isBroken: corner => tables is not null && AnyUnder(corner, broken),
+                isDeep: corner => AnyUnder(corner, deep),
                 price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.HasFootwork, freeStep: FreeStepFor(mover)),
                 brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken));
             return map;

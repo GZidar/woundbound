@@ -118,7 +118,7 @@ namespace WoundBound.Game.Combat
         /// <summary>What a spell's senses are, read from what it does: a figure seen, a voice heard, a wound felt.</summary>
         public static Senses SensesOf(SpellDefinition spell)
         {
-            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            var text = SpellArea.TextOf(spell);
             var senses = Senses.None;
             if (text.Contains("figure") || text.Contains("likeness") || text.Contains("double") || text.Contains("image")
                 || text.Contains("wall") || text.Contains("lantern") || text.Contains("sight") || text.Contains("seen"))
@@ -142,7 +142,7 @@ namespace WoundBound.Game.Combat
         /// <summary>What a spell is made to be, read from what it does.</summary>
         public static IllusionForm? FormOf(SpellDefinition spell)
         {
-            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            var text = SpellArea.TextOf(spell);
             return text.Contains("wound") || text.Contains("injury") ? IllusionForm.Wound
                 : text.Contains("wall") || text.Contains("barricade") || text.Contains("rockfall") ? IllusionForm.Wall
                 : text.Contains("figure") || text.Contains("likeness") || text.Contains("double") ? IllusionForm.Figure
@@ -327,7 +327,7 @@ namespace WoundBound.Game.Combat
 
             foreach (var witness in combatants.Where(c => c != creature && c.OccupiesSquare && Fools(illusion, c)
                          && c.DistanceTo(where) <= MiddleRangeSquares()
-                         && (Setting.Walls.Count == 0 || Sight.Clear(c.Position, where, Setting.IsWall))).ToList())
+                         && (Setting.Walls.Count == 0 || Sight.Clear(c.Position, where, Setting.WallTest))).ToList())
             {
                 BeliefCheck(illusion, witness, free: true);
             }

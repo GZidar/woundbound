@@ -497,6 +497,25 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public (double Hit, double ExpectedDealt, double Kill) Blow(Combatant attacker, AttackProfile attack, Combatant target, int? dieSides, int dodgeThreshold,
             bool advantage = false, bool disadvantage = false, bool precise = false, int woundsAlready = 0, int extraDamage = 0)
         {
+            // An assessor lives for one decision, over which nobody's state moves: the same blow is
+            // asked for from every square weighed, and worked out once.
+            var key = new BlowKey(attacker, attack, target, dieSides, dodgeThreshold, advantage, disadvantage, precise, woundsAlready, extraDamage);
+            if (!blows.TryGetValue(key, out var blow))
+            {
+                blows[key] = blow = WorkOutBlow(attacker, attack, target, dieSides, dodgeThreshold, advantage, disadvantage, precise, woundsAlready, extraDamage);
+            }
+
+            return blow;
+        }
+
+        private readonly record struct BlowKey(Combatant Attacker, AttackProfile Attack, Combatant Target, int? DieSides, int Dodge,
+            bool Advantage, bool Disadvantage, bool Precise, int WoundsAlready, int ExtraDamage);
+
+        private readonly Dictionary<BlowKey, (double Hit, double ExpectedDealt, double Kill)> blows = new();
+
+        private (double Hit, double ExpectedDealt, double Kill) WorkOutBlow(Combatant attacker, AttackProfile attack, Combatant target, int? dieSides, int dodgeThreshold,
+            bool advantage, bool disadvantage, bool precise, int woundsAlready, int extraDamage)
+        {
             advantage |= attacker.IsHelped || target.IsDefenceless || attacker.HoldsPatient;
             precise |= attacker.HoldsPrecise;
             disadvantage |= attacker.IsStandingGround || attacker.IsOffGuard || attacker.IsHarried;
@@ -581,7 +600,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private static bool Drops(Combatant target, int through, int woundsAlready = 0) =>
             through > 0 && (target.IsMinion || through >= target.Body - woundsAlready || target.IsDefenceless && target.Body - 1 <= PlayStateCalculator.MinBodyWounds);
 
-        private static IEnumerable<int> Sums(IReadOnlyList<int> dice)
+        /// <summary>Every way <paramref name="dice"/> can fall, summed — worked out once for each set of dice.</summary>
+        private static int[] Sums(IReadOnlyList<int> dice) =>
+            SumsMade.GetOrAdd(string.Join(',', dice), _ => EnumerateSums(dice).ToArray());
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int[]> SumsMade = new();
+
+        private static IEnumerable<int> EnumerateSums(IReadOnlyList<int> dice)
         {
             if (dice.Count == 0)
             {
@@ -589,7 +614,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 yield break;
             }
 
-            foreach (var rest in Sums(dice.Skip(1).ToList()))
+            foreach (var rest in EnumerateSums(dice.Skip(1).ToList()))
             {
                 for (var face = 1; face <= dice[0]; face++)
                 {
@@ -670,6 +695,19 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// could choose instead.
         /// </summary>
         public double Exposure(Combatant creature, GridPosition square, int extraDodge = 0)
+        {
+            var key = (creature, square, extraDodge, creature.IsShowingFromCover);
+            if (!exposures.TryGetValue(key, out var exposure))
+            {
+                exposures[key] = exposure = WorkOutExposure(creature, square, extraDodge);
+            }
+
+            return exposure;
+        }
+
+        private readonly Dictionary<(Combatant, GridPosition, int, bool), double> exposures = new();
+
+        private double WorkOutExposure(Combatant creature, GridPosition square, int extraDodge)
         {
             double expected = 0;
             foreach (var enemy in view.EnemiesOf(creature).Where(e => !e.IsBroken))
@@ -817,6 +855,37 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var hits = Odds.Of(with.AttackModifier, Math.Max(dodge, Stability(target)), actor.IsHelped, disadvantage).Success;
             return Math.Max(0, reachesBare - hits);
         }
+
+        /// <summary>
+        /// How much a character minds the blows a choice invites, by what they and the party have
+        /// left (the user's direction, 2026-11-05): a player's two priorities are to stay alive and
+        /// to keep the party alive. Fresh, with every Stamina and the whole party standing, they'll
+        /// take a risk to get the fight done; as their own Body and Stamina and the party's numbers
+        /// dwindle, keeping everybody up comes first. An adversary is 1: it is there to challenge the
+        /// party, and minds a blow only for the harm it would have done later (<see cref="Value"/>).
+        /// </summary>
+        public double Caution(Combatant c)
+        {
+            if (c.Side != Side.Party || c.IsSteed || c.IsPhantom)
+            {
+                return 1;
+            }
+
+            var party = view.Combatants.Where(p => p.Side == Side.Party && !p.IsSteed && !p.IsPhantom && !p.HasFled).ToList();
+            var standing = party.Count == 0 ? 1 : party.Count(p => !p.IsOutOfFight) / (double)party.Count;
+            var partyBody = party.Count == 0 ? 1 : party.Sum(p => Math.Max(0, p.Body)) / (double)Math.Max(1, party.Sum(p => p.BodyMax));
+            var body = Math.Max(0, c.Body) / (double)Math.Max(1, c.BodyMax);
+            // The last Stamina is never spent — a character starting a turn on none falls unconscious.
+            var stamina = c.StaminaMax <= 1 ? 1 : Math.Clamp((c.Stamina - 1) / (double)(c.StaminaMax - 1), 0, 1);
+            var left = 0.6 * (0.5 * body + 0.5 * stamina) + 0.4 * (0.5 * standing + 0.5 * partyBody);
+            return FreshCaution + (SpentCaution - FreshCaution) * (1 - left);
+        }
+
+        /// <summary>A character's caution with everything still in hand.</summary>
+        public const double FreshCaution = 0.7;
+
+        /// <summary>A character's caution with nothing left: their own Body and Stamina gone, and the party down.</summary>
+        public const double SpentCaution = 1.6;
 
         /// <summary>
         /// How much a creature of this side minds the blows a choice invites. A Minion is there to be

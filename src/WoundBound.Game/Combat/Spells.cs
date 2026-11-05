@@ -127,6 +127,15 @@ namespace WoundBound.Game.Combat
     /// What the rules make of a <see cref="SpellCast"/> before anything is paid or rolled: whether it
     /// can be cast at all, and if so where it lands, what it costs, what it rolls and who it catches.
     /// </summary>
+    /// <summary>
+    /// Where a cast would land and whom it would catch, or why it can't go there — the part of a
+    /// <see cref="CastPlan"/> that doesn't turn on how it is paid for.
+    /// </summary>
+    public sealed record CastPlacement(string? Refusal, GridPosition Origin, SpellRange Range, List<GridPosition> Squares, List<Combatant> Caught, MotionKind? Motion)
+    {
+        public static CastPlacement Refused(string why) => new(why, default, SpellRange.Close, [], [], null);
+    }
+
     public sealed record CastPlan(
         string? Refusal,
         GridPosition Origin = default,
@@ -337,7 +346,7 @@ namespace WoundBound.Game.Combat
                 return null;
             }
 
-            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            var text = SpellArea.TextOf(spell);
             return text.Contains("ground") || text.Contains("mud") || text.Contains("mire") || text.Contains("footing")
                 ? Lever.Ground
                 : text.Contains("warm") || text.Contains("chill") || text.Contains("cold") || text.Contains("heat")
@@ -359,7 +368,7 @@ namespace WoundBound.Game.Combat
                 return null;
             }
 
-            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            var text = SpellArea.TextOf(spell);
             return text.Contains("scry") ? UtilityKind.Scrying
                 : text.Contains("sensing") || text.Contains("senses") || text.Contains("detect") ? UtilityKind.Sensing
                 : UtilityKind.Lever;
@@ -371,11 +380,19 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public static MotionKind MotionOf(SpellDefinition spell)
         {
-            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            var text = SpellArea.TextOf(spell);
             return text.Contains("hasten") || text.Contains("quicken") ? MotionKind.Quicken
                 : text.Contains("moves the target") || text.Contains("shift") || text.Contains("shove") || text.Contains("hurl") ? MotionKind.Shift
                 : MotionKind.Bind;
         }
+
+        /// <summary>
+        /// A spell's name and notes, lower-cased, which the helpers here read what it does from — made
+        /// once for each spell, which is never rewritten in play, since a brain asks on every square.
+        /// </summary>
+        internal static string TextOf(SpellDefinition spell) => Texts.GetValue(spell, static s => $"{s.Name} {s.Notes}".ToLowerInvariant());
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SpellDefinition, string> Texts = new();
 
         /// <summary>
         /// The element an Elemental spell works, read from what it is: flame and fire, stone and
@@ -383,7 +400,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public static Element? ElementOf(SpellDefinition spell)
         {
-            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            var text = SpellArea.TextOf(spell);
             return text.Contains("flame") || text.Contains("fire") || text.Contains("conflagration") ? Element.Fire
                 : text.Contains("stone") || text.Contains("earth") ? Element.Earth
                 : text.Contains("wind") || text.Contains("gale") || text.Contains("air") ? Element.Air
@@ -398,7 +415,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public static ControlEffect? FixedEffectOf(SpellDefinition spell)
         {
-            var text = $"{spell.Name} {spell.Notes}".ToLowerInvariant();
+            var text = SpellArea.TextOf(spell);
             return text.Contains("control - fear") || text.Contains("applies frightened") ? ControlEffect.Fear
                 : text.Contains("control - confusion") || text.Contains("confusion effect") ? ControlEffect.Confusion
                 : text.Contains("control - compulsion") || text.Contains("compulsion effect") ? ControlEffect.Compulsion

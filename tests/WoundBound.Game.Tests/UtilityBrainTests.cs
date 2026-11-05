@@ -176,6 +176,82 @@ public class UtilityBrainTests
         Assert.Equal(new PartyStep.Tend(CombatAction.Heal, fighter), step);
     }
 
+    [Fact]
+    public void ThePartyBrain_MeditatesAStunnedFriendBackIntoTheFight()
+    {
+        var encounter = SampleEncounters.SignpostAmbush(Data, new ScriptedDice());
+        foreach (var bandit in encounter.Combatants.Where(c => c.Side == Side.Adversaries))
+        {
+            bandit.Position = new GridPosition(bandit.Position.X + 14, bandit.Position.Y);
+        }
+
+        var salla = Named(encounter, "Salla Rinehart");
+        var fighter = Named(encounter, "The Dumb Fighter");
+        fighter.Mind = 0;
+        fighter.TendEligible[WoundType.Mind] = true;
+        encounter.TryBeginTurn(salla);
+
+        var brain = new UtilityPartyBrain();
+        var step = brain.NextStep(encounter.View, salla);
+        if (step is PartyStep.Move move)
+        {
+            Assert.True(move.Square.DistanceTo(fighter.Position) <= 1);
+            Assert.True(encounter.TryMove(move.Square));
+            step = brain.NextStep(encounter.View, salla);
+        }
+
+        Assert.Equal(new PartyStep.Tend(CombatAction.Meditate, fighter), step);
+    }
+
+    [Fact]
+    public void ACharacter_GrowsWarier_AsTheirResourcesAndThePartysRunDown_AndAnAdversaryNever()
+    {
+        var encounter = SampleEncounters.SignpostAmbush(Data, new ScriptedDice(), new UtilityGmBrain());
+        var party = encounter.Combatants.Where(c => c.Side == Side.Party).ToList();
+        var (me, friend) = (party[0], party[1]);
+        var bandit = encounter.Combatants.First(c => c.Side == Side.Adversaries);
+        double Caution(Combatant c) => new Assessor(encounter.View).Caution(c);
+
+        var fresh = Caution(me);
+        Assert.Equal(Assessor.FreshCaution, fresh, 3);
+
+        me.Body = 2;
+        me.Stamina = 1;
+        var spent = Caution(me);
+        Assert.True(spent > fresh, $"spent {spent} v fresh {fresh}");
+
+        // A friend down weighs on everybody, not only on them.
+        friend.Body = 0;
+        Assert.True(Caution(me) > spent);
+
+        bandit.Body = 1;
+        Assert.Equal(1, Caution(bandit));
+    }
+
+    [Fact]
+    public void TheGm_SpendsNoTurnTendingAScratch()
+    {
+        // A point of Body back on a bandit still standing changes nothing: Heal isn't even weighed.
+        var encounter = SampleEncounters.SignpostAmbush(Data, new ScriptedDice(), new UtilityGmBrain());
+        var bandits = encounter.Combatants.Where(c => c.Side == Side.Adversaries).ToList();
+        foreach (var bandit in bandits)
+        {
+            bandit.Position = new GridPosition(bandit.Position.X + 14, bandit.Position.Y);
+        }
+
+        var (healer, hurt) = (bandits[0], bandits[1]);
+        hurt.Position = new GridPosition(healer.Position.X + 1, healer.Position.Y);
+        hurt.Body = (hurt.BodyMax + 1) / 2;
+        hurt.TendEligible[WoundType.Body] = true;
+        healer.HasMove = true;
+        healer.ActionsRemaining = 1;
+
+        var planner = new TurnPlanner(new Assessor(encounter.View, Knowledge.Sheets, Side.Adversaries), BrainSkill.Best);
+        var options = planner.Options(healer, hasMove: true, actions: 1, real: true);
+
+        Assert.DoesNotContain(options, o => o.Kind == OptionKind.Tend || o.Then == OptionKind.Tend);
+    }
+
     [Theory]
     [InlineData("Best")]
     [InlineData("Balanced")]
@@ -185,10 +261,10 @@ public class UtilityBrainTests
         var skill = BrainSkill.Levels.Single(l => l.Name == level);
         Func<IDiceRoller, Encounter>[] fights =
         [
-            dice => SampleEncounters.SignpostAmbush(Data, dice, new UtilityGmBrain(skill)),
-            dice => SampleEncounters.SignpostAmbush(Data, dice, new UtilityGmBrain(skill), fourPlayers: true),
-            dice => SampleEncounters.PartyVersusAmbush(Data, dice, new UtilityGmBrain(skill)),
-            dice => SampleEncounters.FighterVersusRatkin(Data, dice, new UtilityGmBrain(skill)),
+            dice => SampleEncounters.SignpostAmbush(Data, dice, new UtilityGmBrain(skill, foresight: Foresight.None)),
+            dice => SampleEncounters.SignpostAmbush(Data, dice, new UtilityGmBrain(skill, foresight: Foresight.None), fourPlayers: true),
+            dice => SampleEncounters.PartyVersusAmbush(Data, dice, new UtilityGmBrain(skill, foresight: Foresight.None)),
+            dice => SampleEncounters.FighterVersusRatkin(Data, dice, new UtilityGmBrain(skill, foresight: Foresight.None)),
         ];
 
         foreach (var stage in fights)
@@ -199,13 +275,27 @@ public class UtilityBrainTests
     }
 
     [Fact]
-    public void TheBestGm_IsHarderToBeatThanThePoorOne()
+    public void TheChallenge_SetsHowFarTheGmLooksAhead_NotHowWellItPlays()
     {
-        // Same seeds, same middling party: the GM's skill should show in the results.
-        double PartyBodyLeft(BrainSkill gm) => Simulator.Run(
-            dice => SampleEncounters.PartyVersusAmbush(Data, dice, new UtilityGmBrain(gm)),
-            () => new TacticalPartyBrain(PartyTactics.Presets[0]), fights: 40).Fights.Average(f => f.PartyBodyLeft);
+        Assert.Equal(Foresight.Default, new UtilityGmBrain(BrainSkill.Best).Foresight);
+        Assert.Equal((2, 6), (new UtilityGmBrain(BrainSkill.Balanced).Foresight!.Candidates, new UtilityGmBrain(BrainSkill.Balanced).Foresight!.Games));
+        Assert.Equal(Foresight.None, new UtilityGmBrain(BrainSkill.Poor).Foresight);
+    }
 
-        Assert.True(PartyBodyLeft(BrainSkill.Best) < PartyBodyLeft(BrainSkill.Poor));
+    [Fact]
+    public void AGmThatLooksAhead_WeighsItsPlansByPlayingThemForward_WithinTheRules()
+    {
+        var gms = new List<UtilityGmBrain>();
+        var report = Simulator.Run(dice =>
+        {
+            var gm = new UtilityGmBrain(BrainSkill.Best, new Random(gms.Count), foresight: Foresight.Default with { Candidates = 3, Games = 4 });
+            gms.Add(gm);
+            return SampleEncounters.PartyVersusAmbush(Data, dice, gm);
+        }, () => new UtilityPartyBrain(BrainSkill.Best), fights: 2);
+
+        Assert.Equal(2, report.Fights.Count);
+        var (weighed, _, failed) = gms.Aggregate((0, 0, 0), (t, g) => (t.Item1 + g.ForesightTally.Weighed, 0, t.Item3 + g.ForesightTally.Failed));
+        Assert.True(weighed > 0);
+        Assert.True(failed < weighed, $"{failed} games failed over {weighed} decisions");
     }
 }

@@ -88,12 +88,22 @@ bool? peers = Text("--sight", null) switch
 };
 // --gm-caution: what share of its skill's Care the GM spends on its own creatures — for tuning.
 var caution = double.TryParse(Text("--gm-caution", null), System.Globalization.CultureInfo.InvariantCulture, out var c) ? c : UtilityGmBrain.GmCaution;
+// --foresight K,N,R[,own]: the GM looks ahead — K plans, N games each, R rounds past this one, its own
+// creatures worth `own` of the party's. Left out, it goes with the GM's challenge (Foresight.For); "off", it doesn't look ahead.
+Foresight? foresight = Text("--foresight", null) switch
+{
+    null => null,
+    "off" => Foresight.None,
+    var sight when sight.Split(',') is [var k, var n, var r, .. var rest] => new Foresight(int.Parse(k), int.Parse(n), int.Parse(r),
+        rest is [var own, ..] ? double.Parse(own, System.Globalization.CultureInfo.InvariantCulture) : UtilityGmBrain.GmCaution),
+    var sight => throw new ArgumentException($"--foresight wants K,N,R[,own] or off, not {sight}"),
+};
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),
-    "best" => new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers),
-    "balanced" => new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers),
-    "poor" => new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers),
+    "best" => new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight),
+    "balanced" => new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight),
+    "poor" => new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight),
     _ => new SimpleGmBrain(),
 };
 
@@ -146,7 +156,7 @@ var fight = which switch
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 
-Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}, {(u.PeersThroughFog ? "peering through the fog" : "in the fog")}" : string.Empty)}.");
+Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}, {(u.PeersThroughFog ? "peering through the fog" : "in the fog")}{(u.Foresight is { LooksAhead: true } f ? $", looking ahead ({f.Candidates} plans, {f.Games} games, {f.Rounds} rounds on)" : string.Empty)}" : string.Empty)}.");
 Console.WriteLine();
 
 // --show N: play the one fight on seed N with the best utility party (or --show-as balanced|poor), and print its log.

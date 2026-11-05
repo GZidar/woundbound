@@ -14,7 +14,7 @@ namespace WoundBound.Game.Combat.Brains
             var actor = turn.Actor;
             if (!turn.HasAttacked && !actor.IsMinion && !actor.IsProne && actor.ActionsRemaining > 0 && TripTarget(view, actor) is { } target)
             {
-                var advantage = turn.BonusAvailable && view.BankedOpportunities >= view.MaxBankedOpportunities;
+                var advantage = turn.BonusAvailable && view.BankedOpportunities >= view.MaxBankedOpportunities && Encounter.BonusAttackRefusal(turn.Actor, null) is null;
                 return new GmStep.Control(ControlAction.Trip, target, advantage);
             }
 

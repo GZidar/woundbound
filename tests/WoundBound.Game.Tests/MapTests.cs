@@ -181,7 +181,7 @@ public class MapTests
     public void BotsPlayTheFord_WithinTheRules()
     {
         var report = Game.Simulation.Simulator.Run(
-            dice => SampleEncounters.FerryShrineAmbush(Data, dice, new Combat.Brains.Utility.UtilityGmBrain()),
+            dice => SampleEncounters.FerryShrineAmbush(Data, dice, new Combat.Brains.Utility.UtilityGmBrain(foresight: Combat.Brains.Utility.Foresight.None)),
             () => new Combat.Brains.Utility.UtilityPartyBrain(), fights: 6);
 
         Assert.Equal(6, report.Fights.Count);

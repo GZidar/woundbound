@@ -57,6 +57,15 @@ namespace WoundBound.Game.Combat
         public bool IsWall(GridPosition square) => Walls.Contains(square);
 
         /// <summary>
+        /// <see cref="IsWall"/> as one delegate, made once for each setting: the line-of-sight and
+        /// spell-shape tests are asked it on every square a brain weighs. Held outside the record, so a
+        /// copy made with <c>with</c> never inherits a test of the old one's walls.
+        /// </summary>
+        public Func<GridPosition, bool> WallTest => WallTests.GetValue(this, static s => s.IsWall);
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Setting, Func<GridPosition, bool>> WallTests = new();
+
+        /// <summary>
         /// Cover (Core Rules §9, "Cover"): the solid things on the map a creature crouches behind —
         /// a low wall, a cart, a barrel (Partial), a pillar or a stack of crates taller than a man
         /// (Full). Marked where they stand, like the ground. Nobody stands in or walks through one.
@@ -92,7 +101,7 @@ namespace WoundBound.Game.Combat
         /// where one beside the archer is only leant round.
         /// </summary>
         public bool LineOpen(GridPosition from, GridPosition to) =>
-            (Walls.Count == 0 || Sight.Clear(from, to, IsWall))
+            (Walls.Count == 0 || Sight.Clear(from, to, WallTest))
             && (CoverPieces.Count == 0
                 || !Sight.Between(from, to).Any(sq => CoverAt(sq) == Cover.Full && sq.DistanceTo(from) > 1 && sq.DistanceTo(to) > 1));
 

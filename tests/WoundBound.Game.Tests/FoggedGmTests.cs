@@ -126,7 +126,7 @@ public class FoggedGmTests
         for (var seed = 0; seed < 6; seed++)
         {
             var encounter = SampleEncounters.SignpostAmbush(Data, new RandomDiceRoller(new Random(seed)),
-                new UtilityGmBrain(BrainSkill.Balanced, new Random(seed), peers: false));
+                new UtilityGmBrain(BrainSkill.Balanced, new Random(seed), peers: false, foresight: Foresight.None));
             new BotDriver(encounter, new UtilityPartyBrain(BrainSkill.Best, new Random(seed))).PlayToEnd();
             Assert.True(encounter.IsOver || encounter.Round > 0);
         }

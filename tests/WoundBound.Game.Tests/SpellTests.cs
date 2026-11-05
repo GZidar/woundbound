@@ -310,7 +310,7 @@ public class SpellTests
         for (var seed = 1; seed <= 15; seed++)
         {
             var encounter = SampleEncounters.SignpostWithCasters(Data, new RandomDiceRoller(new Random(seed)),
-                new Combat.Brains.Utility.UtilityGmBrain(Combat.Brains.Utility.BrainSkill.Best));
+                new Combat.Brains.Utility.UtilityGmBrain(Combat.Brains.Utility.BrainSkill.Best, foresight: Combat.Brains.Utility.Foresight.None));
             Combat.Brains.IPartyBrain brain = party == "utility"
                 ? new Combat.Brains.Utility.UtilityPartyBrain(Combat.Brains.Utility.BrainSkill.Best)
                 : new Combat.Brains.TacticalPartyBrain(Combat.Brains.PartyTactics.Presets[0]);

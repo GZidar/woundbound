@@ -39,14 +39,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
     }
 
-    public class UtilityGmBrain : SimpleGmBrain, IGmBrain
+    public partial class UtilityGmBrain : SimpleGmBrain, IGmBrain
     {
         private readonly Random random;
 
-        public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null, double caution = GmCaution, bool? peers = null)
+        public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null, double caution = GmCaution, bool? peers = null,
+            Foresight? foresight = null)
         {
             Skill = skill ?? BrainSkill.Best;
-            planning = Skill with { Care = Skill.Care * caution };
+            Foresight = foresight ?? Foresight.For(Skill);
+            planning = Plays with { Care = Plays.Care * caution };
             this.random = random ?? new Random(1);
             Knowledge = knowledge ?? KnowledgeFor(Skill);
             PeersThroughFog = peers ?? PeersFor(Skill);
@@ -62,13 +64,25 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>Whether a GM of <paramref name="skill"/> peers through the fog when nobody says: at Best, as it reads the sheets.</summary>
         public static bool PeersFor(BrainSkill skill) => skill.Name == BrainSkill.Best.Name;
 
+        /// <summary>
+        /// The challenge it is set to. A GM's creatures are always played as well as it knows how —
+        /// a weaker GM that blunders on purpose only makes a duller fight (the user's direction,
+        /// 2026-11-05) — so the challenge sets how far ahead it looks (<see cref="Foresight.For"/>),
+        /// and, unless told otherwise, what it knows of the party and whether it peers through the fog.
+        /// </summary>
         public BrainSkill Skill { get; }
+
+        /// <summary>How it plays each creature, whatever the challenge: at its best.</summary>
+        private static BrainSkill Plays => BrainSkill.Best;
 
         /// <summary>
         /// How much of its skill's Care the GM spends on its own creatures. A player guards a
         /// character they have carried for a campaign; a GM's bandit is there to make the fight, and
         /// one that hangs back to keep its own skin whole loses it — sims (2026-11-03) put the GM's
-        /// best around four-tenths of the party's caution.
+        /// best around four-tenths of the party's caution. What it does mind is priced in the harm the
+        /// creature would still do (<see cref="Assessor.Value"/>): it heals, dodges or raises a shield
+        /// to stay in the fight and hurt the party later, and spends itself where that hurts them more
+        /// (the user's direction, 2026-11-05: adversaries are there to take the party down, not to live).
         /// </summary>
         public const double GmCaution = 0.4;
 
@@ -118,7 +132,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public override Combatant ChooseOwedTurn(BattleView view)
         {
             var candidates = view.YetToAct.ToList();
-            return Choose.Pick(candidates, a => FreshTurnWorth(view, a), Skill, random);
+            return Choose.Pick(candidates, a => FreshTurnWorth(view, a), Plays, random);
         }
 
         /// <summary>Buys an extra turn where one is worth more than an Opportunity kept.</summary>
@@ -151,7 +165,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 // One action from where it lies: the best blow, shot or spell it has, or nothing.
                 var surprise = Planner(view, out _).Options(actor, hasMove: false, actions: 1, real: true)
                     .Where(o => o.Kind != OptionKind.Move && o.Then is null).ToList();
-                var pick = surprise.Count == 0 ? null : Choose.Pick(surprise, o => o.Score, Skill, random);
+                var pick = surprise.Count == 0 ? null : Choose.Pick(surprise, o => o.Score, Plays, random);
                 BrainTrace.Decision(actor, surprise, pick ?? new Option(OptionKind.End, 0, "keep hidden"));
                 return pick is null ? GmStep.End : StepFor(pick, turn);
             }
@@ -162,7 +176,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             // Rampage: its blow just dropped somebody, and a Stamina buys a second at somebody else —
             // closing with its move first if it must — where that blow beats keeping the Stamina.
-            if (actor.RampageFrom is { } dropped && actor.Stamina >= 2 && Skill.UsesTricks && BattleView.TacticalSpendRefusal(actor) is null)
+            if (actor.RampageFrom is { } dropped && actor.Stamina >= 2 && Plays.UsesTricks && BattleView.TacticalSpendRefusal(actor) is null)
             {
                 var second = planner.Options(actor, actor.HasMove, 1, real: false, bonusAvailable: false, stillToAct: StillToAct(view, actor))
                     .Where(o => o.Target is { } t && t != dropped && t.Side != actor.Side
@@ -185,7 +199,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             // Out of actions: another, for Stamina, where the best thing it buys beats keeping the
             // Stamina — and the reaction that Stamina would otherwise pay for this round.
-            if (actor.ActionsRemaining == 0 && actor.Stamina >= 2 && BattleView.TacticalSpendRefusal(actor) is null && Skill.UsesTricks)
+            if (actor.ActionsRemaining == 0 && actor.Stamina >= 2 && BattleView.TacticalSpendRefusal(actor) is null && Plays.UsesTricks)
             {
                 var bought = WithoutAttacks(attacked, planner.Options(actor, actor.HasMove, 1, real: false, turn.BonusAvailable, stillToAct: StillToAct(view, actor)))
                     .Where(o => o.Kind is not (OptionKind.End or OptionKind.Move))
@@ -207,7 +221,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return GmStep.End;
             }
 
-            var choice = Choose.Pick(options, o => o.Score, Skill, random);
+            var choice = Foresee(view, turn, options) ?? Choose.Pick(options, o => o.Score, Plays, random);
             BrainTrace.Decision(actor, options, choice);
             return StepFor(choice, turn);
         }
@@ -246,7 +260,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         private GmStep? BonusStep(BattleView view, TurnPlanner planner, Combatant actor, GmTurn turn, List<Option> options)
         {
-            if (!turn.BonusAvailable || !Skill.UsesTricks)
+            if (!turn.BonusAvailable || !Plays.UsesTricks)
             {
                 return null;
             }

@@ -17,6 +17,9 @@ namespace WoundBound.Game.Combat.Brains
             FoggedFor = fogFor;
         }
 
+        /// <summary>The fight this is a view of — for a brain that looks ahead by forking it.</summary>
+        internal Encounter Encounter => encounter;
+
         /// <summary>
         /// The side this view is fogged for, or null for a view of the whole board. A fogged view
         /// shows that side's own creatures, and of the other side only those it sees now; the rest
@@ -315,6 +318,13 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>What casting <paramref name="cast"/> from <paramref name="from"/> would come to, leaving the turn aside.</summary>
         public CastPlan PlanCastFrom(Combatant caster, GridPosition from, SpellCast cast) => encounter.PlanCastFrom(caster, from, cast, checkTurn: false);
+
+        /// <summary>As <see cref="PlanCastFrom(Combatant, GridPosition, SpellCast)"/>, with where it lands already worked out — and the turn checked too, if <paramref name="checkTurn"/>.</summary>
+        internal CastPlan PlanCastFrom(Combatant caster, GridPosition from, SpellCast cast, bool checkTurn, CastPlacement placed) =>
+            encounter.PlanCastFrom(caster, from, cast, checkTurn, placed);
+
+        /// <summary>Where <paramref name="cast"/> would land from <paramref name="from"/>, and whom it would catch.</summary>
+        internal CastPlacement PlaceCast(Combatant caster, GridPosition from, SpellCast cast) => encounter.PlaceCast(caster, from, cast);
 
         /// <summary>Why <paramref name="character"/> can't buy <paramref name="exploit"/> now, or null if they can.</summary>
         public static string? ExploitRefusal(Combatant character, Rules.Enums.NimbleExploit exploit) => Encounter.ExploitRefusal(character, exploit);

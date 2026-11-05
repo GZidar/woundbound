@@ -88,7 +88,7 @@ public class LeavingReachBrainTests
         mirella.HasCastSpell = true;
         var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [elthric, mirella, bandit],
-            Data.RangeBands, new RandomDiceRoller(new Random(3)), new Game.Combat.Brains.Utility.UtilityGmBrain(caution: 1));
+            Data.RangeBands, new RandomDiceRoller(new Random(3)), new Game.Combat.Brains.Utility.UtilityGmBrain(caution: 1, foresight: Game.Combat.Brains.Utility.Foresight.None));
         encounter.TryBeginTurn(mirella);
         encounter.EndTurn();
         var start = encounter.Log.Count;

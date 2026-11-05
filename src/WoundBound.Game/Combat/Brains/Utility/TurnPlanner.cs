@@ -127,8 +127,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var options = new List<Option>();
 
             // A standoff wears caution down: each quiet round, the blows a square invites matter less
-            // than ending it — somebody has to close.
-            var care = skill.Care * Assessor.RiskAppetite(actor) / (1 + View.QuietRounds);
+            // than ending it — somebody has to close. A character minds them more as their resources
+            // and the party's run down (Assessor.Caution).
+            var care = skill.Care * Assessor.RiskAppetite(actor) * assess.Caution(actor) / (1 + View.QuietRounds);
             var here = actor.Position;
 
             // Its footing back first: no action does anything else until then.
@@ -181,7 +182,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     foreach (var act in Actions(actor, square, real && !moved, bonusAvailable, bankFull, stillToAct, care))
                     {
                         var score = standing + (1 - dropped) * act.Score;
-                        options.Add(first is null ? act with { Score = score } : first with { Score = score, Why = $"{first.Why}, then {act.Why}", Target = act.Target, Then = act.Kind, Cast = act.Cast });
+                        // A move made for an act carries the whole of it — which blow, which hand, which
+                        // Opportunity — so whoever plays the plan through can make it as it was weighed.
+                        options.Add(first is null ? act with { Score = score }
+                            : act with { Kind = OptionKind.Move, Score = score, Why = $"{first.Why}, then {act.Why}", Square = square, Then = act.Kind });
                     }
                 }
 
@@ -713,21 +717,27 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 yield return new Option(OptionKind.Aid, HarryWorth(actor, foe, care), $"Harry {foe.Name}", Target: foe, Action: CombatAction.Harry);
             }
 
-            // Heal: the dying first — a body back in the fight, and a death put off.
-            foreach (var hurt in View.PartyOnBoard.Concat(View.Adversaries).Where(c => skill.Uses(Trick.Tend) && c.Side == actor.Side && c.CanBeTended(WoundType.Body)))
+            // Heal, Meditate and Pray put back a single wound (Core Rules §4, "Recovery"). One point on
+            // somebody still standing changes next to nothing and costs the turn, so the action is only
+            // weighed where that point puts a body back in the fight: Meditate over the stunned, Pray over
+            // the numbed, Heal on a character dying or stable (the user, 2026-11-04). Nobody can tend
+            // themselves back — the stunned, numbed and dying can't act.
+            foreach (var hurt in View.PartyOnBoard.Concat(View.Adversaries).Where(c => skill.Uses(Trick.Tend) && c.Side == actor.Side && c != actor))
             {
-                if (hurt != actor && actor.DistanceFrom(at, hurt) > 1)
+                if (actor.DistanceFrom(at, hurt) > 1)
                 {
                     continue;
                 }
 
-                if (checkRules && BattleView.TendRefusal(actor, CombatAction.Heal, hurt) is not null)
+                foreach (var (action, worth) in Revivals(hurt))
                 {
-                    continue;
-                }
+                    if (checkRules && BattleView.TendRefusal(actor, action, hurt) is not null)
+                    {
+                        continue;
+                    }
 
-                var worth = hurt.IsDefenceless ? HealDyingWorth(hurt) : assess.MendWorth(hurt, 1);
-                yield return new Option(OptionKind.Tend, worth, $"Heal {hurt.Name}", Target: hurt, Action: CombatAction.Heal);
+                    yield return new Option(OptionKind.Tend, worth, $"{action} {hurt.Name}", Target: hurt, Action: action);
+                }
             }
 
             if (skill.Uses(Trick.Shield) && actor.InHandShield is { } shield && actor.CoveredBy.All(c => c.Bearer != actor) && (!checkRules || BattleView.ShieldRefusal(actor) is null))
@@ -864,7 +874,40 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// in the fight — but only as far as they're likely to keep it until they act. Brought back
         /// beside the thing that dropped them, they go straight down again.
         /// </summary>
-        private double HealDyingWorth(Combatant hurt)
+        /// <summary>
+        /// The tending actions that would wake <paramref name="hurt"/> or get them off the ground, with
+        /// what each is worth. A point back on a track that isn't the only thing keeping them down — Mind
+        /// to somebody numbed as well, or dying besides — is only a step towards it, worth a share.
+        /// </summary>
+        private IEnumerable<(CombatAction Action, double Worth)> Revivals(Combatant hurt)
+        {
+            var down = hurt.Side == Side.Party ? hurt.BodyStatus is BodyStatus.Dying or BodyStatus.Stable : hurt.Body <= 0;
+            if (hurt.HasFled || hurt.BodyStatus == BodyStatus.Dead || (down && hurt.Side != Side.Party))
+            {
+                yield break;
+            }
+
+            var holdingDown = (hurt.IsStunned ? 1 : 0) + (hurt.IsNumbed ? 1 : 0) + (down ? 1 : 0);
+            double Share(double worth) => holdingDown <= 1 ? worth : worth * 0.3;
+
+            if (hurt.IsStunned && hurt.CanBeTended(WoundType.Mind))
+            {
+                yield return (CombatAction.Meditate, Share(ReviveWorth(hurt)));
+            }
+
+            if (hurt.IsNumbed && hurt.CanBeTended(WoundType.Soul))
+            {
+                yield return (CombatAction.Pray, Share(ReviveWorth(hurt)));
+            }
+
+            if (down && hurt.CanBeTended(WoundType.Body))
+            {
+                yield return (CombatAction.Heal, Share(ReviveWorth(hurt)));
+            }
+        }
+
+        /// <summary>A body back in the fight — and, for the dying, a death put off — if it stays up once it's there.</summary>
+        private double ReviveWorth(Combatant hurt)
         {
             var incoming = 1.5 * assess.Exposure(hurt, hurt.Position) / Math.Max(1e-6, assess.PerWound(hurt));
             var stays = Math.Max(0.15, 1 - Math.Min(1, incoming));

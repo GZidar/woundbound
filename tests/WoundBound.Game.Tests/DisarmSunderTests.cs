@@ -186,7 +186,7 @@ public class RivalBandTests
         Assert.Contains(rivals, r => Encounter.ManoeuvresOf(r).Contains(WeaponManoeuvre.Sunder));
 
         var report = Game.Simulation.Simulator.Run(
-            dice => SampleEncounters.RivalBand(Data, dice, new Game.Combat.Brains.Utility.UtilityGmBrain()),
+            dice => SampleEncounters.RivalBand(Data, dice, new Game.Combat.Brains.Utility.UtilityGmBrain(foresight: Game.Combat.Brains.Utility.Foresight.None)),
             () => new Game.Combat.Brains.Utility.UtilityPartyBrain(), fights: 4);
         Assert.Equal(4, report.Fights.Count);
     }
@@ -207,7 +207,7 @@ public class AdversaryTurnTests
             CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(2, 4)),
             CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 6)),
             CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(12, 5)),
-        }, Data.RangeBands, new RandomDiceRoller(new Random(4)), new Game.Combat.Brains.Utility.UtilityGmBrain());
+        }, Data.RangeBands, new RandomDiceRoller(new Random(4)), new Game.Combat.Brains.Utility.UtilityGmBrain(foresight: Game.Combat.Brains.Utility.Foresight.None));
         encounter.BankedOpportunities = 3;
 
         foreach (var name in new[] { "The Dumb Fighter", "Joren Blacke" })

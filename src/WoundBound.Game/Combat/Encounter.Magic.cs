@@ -48,7 +48,8 @@ namespace WoundBound.Game.Combat
         /// Leaving out the turn — the action and the footing — lets a brain weigh a casting it
         /// would make after a move.
         /// </summary>
-        internal CastPlan PlanCastFrom(Combatant caster, GridPosition from, SpellCast cast, bool checkTurn)
+        /// <param name="placed">Where the cast lands, from <see cref="PlaceCast"/> — the same for every way of paying for it.</param>
+        internal CastPlan PlanCastFrom(Combatant caster, GridPosition from, SpellCast cast, bool checkTurn, CastPlacement? placed = null)
         {
             var spell = cast.Spell;
             var build = caster.Build;
@@ -161,240 +162,14 @@ namespace WoundBound.Game.Combat
                     ? caster.StatblockBleedBonus
                     : caster.StatblockCastBonus;
 
-            // Where it lands (Core Rules §11, "Spell Shape", "Placing a Volume").
-            var touch = spell.Range == SpellRange.Touch || spell.Shape == SpellShape.None;
-            var shape = SpellArea.ShapeOf(cast);
-            if (spell.SpellType != SpellType.Illusion && SpellArea.ShapeRefusal(spell, shape) is { } wrongShape)
+            // Where it lands: worked out once for every way a brain weighs paying for the same cast.
+            var place = placed ?? PlaceCast(caster, from, cast);
+            if (place.Refusal is { } nowhere)
             {
-                return CastPlan.Refused(wrongShape);
+                return CastPlan.Refused(nowhere);
             }
 
-            if (spell.SpellType == SpellType.Utility && UtilityRefusal(spell, shape) is { } noUtility)
-            {
-                return CastPlan.Refused(noUtility);
-            }
-
-            GridPosition origin;
-            List<GridPosition> squares;
-            List<Combatant> caught;
-            if (spell.SpellType == SpellType.Illusion)
-            {
-                var placed = PlaceIllusion(caster, from, cast);
-                if (placed.Refusal is { } nowhere)
-                {
-                    return CastPlan.Refused(nowhere);
-                }
-
-                (origin, squares, caught, touch) = (placed.Origin, placed.Squares, placed.Caught, placed.Touch);
-            }
-            else if (touch || shape == SpellShape.Ray)
-            {
-                if (cast.Target is not { } target)
-                {
-                    return CastPlan.Refused($"{spell.Name} needs somebody to go into.");
-                }
-
-                if (target.HasFled || !target.OccupiesSquare)
-                {
-                    return CastPlan.Refused($"{target.Name} isn't on the board.");
-                }
-
-                if (touch && caster.DistanceFrom(from, target) > 1)
-                {
-                    return CastPlan.Refused($"{spell.Name} is cast at Touch — {target.Name} has to be in reach of a hand.");
-                }
-
-                origin = target.Position;
-                squares = touch ? [] : [origin];
-                caught = [target];
-            }
-            else if (shape is SpellShape.Line or SpellShape.Cone)
-            {
-                if (cast.Origin is not { } start || cast.Aim is not { } aim || (aim.X == 0 && aim.Y == 0) || Math.Abs(aim.X) > 1 || Math.Abs(aim.Y) > 1)
-                {
-                    return CastPlan.Refused($"A {shape} needs a point of origin and one of the eight ways to aim it.");
-                }
-
-                if (Setting.IsWall(start))
-                {
-                    return CastPlan.Refused("The point of origin is inside a wall.");
-                }
-
-                origin = start;
-                squares = shape == SpellShape.Line
-                    ? SpellArea.Line(start, aim, spell.Size, Setting.IsWall)
-                    : SpellArea.Cone(start, aim, spell.Size, Setting.IsWall);
-                var covered = squares.ToHashSet();
-
-                // Aimed away from the hand that casts it: the caster isn't caught in their own Line or Cone.
-                caught = combatants.Where(c => c != caster && c.OccupiesSquare && c.Footprint.Any(covered.Contains)).ToList();
-                // An area effect catches a mount as well as its rider (Core Rules §9, "Mounts").
-                caught.AddRange(Steeds.Where(m => covered.Contains(m.Position)));
-            }
-            else if (shape == SpellShape.Volume)
-            {
-                if (cast.Corner is not { } corner)
-                {
-                    return CastPlan.Refused($"{spell.Name} needs a place for its block.");
-                }
-
-                var block = SpellArea.Block(corner, spell.Size).Where(sq => !Setting.IsWall(sq)).ToList();
-                if (block.Count == 0)
-                {
-                    return CastPlan.Refused("There's no open ground in that block to put the spell into.");
-                }
-
-                origin = block.OrderBy(sq => from.DistanceTo(sq)).ThenBy(sq => Math.Abs(sq.X - from.X) + Math.Abs(sq.Y - from.Y)).First();
-                squares = SpellArea.Reached(corner, spell.Size, origin, Setting.IsWall);
-                var covered = squares.ToHashSet();
-                caught = combatants.Where(c => c.OccupiesSquare && c.Footprint.Any(covered.Contains)).ToList();
-                caught.AddRange(Steeds.Where(m => covered.Contains(m.Position)));
-            }
-            else
-            {
-                return CastPlan.Refused($"{shape} spells aren't in the game yet.");
-            }
-
-            var distance = from.DistanceTo(origin);
-            if (!touch)
-            {
-                if (distance > LongRangeSquares)
-                {
-                    return CastPlan.Refused($"Beyond Long — the point of origin is {distance} squares off.");
-                }
-
-                if (distance > 1 && !LineOpen(from, origin))
-                {
-                    return CastPlan.Refused("Something solid is in the way.");
-                }
-
-                var seen = environment is not { } tables || RangeBandCalculator.BandForSquares(bands, distance) is not { } band
-                    || (caught.Count == 1 && squares.Count == 1
-                        ? CanBeTargeted(caught[0], origin, distance)
-                        : EnvironmentCalculator.AllowsTargeting(tables, VisibilityAtSquare(origin), band));
-                if (!seen)
-                {
-                    return CastPlan.Refused("Too dark to see where it would go — nothing can be targeted beyond Close at Visibility None.");
-                }
-            }
-
-            var range = touch ? SpellRange.Touch : RangeBandCalculator.BandForSquares(bands, distance) switch
-            {
-                DistanceBand.Middle => SpellRange.Middle,
-                DistanceBand.Long => SpellRange.Long,
-                DistanceBand.Short => SpellRange.Short,
-                _ => SpellRange.Close,
-            };
-
-            // Who it works on, by Type (Core Rules §11).
-            MotionKind? motion = spell.SpellType == SpellType.Motion ? SpellArea.MotionOf(spell) : null;
-            var willingOnly = spell.SpellType == SpellType.Buff || motion == MotionKind.Quicken;
-
-            // Cover (Core Rules §9): a Ray, Line or Cone is aimed, and full cover can't be targeted by
-            // it; a Volume fills the space and flows round, so it ignores cover. A spell laid on the
-            // willing, a Heal or a Utility isn't an attack at anybody.
-            if (!touch && shape != SpellShape.Volume && !willingOnly
-                && spell.SpellType is SpellType.Harm or SpellType.Control or SpellType.Bane or SpellType.Motion
-                && Setting.CoverPieces.Count > 0)
-            {
-                var exposed = caught.Where(c => c.Side == caster.Side || CoverFrom(from, c) != Cover.Full).ToList();
-                if (exposed.Count == 0 && caught.Count > 0)
-                {
-                    return CastPlan.Refused(caught.Count == 1
-                        ? $"{caught[0].Name} is behind full cover from here — only a Volume would reach them."
-                        : "Everybody it would catch is behind full cover from here.");
-                }
-
-                caught = exposed;
-            }
-            if (willingOnly)
-            {
-                caught = caught.Where(c => c.Side == caster.Side && !c.IsOutOfFight).ToList();
-                if (caught.Count == 0)
-                {
-                    return CastPlan.Refused($"A {spell.SpellType} is laid on a willing target, and nobody willing is there.");
-                }
-            }
-
-            switch (spell.SpellType)
-            {
-                case SpellType.Utility:
-                    // It works on the ground, not on whoever happens to be standing there.
-                    caught = [];
-                    break;
-
-                case SpellType.Illusion:
-                    // It works on whoever sees it, which is a matter for the moment it stands.
-                    break;
-
-                case SpellType.Heal:
-                    var patient = caught[0];
-                    if (patient == caster)
-                    {
-                        return CastPlan.Refused("A Heal can never target its own caster — blood given closes someone else's wound.");
-                    }
-
-                    if (patient.BodyStatus == BodyStatus.Dead)
-                    {
-                        return CastPlan.Refused($"{patient.Name} is beyond healing.");
-                    }
-
-                    var mends = cast.Restores ?? spell.DamageType ?? WoundType.Body;
-                    if (patient.Track(mends) is var (now, max) && now >= max)
-                    {
-                        return CastPlan.Refused($"{patient.Name} carries no {mends} wound.");
-                    }
-
-                    break;
-
-                case SpellType.Buff or SpellType.Bane:
-                    var moves = cast.Threshold ?? spell.Threshold ?? ThresholdType.Dodge;
-                    if (moves == ThresholdType.Fortitude)
-                    {
-                        // Nothing with no living body has a Fortitude for it to move (GM Reference §9).
-                        caught = caught.Where(c => c.BaseFortitudeThreshold is not null).ToList();
-                        if (caught.Count == 0)
-                        {
-                            return CastPlan.Refused("No living body there for Fortitude to measure.");
-                        }
-                    }
-
-                    break;
-
-                case SpellType.Control:
-                    if (SpellArea.FixedEffectOf(spell) is { } written && written != cast.Effect)
-                    {
-                        return CastPlan.Refused($"{spell.Name} is written to cause {written}, not {cast.Effect}.");
-                    }
-
-                    caught = caught.Where(c => c.ResolveThreshold is not null && !c.IsOutOfFight).ToList();
-                    if (cast.Effect == ControlEffect.Compulsion && cast.Directed is { } directed && (directed.HasFled || !directed.OccupiesSquare))
-                    {
-                        return CastPlan.Refused($"{directed.Name} isn't there to be attacked.");
-                    }
-
-                    break;
-
-                case SpellType.Motion when motion == MotionKind.Bind && cast.BindAs is { } lower && lower > spell.SpellTier:
-                    return CastPlan.Refused($"A {spell.SpellTier} Bind can't produce a {lower} effect — only its own, or a lower one.");
-            }
-
-            // A Swarm is moved, held or hurried only as a whole: a Motion spell must cover every square
-            // of it, or it does nothing to the mass (the user's ruling, 2026-11-02).
-            var swarmUnmoved = spell.SpellType == SpellType.Motion
-                ? caught.FirstOrDefault(c => c.IsSwarm && !c.Footprint.All(squares.Contains))
-                : null;
-            if (swarmUnmoved is not null)
-            {
-                caught = caught.Where(c => c != swarmUnmoved && !(c.IsSwarm && !c.Footprint.All(squares.Contains))).ToList();
-            }
-
-            if (caught.Count == 0 && spell.SpellType is not (SpellType.Utility or SpellType.Illusion))
-            {
-                return CastPlan.Refused(swarmUnmoved is not null
-                    ? $"{spell.Name} has to cover the whole of {swarmUnmoved.Name} to move it — a part of a Swarm can't be moved."
-                    : $"{spell.Name} would catch nobody there.");
-            }
+            var (origin, range, squares, caught, motion) = (place.Origin, place.Range, place.Squares, place.Caught, place.Motion);
 
             // What it costs, and whether it can be paid (Core Rules §11, "Spell Wound Cost"; §4).
             var cost = SpellCalculator.SpellCost(spell.SpellTier, spell.Size, range);
@@ -472,6 +247,267 @@ namespace WoundBound.Game.Combat
             }
 
             return new CastPlan(null, origin, range, cost, track, ability, castBonus, squares, caught, motion) { WoundsPaid = wounds, Fuel = fuel };
+        }
+
+        /// <summary>Everybody on the board standing on any of <paramref name="covered"/>, but <paramref name="except"/>, in the order they fight in.</summary>
+        private List<Combatant> CaughtIn(HashSet<GridPosition> covered, Combatant? except)
+        {
+            var caught = new List<Combatant>();
+            foreach (var c in combatants)
+            {
+                if (c != except && c.OccupiesSquare && Footprints.AnyIn(c.Position, c.Across, covered))
+                {
+                    caught.Add(c);
+                }
+            }
+
+            return caught;
+        }
+
+        /// <summary>
+        /// Where <paramref name="cast"/> would land from <paramref name="from"/> and whom it would catch
+        /// (Core Rules §11, "Spell Shape", "Placing a Volume"; §9, "Cover") — or why it can't go there.
+        /// Nothing here turns on how the cast is paid for.
+        /// </summary>
+        internal CastPlacement PlaceCast(Combatant caster, GridPosition from, SpellCast cast)
+        {
+            var spell = cast.Spell;
+            // Where it lands (Core Rules §11, "Spell Shape", "Placing a Volume").
+            var touch = spell.Range == SpellRange.Touch || spell.Shape == SpellShape.None;
+            var shape = SpellArea.ShapeOf(cast);
+            if (spell.SpellType != SpellType.Illusion && SpellArea.ShapeRefusal(spell, shape) is { } wrongShape)
+            {
+                return CastPlacement.Refused(wrongShape);
+            }
+
+            if (spell.SpellType == SpellType.Utility && UtilityRefusal(spell, shape) is { } noUtility)
+            {
+                return CastPlacement.Refused(noUtility);
+            }
+
+            GridPosition origin;
+            List<GridPosition> squares;
+            List<Combatant> caught;
+            if (spell.SpellType == SpellType.Illusion)
+            {
+                var placed = PlaceIllusion(caster, from, cast);
+                if (placed.Refusal is { } nowhere)
+                {
+                    return CastPlacement.Refused(nowhere);
+                }
+
+                (origin, squares, caught, touch) = (placed.Origin, placed.Squares, placed.Caught, placed.Touch);
+            }
+            else if (touch || shape == SpellShape.Ray)
+            {
+                if (cast.Target is not { } target)
+                {
+                    return CastPlacement.Refused($"{spell.Name} needs somebody to go into.");
+                }
+
+                if (target.HasFled || !target.OccupiesSquare)
+                {
+                    return CastPlacement.Refused($"{target.Name} isn't on the board.");
+                }
+
+                if (touch && caster.DistanceFrom(from, target) > 1)
+                {
+                    return CastPlacement.Refused($"{spell.Name} is cast at Touch — {target.Name} has to be in reach of a hand.");
+                }
+
+                origin = target.Position;
+                squares = touch ? [] : [origin];
+                caught = [target];
+            }
+            else if (shape is SpellShape.Line or SpellShape.Cone)
+            {
+                if (cast.Origin is not { } start || cast.Aim is not { } aim || (aim.X == 0 && aim.Y == 0) || Math.Abs(aim.X) > 1 || Math.Abs(aim.Y) > 1)
+                {
+                    return CastPlacement.Refused($"A {shape} needs a point of origin and one of the eight ways to aim it.");
+                }
+
+                if (Setting.IsWall(start))
+                {
+                    return CastPlacement.Refused("The point of origin is inside a wall.");
+                }
+
+                origin = start;
+                squares = shape == SpellShape.Line
+                    ? SpellArea.Line(start, aim, spell.Size, Setting.WallTest)
+                    : SpellArea.Cone(start, aim, spell.Size, Setting.WallTest);
+                var covered = squares.ToHashSet();
+
+                // Aimed away from the hand that casts it: the caster isn't caught in their own Line or Cone.
+                caught = CaughtIn(covered, except: caster);
+                // An area effect catches a mount as well as its rider (Core Rules §9, "Mounts").
+                caught.AddRange(Steeds.Where(m => covered.Contains(m.Position)));
+            }
+            else if (shape == SpellShape.Volume)
+            {
+                if (cast.Corner is not { } corner)
+                {
+                    return CastPlacement.Refused($"{spell.Name} needs a place for its block.");
+                }
+
+                var block = SpellArea.Block(corner, spell.Size).Where(sq => !Setting.IsWall(sq)).ToList();
+                if (block.Count == 0)
+                {
+                    return CastPlacement.Refused("There's no open ground in that block to put the spell into.");
+                }
+
+                origin = block.OrderBy(sq => from.DistanceTo(sq)).ThenBy(sq => Math.Abs(sq.X - from.X) + Math.Abs(sq.Y - from.Y)).First();
+                squares = SpellArea.Reached(corner, spell.Size, origin, Setting.WallTest);
+                var covered = squares.ToHashSet();
+                caught = CaughtIn(covered, except: null);
+                caught.AddRange(Steeds.Where(m => covered.Contains(m.Position)));
+            }
+            else
+            {
+                return CastPlacement.Refused($"{shape} spells aren't in the game yet.");
+            }
+
+            var distance = from.DistanceTo(origin);
+            if (!touch)
+            {
+                if (distance > LongRangeSquares)
+                {
+                    return CastPlacement.Refused($"Beyond Long — the point of origin is {distance} squares off.");
+                }
+
+                if (distance > 1 && !LineOpen(from, origin))
+                {
+                    return CastPlacement.Refused("Something solid is in the way.");
+                }
+
+                var seen = environment is not { } tables || RangeBandCalculator.BandForSquares(bands, distance) is not { } band
+                    || (caught.Count == 1 && squares.Count == 1
+                        ? CanBeTargeted(caught[0], origin, distance)
+                        : EnvironmentCalculator.AllowsTargeting(tables, VisibilityAtSquare(origin), band));
+                if (!seen)
+                {
+                    return CastPlacement.Refused("Too dark to see where it would go — nothing can be targeted beyond Close at Visibility None.");
+                }
+            }
+
+            var range = touch ? SpellRange.Touch : RangeBandCalculator.BandForSquares(bands, distance) switch
+            {
+                DistanceBand.Middle => SpellRange.Middle,
+                DistanceBand.Long => SpellRange.Long,
+                DistanceBand.Short => SpellRange.Short,
+                _ => SpellRange.Close,
+            };
+
+            // Who it works on, by Type (Core Rules §11).
+            MotionKind? motion = spell.SpellType == SpellType.Motion ? SpellArea.MotionOf(spell) : null;
+            var willingOnly = spell.SpellType == SpellType.Buff || motion == MotionKind.Quicken;
+
+            // Cover (Core Rules §9): a Ray, Line or Cone is aimed, and full cover can't be targeted by
+            // it; a Volume fills the space and flows round, so it ignores cover. A spell laid on the
+            // willing, a Heal or a Utility isn't an attack at anybody.
+            if (!touch && shape != SpellShape.Volume && !willingOnly
+                && spell.SpellType is SpellType.Harm or SpellType.Control or SpellType.Bane or SpellType.Motion
+                && Setting.CoverPieces.Count > 0)
+            {
+                var exposed = caught.Where(c => c.Side == caster.Side || CoverFrom(from, c) != Cover.Full).ToList();
+                if (exposed.Count == 0 && caught.Count > 0)
+                {
+                    return CastPlacement.Refused(caught.Count == 1
+                        ? $"{caught[0].Name} is behind full cover from here — only a Volume would reach them."
+                        : "Everybody it would catch is behind full cover from here.");
+                }
+
+                caught = exposed;
+            }
+            if (willingOnly)
+            {
+                caught = caught.Where(c => c.Side == caster.Side && !c.IsOutOfFight).ToList();
+                if (caught.Count == 0)
+                {
+                    return CastPlacement.Refused($"A {spell.SpellType} is laid on a willing target, and nobody willing is there.");
+                }
+            }
+
+            switch (spell.SpellType)
+            {
+                case SpellType.Utility:
+                    // It works on the ground, not on whoever happens to be standing there.
+                    caught = [];
+                    break;
+
+                case SpellType.Illusion:
+                    // It works on whoever sees it, which is a matter for the moment it stands.
+                    break;
+
+                case SpellType.Heal:
+                    var patient = caught[0];
+                    if (patient == caster)
+                    {
+                        return CastPlacement.Refused("A Heal can never target its own caster — blood given closes someone else's wound.");
+                    }
+
+                    if (patient.BodyStatus == BodyStatus.Dead)
+                    {
+                        return CastPlacement.Refused($"{patient.Name} is beyond healing.");
+                    }
+
+                    var mends = cast.Restores ?? spell.DamageType ?? WoundType.Body;
+                    if (patient.Track(mends) is var (now, max) && now >= max)
+                    {
+                        return CastPlacement.Refused($"{patient.Name} carries no {mends} wound.");
+                    }
+
+                    break;
+
+                case SpellType.Buff or SpellType.Bane:
+                    var moves = cast.Threshold ?? spell.Threshold ?? ThresholdType.Dodge;
+                    if (moves == ThresholdType.Fortitude)
+                    {
+                        // Nothing with no living body has a Fortitude for it to move (GM Reference §9).
+                        caught = caught.Where(c => c.BaseFortitudeThreshold is not null).ToList();
+                        if (caught.Count == 0)
+                        {
+                            return CastPlacement.Refused("No living body there for Fortitude to measure.");
+                        }
+                    }
+
+                    break;
+
+                case SpellType.Control:
+                    if (SpellArea.FixedEffectOf(spell) is { } written && written != cast.Effect)
+                    {
+                        return CastPlacement.Refused($"{spell.Name} is written to cause {written}, not {cast.Effect}.");
+                    }
+
+                    caught = caught.Where(c => c.ResolveThreshold is not null && !c.IsOutOfFight).ToList();
+                    if (cast.Effect == ControlEffect.Compulsion && cast.Directed is { } directed && (directed.HasFled || !directed.OccupiesSquare))
+                    {
+                        return CastPlacement.Refused($"{directed.Name} isn't there to be attacked.");
+                    }
+
+                    break;
+
+                case SpellType.Motion when motion == MotionKind.Bind && cast.BindAs is { } lower && lower > spell.SpellTier:
+                    return CastPlacement.Refused($"A {spell.SpellTier} Bind can't produce a {lower} effect — only its own, or a lower one.");
+            }
+
+            // A Swarm is moved, held or hurried only as a whole: a Motion spell must cover every square
+            // of it, or it does nothing to the mass (the user's ruling, 2026-11-02).
+            var swarmUnmoved = spell.SpellType == SpellType.Motion
+                ? caught.FirstOrDefault(c => c.IsSwarm && !c.Footprint.All(squares.Contains))
+                : null;
+            if (swarmUnmoved is not null)
+            {
+                caught = caught.Where(c => c != swarmUnmoved && !(c.IsSwarm && !c.Footprint.All(squares.Contains))).ToList();
+            }
+
+            if (caught.Count == 0 && spell.SpellType is not (SpellType.Utility or SpellType.Illusion))
+            {
+                return CastPlacement.Refused(swarmUnmoved is not null
+                    ? $"{spell.Name} has to cover the whole of {swarmUnmoved.Name} to move it — a part of a Swarm can't be moved."
+                    : $"{spell.Name} would catch nobody there.");
+            }
+
+            return new CastPlacement(null, origin, range, squares, caught, motion);
         }
 
         /// <summary>Why <paramref name="combatant"/> can't Sacrifice now, or null if they can (Core Rules §3, "Sacrifice").</summary>
