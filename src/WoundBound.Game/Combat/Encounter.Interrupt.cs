@@ -32,6 +32,7 @@ namespace WoundBound.Game.Combat
         private void Declare(Combatant actor, string what, Combatant? against, Func<bool> stillPossible, Action resolve, Action spent, Declaration? intent = null)
         {
             Declared = intent ?? new Declaration(actor, IntentKind.Other, what, against);
+            LastDeclarationSpent = false;
             Write($"{actor.Name} declares: {what}.");
             lastDeclaredTarget = against;
             // Nobody Interrupts what they never saw coming (Core Rules §9, "Ambush").
@@ -39,12 +40,14 @@ namespace WoundBound.Game.Combat
             {
                 if (actor.IsOutOfFight)
                 {
+                    LastDeclarationSpent = true;
                     spent();
                     return;
                 }
 
                 if (!stillPossible())
                 {
+                    LastDeclarationSpent = true;
                     actor.ActionsRemaining = Math.Max(0, actor.ActionsRemaining - 1);
                     Write($"{actor.Name}'s {what} has nothing left to do — the action is spent.");
                     caughtMidMotion = null;
@@ -57,21 +60,54 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
-        /// Who could Interrupt now: a Mind-secondary character still fighting, yet to act this round,
-        /// with the Mind to pay — and a Sentry who has acted already, with a tactical spend and a
-        /// Stamina left for the action it buys (Core Rules §7, "Trained as Sentry").
+        /// A character's action, declared before it is rolled — the choice made on the radial is the
+        /// declaration, as a player's word is at the table (the user's ruling, 2026-11-05) — and the
+        /// moment a Mind-secondary rival may Interrupt it. With nobody who could, it simply goes ahead.
+        /// </summary>
+        private void DeclareForParty(Combatant actor, string what, Combatant? against, Func<bool> stillPossible, Action resolve, Declaration? intent = null)
+        {
+            if (IsSurprise || !InterruptersFor(actor).Any())
+            {
+                resolve();
+                return;
+            }
+
+            Declare(actor, what, against, stillPossible, () =>
+            {
+                resolve();
+                caughtMidMotion = null;
+                Declared = null;
+            }, () =>
+            {
+                Declared = null;
+                CheckForEnd();
+            }, intent);
+        }
+
+        /// <summary>
+        /// Who could Interrupt <paramref name="actor"/>'s declared action now: on the other side, a
+        /// Mind-secondary character still fighting with the Mind to pay, whose turn is yet to come this
+        /// round — for a rival, a GM turn still owed it — and a Sentry who has acted already, with a
+        /// tactical spend and a Stamina left for the action it buys (Core Rules §7, "Trained as Sentry").
         /// </summary>
         private IEnumerable<Combatant> InterruptersFor(Combatant actor) =>
-            partyStillToAct.Where(c => c.HasInterrupt && !c.IsOutOfFight && !c.HasInterruptedThisRound && Encounter.InterruptRefusal(c) is null)
-                .Concat(combatants.Where(c => c.Side == Side.Party && c.IsSentry && !partyStillToAct.Contains(c) && c.HasActedThisRound
-                                              && !c.IsOutOfFight && !c.HasInterruptedThisRound && Encounter.InterruptRefusal(c) is null
-                                              && TacticalSpendRefusal(c) is null));
+            actor.Side == Side.Adversaries
+                ? partyStillToAct.Where(c => c.HasInterrupt && !c.IsOutOfFight && !c.HasInterruptedThisRound && Encounter.InterruptRefusal(c) is null)
+                    .Concat(combatants.Where(c => c.Side == Side.Party && c.IsSentry && !partyStillToAct.Contains(c) && c.HasActedThisRound
+                                                  && !c.IsOutOfFight && !c.HasInterruptedThisRound && Encounter.InterruptRefusal(c) is null
+                                                  && TacticalSpendRefusal(c) is null))
+                : Fighting(Side.Adversaries).Where(c => c.HasInterrupt && !c.HasInterruptedThisRound && !IsControlled(c) && Encounter.InterruptRefusal(c) is null
+                                                        && (RivalTurnOwed(c) || (c.IsSentry && c.HasActedThisRound && TacticalSpendRefusal(c) is null)));
+
+        /// <summary>Whether a rival may take a GM turn early: one still owed it, and the GM a turn left to give this round.</summary>
+        private bool RivalTurnOwed(Combatant rival) => rival.HasTurnLeftThisRound && adversaryTurnsRemaining > 0;
 
         /// <summary>The Sentry taking the one action an Interrupt after acting buys, rather than a turn.</summary>
         private Combatant? sentryAction;
 
         /// <summary>Whether <paramref name="character"/> would Interrupt now as a Sentry — having acted this round — rather than taking their turn early.</summary>
-        public bool InterruptsAsSentry(Combatant character) => character.IsSentry && !partyStillToAct.Contains(character);
+        public bool InterruptsAsSentry(Combatant character) =>
+            character.IsSentry && (character.Side == Side.Party ? !partyStillToAct.Contains(character) : !RivalTurnOwed(character));
 
         /// <summary>
         /// Why <paramref name="character"/> can't pay an Interrupt's 1 Mind now, or null if they can.
@@ -94,7 +130,8 @@ namespace WoundBound.Game.Combat
 
             OfferReaction(new PendingReaction(ReactionKind.Interrupt, interrupter, actor, null, 0,
                     InterruptsAsSentry(interrupter)
-                        ? $"{actor.Name} is about to act. {interrupter.Name}, Trained as Sentry, may Interrupt though they've acted — one action now, for 1 Mind and 1 Stamina (a tactical spend: the GM gains an Opportunity)."
+                        ? $"{actor.Name} is about to act. {interrupter.Name}, Trained as Sentry, may Interrupt though they've acted — one action now, for 1 Mind and 1 Stamina"
+                          + (interrupter.Side == Side.Party ? " (a tactical spend: the GM gains an Opportunity)." : " (a tactical spend).")
                         : $"{actor.Name} is about to act. {interrupter.Name} may Interrupt — take their turn now, for 1 Mind, before it is rolled.",
                     Against: lastDeclaredTarget),
                 takes =>
@@ -108,6 +145,9 @@ namespace WoundBound.Game.Combat
                     Interrupt(interrupter, actor, then);
                 });
         }
+
+        /// <summary>Whether the last declared action was left with nothing to do by the Interrupt it drew, or its maker dropped first.</summary>
+        public bool LastDeclarationSpent { get; private set; }
 
         /// <summary>The declared action the party turn under way was taken inside of, if it's an Interrupt's.</summary>
         public Interruption? Interrupting { get; private set; }
@@ -165,7 +205,8 @@ namespace WoundBound.Game.Combat
 
             Write($"{interrupter.Name} Interrupts {actor.Name} — 1 Mind{(backlash ? ", Backlashed onto Body" : drops ? ", their last" : string.Empty)}" +
                   (asSentry ? $" and 1 Stamina ({interrupter.Stamina} left) — and, having acted already, takes one action now." : " — and takes their turn now."));
-            if (asSentry)
+            // A rival's spend hands nobody an Opportunity (the user's ruling, 2026-11-05).
+            if (asSentry && interrupter.Side == Side.Party)
             {
                 GrantImmediateOpportunity(interrupter);
             }
@@ -197,6 +238,12 @@ namespace WoundBound.Game.Combat
                 then();
             };
 
+            if (interrupter.Side == Side.Adversaries)
+            {
+                RivalInterrupt(interrupter, asSentry);
+                return;
+            }
+
             if (asSentry)
             {
                 StartSentryAction(interrupter);
@@ -204,6 +251,37 @@ namespace WoundBound.Game.Combat
             }
 
             StartPartyTurn(interrupter);
+        }
+
+        /// <summary>
+        /// A rival's Interrupt: its GM turn taken now, inside the character's — one of the round's
+        /// adversary turns, as a character's Interrupt is their own turn come early — or, a Sentry
+        /// that has acted, one action. Then the character's declared action goes ahead.
+        /// </summary>
+        private void RivalInterrupt(Combatant rival, bool asSentry)
+        {
+            var declarer = Active;
+            var resume = interruptResume!;
+            interruptResume = null;
+            if (!asSentry)
+            {
+                adversaryTurnsRemaining--;
+                rival.TurnsTakenThisRound++;
+            }
+
+            Phase = EncounterPhase.AdversaryTurn;
+            TakeAdversaryTurn(rival, allowOpportunityBonus: !asSentry, () =>
+            {
+                rival.HasActedThisRound = true;
+                Active = declarer;
+                Phase = EncounterPhase.PartyTurn;
+                if (CheckForEnd())
+                {
+                    return;
+                }
+
+                resume();
+            }, oneAction: asSentry);
         }
 
         /// <summary>

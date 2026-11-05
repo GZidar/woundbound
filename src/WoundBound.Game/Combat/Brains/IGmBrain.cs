@@ -36,6 +36,14 @@ namespace WoundBound.Game.Combat.Brains
         bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver);
 
         /// <summary>
+        /// How <paramref name="adversary"/> answers <paramref name="leaver"/> going out of its reach,
+        /// from <paramref name="options"/>: strike, Grab, Shove or Trip them, or let them go. By
+        /// default, a strike where <see cref="StrikesAtLeaver"/> says so.
+        /// </summary>
+        LeaverResponse RespondsToLeaver(BattleView view, Combatant adversary, Combatant leaver, IReadOnlyList<LeaverResponse> options) =>
+            options.Contains(LeaverResponse.Strike) && StrikesAtLeaver(view, adversary, leaver) ? LeaverResponse.Strike : LeaverResponse.LetThemGo;
+
+        /// <summary>
         /// Whether the adversary <see cref="PendingReaction.Defender"/> spends 1 Stamina on a panic
         /// dodge. Only asked when the dodge would turn the hit and the spend is allowed.
         /// </summary>
@@ -82,6 +90,13 @@ namespace WoundBound.Game.Combat.Brains
         int ShelterAmount(BattleView view, PendingReaction reaction) => 0;
 
         /// <summary>
+        /// Whether the rival <see cref="PendingReaction.Defender"/> Interrupts the character
+        /// <see cref="PendingReaction.Attacker"/>'s declared action — its GM turn taken now, for 1 Mind
+        /// (Core Rules §3; the user's ruling, 2026-11-05: rivals are played as characters). By default, no.
+        /// </summary>
+        bool Interrupts(BattleView view, PendingReaction reaction) => false;
+
+        /// <summary>
         /// Whether the GM plays its creatures knowing where every character stands, as a GM at the
         /// table sees the whole map (the user's direction, 2026-11-04: not cheating, a skill). One
         /// that doesn't is handed a <see cref="BattleView"/> fogged to what its creatures have seen.
@@ -108,7 +123,7 @@ namespace WoundBound.Game.Combat.Brains
         /// </summary>
         /// <param name="With">Which attack line; null for whichever does most from where it stands.</param>
         /// <param name="Manoeuvre">A manoeuvre its Attack line gives it, declared with the blow (GM Reference §2).</param>
-        public sealed record Attack(Combatant Target, bool WithBonus = false, AttackProfile? With = null, Manoeuvre? Manoeuvre = null) : GmStep;
+        public sealed record Attack(Combatant Target, bool WithBonus = false, AttackProfile? With = null, Manoeuvre? Manoeuvre = null, bool Sacrifice = false) : GmStep;
 
         /// <summary>
         /// Take the Dodge, Grounded or Resolute action (Core Rules §10, "Standing Your Ground"):
@@ -164,7 +179,7 @@ namespace WoundBound.Game.Combat.Brains
         public sealed record Exploit(Rules.Enums.NimbleExploit Which) : GmStep;
 
         /// <summary>Raise the shield in hand over itself, with the action.</summary>
-        public sealed record RaiseShield : GmStep;
+        public sealed record RaiseShield(Combatant? Ally = null) : GmStep;
 
         /// <summary>
         /// Rampage (GM Reference §11, the Duskfang Gnoll): its attack has just dropped somebody, and
@@ -188,8 +203,14 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Get up into the saddle from beside its mount, for a move.</summary>
         public sealed record Mount : GmStep;
 
+        /// <summary>Get down from the saddle, for a move — a rival does as a character does.</summary>
+        public sealed record Dismount : GmStep;
+
+        /// <summary>Swap the loadout in hand for the one at the ready, for a move (Core Rules §9) — a rival's, as a character's.</summary>
+        public sealed record SwapLoadout : GmStep;
+
         /// <summary>Throw the throwable weapon in hand at <paramref name="Target"/>: its Attack, as a shot (Core Rules §9).</summary>
-        public sealed record Throw(Combatant Target, bool WithBonus = false) : GmStep;
+        public sealed record Throw(Combatant Target, bool WithBonus = false, bool Sacrifice = false) : GmStep;
 
         /// <summary>Take <paramref name="Weapon"/> from the pack into hand, for an action (Core Rules §15).</summary>
         public sealed record DrawWeapon(Rules.Models.WeaponDefinition Weapon) : GmStep;

@@ -46,10 +46,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         .Select(cast => (cast, (Func<CastPlan, double>)(plan => HarmWorth(actor, spell, plan)))),
                     SpellType.Harm => enemies
                         .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => HarmWorth(actor, spell, plan)))),
-                    SpellType.Heal => View.PartyOnBoard.Concat(View.Adversaries)
+                    SpellType.Heal => View.OnBoard
                         .Where(c => c.Side == actor.Side && c != actor && c.DistanceTo(at) <= 1)
                         .Select(c => (Mend(spell, c), (Func<CastPlan, double>)(plan => HealWorth(actor, spell, plan)))),
-                    SpellType.Buff when usesTricks => View.PartyOnBoard.Concat(View.Adversaries)
+                    SpellType.Buff when usesTricks => View.OnBoard
                         .Where(c => c.Side == actor.Side && !c.IsOutOfFight)
                         .Select(c => (new SpellCast(spell) { Target = c, Threshold = ThresholdType.Dodge }, (Func<CastPlan, double>)(plan => Denial * BuffWorth(plan, care)))),
                     SpellType.Control when usesTricks => enemies.Where(e => e.ResolveThreshold is not null && !View.IsControlled(e))
@@ -400,7 +400,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             const double perPointPerBlow = 0.05 * 3.5;
             const double rounds = 2;
             double worth = 0;
-            foreach (var creature in View.PartyOnBoard.Concat(View.Adversaries).Distinct().Where(c => !c.IsOutOfFight))
+            foreach (var creature in View.OnBoard.Distinct().Where(c => !c.IsOutOfFight))
             {
                 var stripped = View.VisibilityDodgeModifier(creature) - View.DodgeModifierWith(creature, light);
                 if (stripped <= 0)

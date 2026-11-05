@@ -240,7 +240,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             if (c.HasFled || c.HasSurrendered || c.IsOutOfFight)
             {
-                return c.Side == Side.Party && c.BodyStatus == BodyStatus.Dead ? -0.5 : 0;
+                return c.DiesLikeACharacter && c.BodyStatus == BodyStatus.Dead ? -0.5 : 0;
             }
 
             // Still standing is most of it: a character on 2 Body swings as hard as one on 8, so two
@@ -295,6 +295,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
             public bool Sustains(BattleView view, PendingReaction reaction) => inner.Sustains(view, reaction);
 
             public int ShelterAmount(BattleView view, PendingReaction reaction) => inner.ShelterAmount(view, reaction);
+
+            public bool Interrupts(BattleView view, PendingReaction reaction) => inner.Interrupts(view, reaction);
+
+            public LeaverResponse RespondsToLeaver(BattleView view, Combatant adversary, Combatant leaver, IReadOnlyList<LeaverResponse> options) =>
+                inner.RespondsToLeaver(view, adversary, leaver, options);
         }
     }
 }

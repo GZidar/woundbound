@@ -101,7 +101,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private TurnPlanner Planner(BattleView view, out Assessor assess)
         {
             assess = Assess(view);
-            return new TurnPlanner(assess, planning);
+            return new TurnPlanner(assess, planning, characterCare: Plays.Care);
         }
 
         /// <summary>What a fresh turn would be worth to this adversary — its best plan from where it stands.</summary>
@@ -151,6 +151,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>What a turn must be worth to spend an Immediate Opportunity on, which would otherwise lapse.</summary>
         public const double ImmediateBar = 0.4;
 
+        /// <summary>What a rival's off-hand blow must be worth to spend the Stamina on.</summary>
+        public const double OffHandBar = 0.3;
+
         public override GmStep NextStep(BattleView view, GmTurn turn)
         {
             var actor = turn.Actor;
@@ -170,9 +173,23 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return pick is null ? GmStep.End : StepFor(pick, turn);
             }
 
-            var attacked = Encounter.OnceARoundRefusal(actor, turn) is not null;
-            var options = WithoutAttacks(attacked, planner.Options(actor, actor.HasMove, actor.ActionsRemaining, real: true,
-                turn.BonusAvailable, view.BankedOpportunities >= view.MaxBankedOpportunities, StillToAct(view, actor)));
+            // A rival's Attack action just opened its off-hand strike: taken where the blow is worth the Stamina.
+            if (actor.OffHandOwed && CanSpare(actor) && Plays.UsesTricks && actor.OffHandAttack is { } offHand)
+            {
+                var assess = Assess(view);
+                var best = view.EnemiesOf(actor).Where(e => !e.IsOutOfFight && !e.IsPhantom)
+                    .Where(e => view.Encounter.OffHandRefusal(actor, e) is null)
+                    .Select(e => (Who: e, Plan: view.PlanAttackWith(actor, offHand, actor.Position, e)))
+                    .Select(x => (x.Who, Worth: assess.Worth(assess.Blow(actor, offHand, x.Who, x.Plan.DamageDieSides, assess.PlanThreshold(x.Who, x.Plan)), x.Who)))
+                    .OrderByDescending(x => x.Worth).FirstOrDefault();
+                if (best.Who is not null && best.Worth >= OffHandBar)
+                {
+                    return new GmStep.OffHand(best.Who);
+                }
+            }
+
+            var options = planner.Options(actor, actor.HasMove, actor.ActionsRemaining, real: true,
+                turn.BonusAvailable, view.BankedOpportunities >= view.MaxBankedOpportunities, StillToAct(view, actor));
 
             // Rampage: its blow just dropped somebody, and a Stamina buys a second at somebody else —
             // closing with its move first if it must — where that blow beats keeping the Stamina.
@@ -201,7 +218,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // Stamina — and the reaction that Stamina would otherwise pay for this round.
             if (actor.ActionsRemaining == 0 && actor.Stamina >= 2 && BattleView.TacticalSpendRefusal(actor) is null && Plays.UsesTricks)
             {
-                var bought = WithoutAttacks(attacked, planner.Options(actor, actor.HasMove, 1, real: false, turn.BonusAvailable, stillToAct: StillToAct(view, actor)))
+                var bought = planner.Options(actor, actor.HasMove, 1, real: false, turn.BonusAvailable, stillToAct: StillToAct(view, actor))
                     .Where(o => o.Kind is not (OptionKind.End or OptionKind.Move))
                     .Select(o => o.Score).DefaultIfEmpty(double.MinValue).Max();
                 var keep = options.Select(o => o.Score).DefaultIfEmpty(0).Max();
@@ -299,20 +316,69 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
         }
 
-        /// <summary>Leaves out every blow and Harm, once the adversary has made its one attack this round.</summary>
-        private static List<Option> WithoutAttacks(bool attacked, List<Option> options) =>
-            !attacked ? options : options.Where(o =>
-                o.Kind is not (OptionKind.Attack or OptionKind.Throw) && o.Then is not (OptionKind.Attack or OptionKind.Throw)
-                && !((o.Kind == OptionKind.Cast || o.Then == OptionKind.Cast) && o.Cast?.Spell.SpellType == SpellType.Harm)).ToList();
-
         /// <summary>Strikes at a leaver where the blow is worth the Stamina — and never while running.</summary>
         public override bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) =>
             !adversary.IsBroken && CanSpare(adversary) && Assess(view).BestAttack(adversary, adversary.Position, leaver).Worth >= 0.4;
+
+        /// <summary>
+        /// Strike, Grab or Trip a leaver — whichever is worth most, if anything is worth the Stamina:
+        /// a blow worth having, or the leaver stopped where catching them is worth more than the blow.
+        /// </summary>
+        public LeaverResponse RespondsToLeaver(BattleView view, Combatant adversary, Combatant leaver, IReadOnlyList<LeaverResponse> options)
+        {
+            if (adversary.IsBroken || !CanSpare(adversary))
+            {
+                return LeaverResponse.LetThemGo;
+            }
+
+            var assess = Assess(view);
+            var worths = new List<(LeaverResponse Response, double Worth)>();
+            if (options.Contains(LeaverResponse.Strike))
+            {
+                worths.Add((LeaverResponse.Strike, assess.BestAttack(adversary, adversary.Position, leaver).Worth));
+            }
+
+            if (Plays.Uses(Trick.Grapple))
+            {
+                var stopping = 0.2 * assess.Value(leaver);
+                foreach (var reach in new[] { LeaverResponse.Grab, LeaverResponse.Trip }.Where(options.Contains))
+                {
+                    worths.Add((reach, assess.ControlChance(adversary, leaver, againstDodgeToo: true, topples: reach != LeaverResponse.Grab) * stopping * (reach == LeaverResponse.Grab ? 1 : 0.6)));
+                }
+            }
+
+            var best = worths.OrderByDescending(w => w.Worth).FirstOrDefault();
+            return best.Worth >= 0.4 ? best.Response : LeaverResponse.LetThemGo;
+        }
 
         public override bool PanicDodges(BattleView view, PendingReaction reaction) =>
             (CanSpare(reaction.Defender) && WorthAvoiding(view, reaction)) || SavesItself(reaction.Defender, reaction);
 
         public override bool StandsFirm(BattleView view, PendingReaction reaction) => CanSpare(reaction.Defender);
+
+        /// <summary>
+        /// A rival Interrupts as a character would: where its turn taken now, with what it spares of the
+        /// declared action, beats the same turn taken later by more than the Mind it costs.
+        /// </summary>
+        public bool Interrupts(BattleView view, PendingReaction reaction)
+        {
+            var me = reaction.Defender;
+            if (me.Mind < 2 || me.IsBroken || reaction.Attacker.IsBroken || !Plays.UsesTricks)
+            {
+                return false;
+            }
+
+            var planner = Planner(view, out var assess);
+            var interruption = new Interruption(reaction.Attacker, reaction.Against);
+            var sentry = view.Encounter.InterruptsAsSentry(me);
+            var options = planner.Options(me, hasMove: !sentry, actions: 1, real: false, stillToAct: StillToAct(view, me));
+            var plain = sentry ? 0 : options.Select(o => o.Score).DefaultIfEmpty(0).Max();
+            var now = options.Select(o => o.Score + planner.Spared(me, o, interruption)).DefaultIfEmpty(0).Max()
+                      - (sentry ? planner.ExtraActionPrice(me) : 0);
+            var mindIsFuel = me.Spells.Count > 0 && me.Build?.ClassPrinciple == ClassPrinciple.Cerebral;
+            var cost = (mindIsFuel ? 0.8 : 0.3) * assess.PerWound(me) + 0.4;
+            return now - plain > cost;
+        }
 
         /// <summary>A foe built with Shelter weighs it as a character would.</summary>
         public int ShelterAmount(BattleView view, PendingReaction reaction) => Sheltering.Amount(new Assessor(view), reaction);

@@ -391,12 +391,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 .DefaultIfEmpty(0)
                 .Max();
 
-            // A second weapon hurts more than one: the off-hand blow a character pays Stamina for every
-            // round it can, and an adversary's only when the GM spends an Opportunity on it — about half the time.
-            if (c.OffHandAttack is { } offHand && (c.Side == Side.Party ? c.Stamina >= 2 : c.OpportunityBonus.Kind == OpportunityBonusKind.OffHand))
+            // A second weapon hurts more than one: the off-hand blow paid in Stamina every round it can
+            // be (a character's or a rival's), and a statblock's only when the GM spends an Opportunity
+            // on it — about half the time.
+            var paysStamina = c.OffHandWeapon is not null;
+            if (c.OffHandAttack is { } offHand && (paysStamina ? c.Stamina >= 2 : c.OpportunityBonus.Kind == OpportunityBonusKind.OffHand))
             {
                 var second = view.EnemiesOf(c).Select(e => Blow(c, offHand, e, offHand.DamageDieSides, Dodge(e)).ExpectedDealt).DefaultIfEmpty(0).Max();
-                best += (c.Side == Side.Party ? 1 : 0.5) * second;
+                best += (paysStamina ? 1 : 0.5) * second;
             }
 
             threat[c] = best;
@@ -866,12 +868,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public double Caution(Combatant c)
         {
-            if (c.Side != Side.Party || c.IsSteed || c.IsPhantom)
+            // A rival is a character on the GM's side, and minds its own and its band's as one does.
+            if (!c.DiesLikeACharacter || c.IsSteed || c.IsPhantom)
             {
                 return 1;
             }
 
-            var party = view.Combatants.Where(p => p.Side == Side.Party && !p.IsSteed && !p.IsPhantom && !p.HasFled).ToList();
+            var party = view.Combatants.Where(p => p.Side == c.Side && p.DiesLikeACharacter && !p.IsSteed && !p.IsPhantom && !p.HasFled).ToList();
             var standing = party.Count == 0 ? 1 : party.Count(p => !p.IsOutOfFight) / (double)party.Count;
             var partyBody = party.Count == 0 ? 1 : party.Sum(p => Math.Max(0, p.Body)) / (double)Math.Max(1, party.Sum(p => p.BodyMax));
             var body = Math.Max(0, c.Body) / (double)Math.Max(1, c.BodyMax);

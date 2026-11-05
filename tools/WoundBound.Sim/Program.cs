@@ -35,6 +35,7 @@ var seats = Text("--party", "all");
 RuleTrials.MinionStamina = Option("--minion-stamina", 1);
 var data = GameData.Load(file => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", file)));
 RuleTrials.IgnoreMorale = args.Contains("--no-morale");
+RuleTrials.Uncapped = args.Contains("--uncapped");
 
 // --extra N: N more of the fight's own adversaries, cycling through them, each on the nearest open
 // square to the one it copies — for calibrating Threat Value against what the brains can do.
@@ -99,12 +100,20 @@ Foresight? foresight = Text("--foresight", null) switch
         rest is [_, var others] ? Enum.Parse<GamesPlayedBy>(others, ignoreCase: true) : GamesPlayedBy.Quick),
     var sight => throw new ArgumentException($"--foresight wants K,N,R[,own[,quick|best]] or off, not {sight}"),
 };
+// Every utility GM built, so the look-ahead tally can be summed at the end.
+var utilityGms = new System.Collections.Concurrent.ConcurrentBag<UtilityGmBrain>();
+UtilityGmBrain Kept(UtilityGmBrain gm)
+{
+    utilityGms.Add(gm);
+    return gm;
+}
+
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),
-    "best" => new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight),
-    "balanced" => new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight),
-    "poor" => new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight),
+    "best" => Kept(new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight)),
+    "balanced" => Kept(new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight)),
+    "poor" => Kept(new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight)),
     _ => new SimpleGmBrain(),
 };
 
@@ -235,6 +244,12 @@ if (Text("--show", null) is { } show && int.TryParse(show, out var shown))
 
     Simulator.PlayOne(one, new UtilityPartyBrain(showAs));
     Console.WriteLine(string.Join(Environment.NewLine, one.Log));
+    Console.WriteLine($"- End: {one.Phase}, round {one.Round} -");
+    foreach (var who in one.Combatants.Where(w => !w.IsPhantom))
+    {
+        Console.WriteLine($"  [{who.Side}] {who.Name}: Body {who.Body}/{who.BodyMax}, Stamina {who.Stamina}/{who.StaminaMax}{(who.IsOutOfFight ? ", out" : "")}{(who.HasFled ? ", fled" : "")}{(who.IsBroken ? ", broken" : "")}");
+    }
+
     return;
 }
 
@@ -250,13 +265,12 @@ if (Text("--show", null) is { } show && int.TryParse(show, out var shown))
     }
     else
     {
-        var spend = foes.Sum(f => f.Role is { } role
-            ? WoundBound.Rules.Calculation.ChallengeCalculator.ThreatValue(role, f.Tier, partyTier)
-            : 1.0);
-        var multiplier = spend / party.Count;
-        var named = new[] { (0.75, "Easy"), (1.0, "Standard"), (1.5, "Hard"), (2.0, "Deadly") }
+        static string Named(double multiplier) => new[] { (0.75, "Easy"), (1.0, "Standard"), (1.5, "Hard"), (2.0, "Deadly") }
             .FirstOrDefault(d => multiplier <= d.Item1 + 1e-9, (99, "over Deadly")).Item2;
-        Console.WriteLine($"Cost: Threat {spend:0.##} for {party.Count} PCs = {multiplier:0.##}× ({named}).");
+        var spend = foes.Sum(f => RuleTrials.ThreatValue(f, partyTier));
+        var written = foes.Sum(f => RuleTrials.WrittenThreatValue(f, partyTier));
+        Console.WriteLine($"Cost: Threat {spend:0.##} for {party.Count} PCs = {spend / party.Count:0.##}× ({Named(spend / party.Count)}) at the trial prices; "
+                          + $"{written:0.##} = {written / party.Count:0.##}× ({Named(written / party.Count)}) as written.");
     }
 }
 
@@ -317,6 +331,12 @@ Console.WriteLine();
 Console.WriteLine("Obj% is fights with every objective met. Body left and Up (characters still standing) are averaged over wins only.");
 Console.WriteLine("Foes = dropped, Fled = got away. Attacks to Leavers (reactions to a foe leaving reach) are per fight, across the party.");
 Console.WriteLine("W/L/S/X = wins, losses, stalemates (50 rounds), withdrawals (the party got clear of foes still willing to fight).");
+var (weighedAll, changedAll, failedAll) = utilityGms.Aggregate((0, 0, 0), (t, g) =>
+    (t.Item1 + g.ForesightTally.Weighed, t.Item2 + g.ForesightTally.Changed, t.Item3 + g.ForesightTally.Failed));
+if (weighedAll > 0)
+{
+    Console.WriteLine($"Look-ahead: {weighedAll} decisions weighed, {changedAll} ({(double)changedAll / weighedAll:P0}) taken other than the top-scored plan, {failedAll} games lost to a refusal.");
+}
 
 int Option(string name, int fallback) => int.TryParse(Text(name, null), out var value) ? value : fallback;
 

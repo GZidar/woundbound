@@ -180,7 +180,7 @@ namespace WoundBound.Game.Combat.Brains
             var done = step switch
             {
                 PartyStep.Move move => Count(encounter.TryMove(move.Square), () => Tally.Moves++),
-                PartyStep.Attack attack => Count(encounter.TryAttack(attack.Target, attack.Sacrifice, attack.Manoeuvre) is not null, () =>
+                PartyStep.Attack attack => Count(encounter.TryAttack(attack.Target, attack.Sacrifice, attack.Manoeuvre) is not null || Answered(), () =>
                 {
                     Tally.Attacks++;
                     Tally.Sacrifices += attack.Sacrifice ? 1 : 0;
@@ -188,7 +188,7 @@ namespace WoundBound.Game.Combat.Brains
                 }),
                 PartyStep.Mount => encounter.TryMount(),
                 PartyStep.Dismount => encounter.TryDismount(),
-                PartyStep.Throw toss => Count(encounter.TryThrow(toss.Target) is not null, () => Tally.Attacks++),
+                PartyStep.Throw toss => Count(encounter.TryThrow(toss.Target) is not null || Answered(), () => Tally.Attacks++),
                 PartyStep.DrawWeapon draw => encounter.TryDrawWeapon(draw.Weapon),
                 PartyStep.PickUpWeapon pick => encounter.TryPickUpWeapon(pick.Lying),
                 PartyStep.OffHand offHand => Count(encounter.TryOffHandAttack(offHand.Target, offHand.Manoeuvre) is not null, () =>
@@ -253,6 +253,12 @@ namespace WoundBound.Game.Combat.Brains
                 });
             }
         }
+
+        /// <summary>
+        /// A declared action that is waiting on somebody's answer — a reaction in the rival's
+        /// Interrupt it drew — or that the Interrupt left with nothing to do: accepted, not refused.
+        /// </summary>
+        private bool Answered() => encounter.Pending is not null || encounter.Phase != EncounterPhase.PartyTurn || encounter.LastDeclarationSpent;
 
         private bool EndTurn()
         {

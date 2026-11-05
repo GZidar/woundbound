@@ -335,7 +335,7 @@ public class PoisonPricingTests
     }
 }
 
-/// <summary>The game's own Opportunity bonus: an off-hand strike after the attack, paid by the Opportunity (the user's ruling, 2026-11-03).</summary>
+/// <summary>The off-hand strike: a statblock's is its Opportunity bonus (the user's ruling, 2026-11-03); a two-weapon rival pays Stamina, as a character does (2026-11-05).</summary>
 public class OffHandBonusTests
 {
     private static readonly Game.Data.GameData Data = TestData.Load();
@@ -372,13 +372,38 @@ public class OffHandBonusTests
     }
 
     [Fact]
-    public void ARivalWithTwoWeapons_CarriesTheOffHandBonus_AndAPartyMemberDoesNot()
+    public void ARivalWithTwoWeapons_PaysItsOffHandInStamina_AsACharacterDoes()
     {
         var rival = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(0, 0), Side.Adversaries);
-        var salla = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(0, 0));
 
-        Assert.Equal(OpportunityBonusKind.OffHand, rival.OpportunityBonus.Kind);
-        Assert.Equal(OpportunityBonusKind.Advantage, salla.OpportunityBonus.Kind);
+        Assert.NotEqual(OpportunityBonusKind.OffHand, rival.OpportunityBonus.Kind);
+        Assert.NotNull(rival.OffHandWeapon);
+    }
+
+    [Fact]
+    public void ARivalsAttack_OpensItsOffHandStrike_For1Stamina_AndNoOpportunity()
+    {
+        var gm = new ScriptedGm((view, turn) => turn.Steps switch
+        {
+            0 => new GmStep.Attack(view.Characters.Single()),
+            1 => new GmStep.OffHand(view.Characters.Single()),
+            _ => null,
+        });
+        var encounter = new Encounter(12, 10, new[]
+        {
+            CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 4)),
+            CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(5, 4), Side.Adversaries),
+        }, Data.RangeBands, new ScriptedDice(2, 3, 2, 3, 1, 1, 1, 1), gm);
+        encounter.DeclineFreeChoices();
+        var rival = encounter.Combatants.Single(c => c.Side == Side.Adversaries);
+        var stamina = rival.Stamina;
+
+        encounter.EndTurn();
+        encounter.RunAdversaryTurn();
+
+        Assert.Contains(encounter.Log, l => l.Contains("in the off hand too (1 Stamina from the equipment"));
+        Assert.Equal(stamina - 1, rival.Stamina);
+        Assert.Equal(0, encounter.BankedOpportunities);
     }
 
     [Fact]

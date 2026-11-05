@@ -250,11 +250,14 @@ namespace WoundBound.Game.Combat
             }
 
             AttackOutcome? result = null;
-            Throw(thrower, target, sacrifice, opportunityBonus: false, outcome =>
-            {
-                result = outcome;
-                CheckForEnd();
-            });
+            DeclareForParty(thrower, $"{ThrowOf(thrower)!.Name}, thrown at {target.Name}", target,
+                () => ThrowRefusal(thrower, target) is null && (!sacrifice || SacrificeRefusal(thrower) is null),
+                () => Throw(thrower, target, sacrifice, opportunityBonus: false, outcome =>
+                {
+                    result = outcome;
+                    CheckForEnd();
+                }),
+                new Declaration(thrower, IntentKind.Shot, ThrowOf(thrower)!.Name, target));
 
             return result;
         }

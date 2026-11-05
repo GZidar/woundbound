@@ -5,7 +5,7 @@ namespace WoundBound.Game.Tests;
 
 /// <summary>
 /// An adversary's Stamina (the user's ruling, 2026-11-02): spent as a character's is, with no
-/// Opportunity for anybody; never on a second attack in a round outside an extra turn; and a
+/// Opportunity for anybody, a second attack included (the user's ruling, 2026-11-05); and a
 /// creature that starts its turn on 0 falls unconscious.
 /// </summary>
 public class AdversaryStaminaTests
@@ -47,7 +47,7 @@ public class AdversaryStaminaTests
     }
 
     [Fact]
-    public void AnAdversary_MayBuyAnExtraAction_ButNotASecondAttack()
+    public void AnAdversary_MayBuyAnExtraAction_ForASecondAttack_HandingNobodyAnOpportunity()
     {
         var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 5));
         fighter.Stamina = 1;
@@ -55,35 +55,17 @@ public class AdversaryStaminaTests
         var gm = new StepsGm(new GmStep.Attack(fighter), new GmStep.BuyExtraAction(), new GmStep.Attack(fighter));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [fighter, bandit], Data.RangeBands,
             new ScriptedDice(3, 3, 1, 1, 1, 1), gm);
+        encounter.DeclineFreeChoices();
         encounter.TryBeginTurn(fighter);
         encounter.EndTurn();
         var stamina = bandit.Stamina;
 
-        var thrown = Assert.Throws<InvalidOperationException>(encounter.RunAdversaryTurn);
+        encounter.RunAdversaryTurn();
 
-        Assert.Contains("Stamina buys it anything but a second", thrown.Message);
         Assert.Equal(stamina - 1, bandit.Stamina);
+        Assert.Equal(2, encounter.Log.Count(l => l.StartsWith("Bandit attacks ")));
         Assert.Contains(encounter.Log, l => l.Contains("Bandit spends 1 Stamina for an extra action"));
         Assert.Equal(0, encounter.BankedOpportunities);
-    }
-
-    [Fact]
-    public void OnceARound_IsLiftedByAnExtraTurn_AndNeverAppliesToASolo()
-    {
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
-        bandit.AttacksThisRound = 1;
-
-        Assert.NotNull(Encounter.OnceARoundRefusal(bandit, new GmTurn(bandit, isExtraTurn: false, bonusAvailable: false)));
-        Assert.Null(Encounter.OnceARoundRefusal(bandit, new GmTurn(bandit, isExtraTurn: true, bonusAvailable: false)));
-    }
-
-    [Fact]
-    public void AnExtraTurn_HasOneAttack_StaminaBuysItNoSecond()
-    {
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
-        var extra = new GmTurn(bandit, isExtraTurn: true, bonusAvailable: false) { Attacks = 1 };
-
-        Assert.Contains("this extra turn's attack", Encounter.OnceARoundRefusal(bandit, extra));
     }
 
     [Theory]

@@ -296,6 +296,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Why <paramref name="bearer"/> can't raise their shield — over <paramref name="ally"/>, if named — now, or null if they can.</summary>
         public static string? ShieldRefusal(Combatant bearer, Combatant? ally = null) => Encounter.ShieldRefusal(bearer, ally);
 
+        /// <summary>Everybody lying or standing on the board, either side — the dying and the stable among them — whom a Heal could still reach or a blow finish.</summary>
+        public IEnumerable<Combatant> OnBoard => encounter.Combatants.Where(c => c.OccupiesSquare && Sees(c));
+
         /// <summary>The party, the dying and the stable among them included — everyone a Heal could still reach.</summary>
         public IEnumerable<Combatant> PartyOnBoard => encounter.Combatants.Where(c => c.Side == Side.Party && c.OccupiesSquare && Sees(c));
 

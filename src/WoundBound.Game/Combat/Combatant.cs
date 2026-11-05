@@ -181,7 +181,7 @@ namespace WoundBound.Game.Combat
         /// stable (who can still be reached, healed — and stabbed), or a foe who gave up.
         /// </summary>
         public bool OccupiesSquare => !HasFled
-            && (!IsOutOfFight || HasSurrendered || (IsDazed && Body > 0) || (Side == Side.Party && BodyStatus is BodyStatus.Dying or BodyStatus.Stable));
+            && (!IsOutOfFight || HasSurrendered || (IsDazed && Body > 0) || (DiesLikeACharacter && BodyStatus is BodyStatus.Dying or BodyStatus.Stable));
 
         /// <summary>
         /// Defenceless — attacks on them have Advantage: a character on 0 Body or below and not yet
@@ -189,7 +189,7 @@ namespace WoundBound.Game.Combat
         /// dying or stable character, any attack against them rolls with Advantage").
         /// </summary>
         public bool IsDefenceless => !HasFled
-            && ((Side == Side.Party && BodyStatus is BodyStatus.Dying or BodyStatus.Stable) || (IsDazed && Body > 0));
+            && ((DiesLikeACharacter && BodyStatus is BodyStatus.Dying or BodyStatus.Stable) || (IsDazed && Body > 0));
 
         /// <summary>At 0 Mind (Core Rules §4, "Stunned and Numbed"): no actions, no moves, no tactical spends, until someone restores a point.</summary>
         public bool IsStunned => MindMax > 0 && Mind <= 0;
@@ -623,7 +623,14 @@ namespace WoundBound.Game.Combat
         /// fight since nobody is left to stabilise them.
         /// </summary>
         public bool IsOutOfFight => IsUnconscious || HasFled || HasSurrendered || IsDazed
-            || (Side == Side.Party ? BodyStatus != BodyStatus.Healthy : Body <= 0);
+            || (DiesLikeACharacter ? BodyStatus != BodyStatus.Healthy : Body <= 0);
+
+        /// <summary>
+        /// Goes down Dying at 0 Body, rolls to hold on and dies at −3 (Core Rules §4, "Dying"):
+        /// everybody on the party's side, and a rival built from a character sheet, who is treated
+        /// exactly as a character is (the user's ruling, 2026-11-05). A generic foe is simply out.
+        /// </summary>
+        public bool DiesLikeACharacter => Side == Side.Party || (Build is not null && !IsPhantom && !IsSteed);
 
         /// <summary>
         /// Has cast a spell in this fight — which is how a caster gives themselves away, and why

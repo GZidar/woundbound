@@ -50,11 +50,18 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private readonly Assessor assess;
         private readonly BrainSkill skill;
         private readonly SpellPlanner spells;
+        private readonly double? characterCare;
 
-        public TurnPlanner(Assessor assess, BrainSkill skill)
+        /// <param name="characterCare">
+        /// The care a creature built from a character sheet takes on the GM's side — a rival, played
+        /// exactly as a character is (the user's ruling, 2026-11-05) — where the GM holds its other
+        /// creatures less dear; null, the skill's own.
+        /// </param>
+        public TurnPlanner(Assessor assess, BrainSkill skill, double? characterCare = null)
         {
             this.assess = assess;
             this.skill = skill;
+            this.characterCare = characterCare;
             spells = new SpellPlanner(assess);
         }
 
@@ -83,7 +90,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public double Spared(Combatant actor, Option option, Interruption interrupting)
         {
             var foe = interrupting.Actor;
-            var victim = interrupting.Against is { Side: Side.Party } v ? v : actor;
+            var victim = interrupting.Against is { } v && v.Side == actor.Side ? v : actor;
             if (foe.IsOutOfFight || foe.IsBroken)
             {
                 return 0;
@@ -129,7 +136,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // A standoff wears caution down: each quiet round, the blows a square invites matter less
             // than ending it — somebody has to close. A character minds them more as their resources
             // and the party's run down (Assessor.Caution).
-            var care = skill.Care * Assessor.RiskAppetite(actor) * assess.Caution(actor) / (1 + View.QuietRounds);
+            var ownCare = actor.Side == Side.Adversaries && actor.DiesLikeACharacter && characterCare is { } rival ? rival : skill.Care;
+            var care = ownCare * Assessor.RiskAppetite(actor) * assess.Caution(actor) / (1 + View.QuietRounds);
             var here = actor.Position;
 
             // Its footing back first: no action does anything else until then.
@@ -398,9 +406,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>
         /// What the off-hand strike an Attack action allows is worth on top of it (Core Rules §9, "Two
         /// Weapons"): the best off-hand blow from <paramref name="at"/>, less what it costs — a
-        /// character's Stamina, taken only with one to spare; an adversary's Opportunity, on a turn that
-        /// can spend one on its off-hand bonus (it attacks once a round otherwise — the user's rulings,
-        /// 2026-11-02 and 2026-11-03).
+        /// character's or a two-weapon rival's Stamina, taken only with one to spare (the user's ruling,
+        /// 2026-11-05); a statblock's Opportunity, on a turn that can spend one on its off-hand bonus.
         /// </summary>
         private double OffHandFollowUp(Combatant actor, GridPosition at, bool bonusAvailable = false, bool bankFull = false)
         {
@@ -409,7 +416,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return 0;
             }
 
-            var price = actor.Side == Side.Party
+            var price = actor.OffHandWeapon is not null
                 ? actor.Stamina < 2 ? double.MaxValue : 0.3
                 : bonusAvailable && actor.OpportunityBonus.Kind == OpportunityBonusKind.OffHand ? bankFull ? 0 : BonusPrice : double.MaxValue;
             if (price == double.MaxValue)
@@ -451,10 +458,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var bestBlow = enemies.Select(e => assess.BestAttack(actor, at, e).Worth).DefaultIfEmpty(0).Max();
             spendCost += Assessor.SpendPrice(actor, bestBlow) - 0.5;
 
-            // The defenceless are still to be finished — the default goal is to kill.
-            var targets = actor.Side == Side.Adversaries
-                ? enemies.Concat(View.PartyOnBoard.Where(c => c.IsDefenceless)).ToList()
-                : enemies;
+            // The defenceless are still to be finished — the default goal is to kill; and a rival
+            // lying dying is as much the party's to finish as a character is the GM's.
+            var targets = enemies.Concat(View.OnBoard.Where(c => c.Side != actor.Side && c.IsDefenceless && !c.IsPhantom)).Distinct().ToList();
 
             foreach (var target in targets)
             {
@@ -722,7 +728,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // weighed where that point puts a body back in the fight: Meditate over the stunned, Pray over
             // the numbed, Heal on a character dying or stable (the user, 2026-11-04). Nobody can tend
             // themselves back — the stunned, numbed and dying can't act.
-            foreach (var hurt in View.PartyOnBoard.Concat(View.Adversaries).Where(c => skill.Uses(Trick.Tend) && c.Side == actor.Side && c != actor))
+            foreach (var hurt in View.OnBoard.Where(c => skill.Uses(Trick.Tend) && c.Side == actor.Side && c != actor))
             {
                 if (actor.DistanceFrom(at, hurt) > 1)
                 {
@@ -881,8 +887,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         private IEnumerable<(CombatAction Action, double Worth)> Revivals(Combatant hurt)
         {
-            var down = hurt.Side == Side.Party ? hurt.BodyStatus is BodyStatus.Dying or BodyStatus.Stable : hurt.Body <= 0;
-            if (hurt.HasFled || hurt.BodyStatus == BodyStatus.Dead || (down && hurt.Side != Side.Party))
+            var down = hurt.DiesLikeACharacter ? hurt.BodyStatus is BodyStatus.Dying or BodyStatus.Stable : hurt.Body <= 0;
+            if (hurt.HasFled || hurt.BodyStatus == BodyStatus.Dead || (down && !hurt.DiesLikeACharacter))
             {
                 yield break;
             }

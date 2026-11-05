@@ -28,16 +28,14 @@ namespace WoundBound.Game.Combat
             var stats = CharacterCalculator.Calculate(build);
             var armour = build.Armour.FirstOrDefault(a => a.IsEquipped)?.Weight ?? ArmourWeight.None;
 
-            // A rival who fights with two weapons spends the GM's Opportunity on the off-hand strike: an
-            // adversary attacks once a round, so its off-hand blow is the Opportunity's (the user's ruling, 2026-11-03).
-            var twoWeapons = side == Side.Adversaries && InventoryCalculator.InHandWeapons(build) is { Count: 2 } held && held.Any(w => w.Weight == WeaponWeight.Light);
-
             return new Combatant
             {
                 Name = build.CharacterName,
                 Side = side,
                 Build = build,
-                OpportunityBonus = twoWeapons ? OpportunityBonus.OffHandStrike : OpportunityBonus.Default,
+                // A rival with two weapons pays its off-hand strike in Stamina, as a character does
+                // (the user's ruling, 2026-11-05), so its Opportunity bonus is the ordinary one.
+                OpportunityBonus = OpportunityBonus.Default,
                 Position = position,
                 BodyMax = stats.BodyWoundPool,
                 Body = build.Play.CurrentBodyWounds ?? stats.BodyWoundPool,

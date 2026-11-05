@@ -37,6 +37,11 @@ public class ForkTests
 
         public int ShelterAmount(BattleView view, PendingReaction offer) => inner.ShelterAmount(view, offer);
 
+        public bool Interrupts(BattleView view, PendingReaction offer) => inner.Interrupts(view, offer);
+
+        public LeaverResponse RespondsToLeaver(BattleView view, Combatant enemy, Combatant leaver, IReadOnlyList<LeaverResponse> options) =>
+            inner.RespondsToLeaver(view, enemy, leaver, options);
+
         public bool ArrestsShove(BattleView view, PendingReaction offer) => inner.ArrestsShove(view, offer);
 
         public GmStep NextStep(BattleView view, GmTurn turn)

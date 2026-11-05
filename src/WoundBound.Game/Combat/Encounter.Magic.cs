@@ -525,7 +525,10 @@ namespace WoundBound.Game.Combat
                 return false;
             }
 
-            Cast(caster, cast, plan, () => CheckForEnd());
+            DeclareForParty(caster, cast.Spell.Name + (cast.Target is { } aim ? $" at {aim.Name}" : string.Empty), cast.Target,
+                () => PlanCast(caster, cast) is { CanCast: true },
+                () => Cast(caster, cast, PlanCast(caster, cast), () => CheckForEnd()),
+                new Declaration(caster, IntentKind.Cast, cast.Spell.Name, cast.Target, Spell: cast.Spell.SpellType));
             return true;
         }
 

@@ -1249,14 +1249,19 @@ namespace WoundBound.Game.Combat
             }
 
             AttackOutcome? result = null;
-            ResolveAttack(attacker, target, asReaction: false, opportunityBonus: false, outcome =>
-            {
-                result = outcome;
-                // The Attack action of a Two Weapons loadout carries a second strike, for the
-                // off-hand's Stamina (Core Rules §9, "Two Weapons").
-                attacker.OffHandOwed = attacker.OffHandWeapon is not null && Active == attacker;
-                CheckForEnd();
-            }, with: with, sacrifice: sacrifice, manoeuvre: manoeuvre);
+            var weapon = with ?? PlanAttack(attacker, target).Profile ?? attacker.Attack;
+            DeclareForParty(attacker, $"{weapon.Name} at {target.Name}" + (manoeuvre is { } declared ? $", to {declared.Kind}" : string.Empty), target,
+                () => CanAttack(attacker, target) && (with is null || PlanAttackWith(attacker, with, attacker.Position, target).CanAttack)
+                      && (!sacrifice || SacrificeRefusal(attacker) is null),
+                () => ResolveAttack(attacker, target, asReaction: false, opportunityBonus: false, outcome =>
+                {
+                    result = outcome;
+                    // The Attack action of a Two Weapons loadout carries a second strike, for the
+                    // off-hand's Stamina (Core Rules §9, "Two Weapons").
+                    attacker.OffHandOwed = attacker.OffHandWeapon is not null && Active == attacker;
+                    CheckForEnd();
+                }, with: with, sacrifice: sacrifice, manoeuvre: manoeuvre),
+                new Declaration(attacker, weapon.IsRanged ? IntentKind.Shot : IntentKind.Strike, weapon.Name, target, manoeuvre?.Kind));
 
             return result;
         }
@@ -1273,6 +1278,12 @@ namespace WoundBound.Game.Combat
                 return false;
             }
 
+            SwapLoadout(swapper);
+            return true;
+        }
+
+        private void SwapLoadout(Combatant swapper)
+        {
             var putAway = swapper.InHandWeapon?.Name ?? "empty hands";
             var paidWith = PayMoves(swapper, 1);
             InventoryCalculator.SwapLoadouts(swapper.Build!);
@@ -1287,7 +1298,6 @@ namespace WoundBound.Game.Combat
             }
 
             CheckHolds();
-            return true;
         }
 
         /// <summary>
@@ -1340,7 +1350,8 @@ namespace WoundBound.Game.Combat
                 return false;
             }
 
-            ResolveControl(actor, action, target, opportunityBonus: false, () => CheckForEnd());
+            DeclareForParty(actor, $"{action} {target.Name}", target, () => ControlRefusal(actor, action, target) is null,
+                () => ResolveControl(actor, action, target, opportunityBonus: false, () => CheckForEnd()));
             return true;
         }
 
@@ -1617,6 +1628,13 @@ namespace WoundBound.Game.Combat
             AgeControls();
             AgeIllusions(roundPassed: true);
 
+            // A dying rival rolls to hold on as a character does, once a round — at the round's
+            // start, since its turns are the GM's to give, and this one spends none of them.
+            foreach (var dying in combatants.Where(c => c.Side == Side.Adversaries && c.DiesLikeACharacter && c.BodyStatus == BodyStatus.Dying && !c.HasFled).ToList())
+            {
+                RollToStabilise(dying);
+            }
+
             // Everyone on the party's side keeps their place in the round, fighting or not: a
             // character with no turn to take still leaves the GM the adversary turn that follows it.
             partyStillToAct.Clear();
@@ -1627,11 +1645,15 @@ namespace WoundBound.Game.Combat
             adversaryTurnCap = ChallengeCalculator.AdversaryTurnCap(adversaryTurnCap, partyStillToAct.Count);
             // A Solo takes its Tier plus one turns by nature, "above and beyond" the cap (Core Rules
             // §9; GM Reference §3, "Solo Actions"); the cap is what everything else is owed.
-            adversaryTurnsRemaining = adversaryTurnCap.Value + Fighting(Side.Adversaries).Where(a => a.IsSolo).Sum(a => a.TurnsPerRound);
+            adversaryTurnsRemaining = (RuleTrials.Uncapped ? Math.Max(adversaryTurnCap.Value, Fighting(Side.Adversaries).Count(a => !a.IsSolo)) : adversaryTurnCap.Value)
+                                      + Fighting(Side.Adversaries).Where(a => a.IsSolo).Sum(a => a.TurnsPerRound);
             BeginNextPartyTurn();
         }
 
         public int AdversaryTurnsPerRound => adversaryTurnCap ?? 0;
+
+        /// <summary>The adversary turns the GM still has to take this round.</summary>
+        public int AdversaryTurnsLeft => adversaryTurnsRemaining;
 
         /// <summary>
         /// Whose turn is next: a character with no turn to take is passed over first, still
@@ -1924,7 +1946,8 @@ namespace WoundBound.Game.Combat
             ExpireSpellsAtTurnStart(combatant);
         }
 
-        private void TakeAdversaryTurn(Combatant actor, bool allowOpportunityBonus, Action done)
+        /// <param name="oneAction">A Sentry rival's Interrupt after acting: one action, no move (Core Rules §7).</param>
+        private void TakeAdversaryTurn(Combatant actor, bool allowOpportunityBonus, Action done, bool oneAction = false)
         {
             StartTurnFor(actor);
             if (actor.Stamina <= 0)
@@ -1947,7 +1970,7 @@ namespace WoundBound.Game.Combat
             }
 
             Active = actor;
-            actor.HasMove = true;
+            actor.HasMove = !oneAction;
             actor.ActionsRemaining = 1;
             actor.OffHandOwed = false;
 
@@ -2085,6 +2108,11 @@ namespace WoundBound.Game.Combat
                         throw new InvalidOperationException($"The GM brain had {actor.Name} {gmManoeuvre.Kind} {attack.Target.Name}: {noManoeuvre}");
                     }
 
+                    if (attack.Sacrifice && SacrificeRefusal(actor) is { } noSacrifice)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} Sacrifice for its blow: {noSacrifice}");
+                    }
+
                     if (attack.With is { EveryOtherRound: true } && actor.LastAreaAttackRound == Round - 1)
                     {
                         throw new InvalidOperationException($"The GM brain had {actor.Name} use {attack.With.Name} two rounds running; it's every other round.");
@@ -2109,9 +2137,11 @@ namespace WoundBound.Game.Combat
                             ResolveAttack(actor, attack.Target, asReaction: false, attack.WithBonus,
                                 _ => FollowThrough(actor, attack.Target, attack.With, () =>
                                 {
+                                    // A rival's Attack action with two weapons carries the off-hand strike, for its Stamina (Core Rules §9, "Two Weapons").
+                                    actor.OffHandOwed = actor.OffHandWeapon is not null && !attack.WithBonus;
                                     OpenRampage(actor, attack.Target, wasUp);
                                     TakeStep(turn, done);
-                                }), attack.With, manoeuvre: attack.Manoeuvre);
+                                }), attack.With, sacrifice: attack.Sacrifice, manoeuvre: attack.Manoeuvre);
                         },
                         () => TakeStep(turn, done), blowIntent);
                     return;
@@ -2148,6 +2178,19 @@ namespace WoundBound.Game.Combat
                         },
                         () => TakeStep(turn, done),
                         new Declaration(actor, IntentKind.Cast, cast.Spell.Spell.Name, cast.Spell.Target, Spell: cast.Spell.Spell.SpellType));
+                    return;
+
+                case GmStep.OffHand offHandStep when actor.OffHandWeapon is not null:
+                    // A rival's off-hand weapon: 1 Stamina from the equipment, as a character pays — no Opportunity.
+                    if (OffHandRefusal(actor, offHandStep.Target) is { } noOffHand)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} strike off-hand at {offHandStep.Target.Name}: {noOffHand}");
+                    }
+
+                    actor.OffHandOwed = false;
+                    actor.Stamina -= OffHandStaminaCost;
+                    Write($"{actor.Name} strikes with the {actor.OffHandAttack!.Name} in the off hand too (1 Stamina from the equipment, {actor.Stamina} left).");
+                    ResolveAttack(actor, offHandStep.Target, asReaction: false, opportunityBonus: false, _ => TakeStep(turn, done), actor.OffHandAttack, spendsAction: false);
                     return;
 
                 case GmStep.OffHand offHandStep:
@@ -2308,14 +2351,14 @@ namespace WoundBound.Game.Combat
                     TakeStep(turn, done);
                     return;
 
-                case GmStep.RaiseShield:
-                    if (ShieldRefusal(actor, null) is { } noShield)
+                case GmStep.RaiseShield raise:
+                    if (ShieldRefusal(actor, raise.Ally) is { } noShield)
                     {
                         throw new InvalidOperationException($"The GM brain had {actor.Name} raise a shield: {noShield}");
                     }
 
                     actor.ActionsRemaining--;
-                    RaiseShield(actor, actor, reactive: false);
+                    RaiseShield(actor, raise.Ally ?? actor, reactive: false);
                     TakeStep(turn, done);
                     return;
 
@@ -2347,6 +2390,26 @@ namespace WoundBound.Game.Combat
                 case GmStep.LetGo:
                     throw new InvalidOperationException($"The GM brain had {actor.Name} let go, but it's holding nobody.");
 
+                case GmStep.SwapLoadout:
+                    if (SwapRefusal(actor) is { } noSwap)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} swap loadouts: {noSwap}");
+                    }
+
+                    SwapLoadout(actor);
+                    TakeStep(turn, done);
+                    return;
+
+                case GmStep.Dismount:
+                    if (DismountRefusal(actor) is { } noDismount)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} dismount: {noDismount}");
+                    }
+
+                    Dismount(actor);
+                    TakeStep(turn, done);
+                    return;
+
                 case GmStep.Mount:
                     if (MountRefusal(actor) is { } noMount)
                     {
@@ -2358,7 +2421,7 @@ namespace WoundBound.Game.Combat
                     return;
 
                 case GmStep.Throw toss:
-                    if (ThrowRefusal(actor, toss.Target) is { } noThrow)
+                    if ((ThrowRefusal(actor, toss.Target) ?? (toss.Sacrifice ? SacrificeRefusal(actor) : null)) is { } noThrow)
                     {
                         throw new InvalidOperationException($"The GM brain had {actor.Name} throw at {toss.Target.Name}: {noThrow}");
                     }
@@ -2371,7 +2434,7 @@ namespace WoundBound.Game.Combat
                     CountAttack(actor, turn, toss.WithBonus);
                     turn.HasAttacked = true;
                     turn.BonusAvailable &= !toss.WithBonus;
-                    Throw(actor, toss.Target, sacrifice: false, toss.WithBonus, _ => TakeStep(turn, done));
+                    Throw(actor, toss.Target, toss.Sacrifice, toss.WithBonus, _ => TakeStep(turn, done));
                     return;
 
                 case GmStep.DrawWeapon draw:
@@ -2641,25 +2704,6 @@ namespace WoundBound.Game.Combat
                     mover.Position = path[leaving];
                 }
 
-                if (enemy.Side == Side.Adversaries)
-                {
-                    if (!PlanAttack(enemy, mover).CanAttack)
-                    {
-                        continue;
-                    }
-
-                    if (!gm.StrikesAtLeaver(GmView, enemy, mover))
-                    {
-                        Write($"{mover.Name} leaves {enemy.Name}'s reach, and it lets them go.");
-                        continue;
-                    }
-
-                    PayTacticalSpend(enemy, CombatActionCatalog.ReactionStaminaCost);
-                    Write($"{mover.Name} leaves {enemy.Name}'s reach, and it strikes as they go (1 Stamina).");
-                    ResolveAttack(enemy, mover, asReaction: true, opportunityBonus: false, _ => ReactToLeaving(mover, path, leftBehind, then));
-                    return;
-                }
-
                 var options = new List<LeaverResponse> { LeaverResponse.LetThemGo };
                 if (PlanAttack(enemy, mover).CanAttack)
                 {
@@ -2678,6 +2722,40 @@ namespace WoundBound.Game.Combat
                 var catchAt = path.Take(leftAt + 1).LastOrDefault(square => Footprints.Distance(square, mover.Across, enemy.Position, enemy.Across) <= enemy.OwnReach
                     && (square == mover.Position || At(square) is null), mover.Position);
                 var reacting = enemy;
+
+                // An adversary answers as a character would — strike, or Grab, Shove or Trip them —
+                // its Stamina handing nobody an Opportunity (the user's rulings, 2026-11-02 and 2026-11-05).
+                if (enemy.Side == Side.Adversaries)
+                {
+                    var answer = gm.RespondsToLeaver(GmView, enemy, mover, options);
+                    if (answer == LeaverResponse.LetThemGo || !options.Contains(answer))
+                    {
+                        Write($"{mover.Name} leaves {enemy.Name}'s reach, and it lets them go.");
+                        continue;
+                    }
+
+                    PayTacticalSpend(enemy, CombatActionCatalog.ReactionStaminaCost);
+                    if (answer == LeaverResponse.Strike)
+                    {
+                        Write($"{mover.Name} leaves {enemy.Name}'s reach, and it strikes as they go (1 Stamina).");
+                        ResolveAttack(enemy, mover, asReaction: true, opportunityBonus: false, _ => ReactToLeaving(mover, path, leftBehind, then));
+                        return;
+                    }
+
+                    Write($"{mover.Name} leaves {enemy.Name}'s reach, and {enemy.Name} tries to {ControlFor(answer).ToString().ToLowerInvariant()} them as they go (1 Stamina).");
+                    ResolveReactiveControl(enemy, ControlFor(answer), mover, catchAt, caught =>
+                    {
+                        if (caught)
+                        {
+                            then(catchAt);
+                        }
+                        else
+                        {
+                            ReactToLeaving(mover, path, leftBehind, then);
+                        }
+                    });
+                    return;
+                }
 
                 Pending = new PendingReaction(ReactionKind.LeaverReaction, reacting, mover, Roll: null, Threshold: 0,
                     $"{mover.Name} is leaving {reacting.Name}'s reach. Strike as they go, or Grab, Shove or Trip them — " +
@@ -2852,21 +2930,6 @@ namespace WoundBound.Game.Combat
             : TacticalSpendRefusal(solo) is { } spent ? $"{solo.Name} has made its attack this round: {spent}"
             : null;
 
-        /// <summary>
-        /// Why <paramref name="actor"/> can't attack again this round, or null if it can: an adversary
-        /// attacks once a round, and Stamina buys it the move, the reposition, the Grab or the spell
-        /// around that attack — never a second one. Extra attacks come from the GM's Opportunities, an
-        /// extra turn; a Solo buys its second with Stamina (GM Reference §3; the user's ruling,
-        /// 2026-11-02). An extra turn's own attack leaves the round's where it was, but within that
-        /// turn too Stamina buys anything but a second: one turn, one attack.
-        /// </summary>
-        public static string? OnceARoundRefusal(Combatant actor, GmTurn turn) =>
-            actor.Side != Side.Adversaries || actor.IsSolo ? null
-            : turn.IsExtraTurn
-                ? turn.Attacks == 0 ? null : $"{actor.Name} has made this extra turn's attack — Stamina buys it anything but a second."
-                : actor.AttacksThisRound == 0 ? null
-                : $"{actor.Name} has made its attack this round — Stamina buys it anything but a second.";
-
         /// <summary>The +2 a Threshold-boost Opportunity bonus gives, as a bracing action does.</summary>
         public const int OpportunityThresholdBoost = 2;
 
@@ -2894,12 +2957,12 @@ namespace WoundBound.Game.Combat
             : cast.Target is not { } ally || ally == actor || ally.Side != actor.Side ? "The free Buff goes on an ally."
             : null;
 
-        /// <summary>Counts an adversary's attack — once a round, outside an extra turn — and pays the Stamina for a Solo's second.</summary>
+        /// <summary>Counts an adversary's attack, and pays the Stamina for a Solo's second.</summary>
         private void CountAttack(Combatant actor, GmTurn turn, bool withBonus = false)
         {
             if (rampageAttackFor == actor)
             {
-                // The second attack its Rampage bought: written on the statblock, so past the once-a-round rule (GM Reference §9).
+                // The second attack its Rampage bought, written on its statblock (GM Reference §9).
                 rampageAttackFor = null;
                 actor.AttacksThisRound++;
                 return;
@@ -2916,20 +2979,10 @@ namespace WoundBound.Game.Combat
 
             if (!actor.IsSolo)
             {
-                if (OnceARoundRefusal(actor, turn) is { } once)
-                {
-                    throw new InvalidOperationException($"The GM brain had {actor.Name} attack again: {once}");
-                }
-
+                // An adversary attacks with every action it has, a bought one included, as a
+                // character does (the user's ruling, 2026-11-05); only a Solo rations its blows.
                 turn.Attacks++;
-
-                // An extra turn's attack is the Opportunity's, bought by the party: it leaves the
-                // creature's own once-a-round attack where it was.
-                if (!turn.IsExtraTurn)
-                {
-                    actor.AttacksThisRound++;
-                }
-
+                actor.AttacksThisRound++;
                 return;
             }
 
@@ -3497,7 +3550,7 @@ namespace WoundBound.Game.Combat
                     ReactionKind.Backlash => gm.Backlashes(GmView, offer),
                     ReactionKind.Sustain => gm.Sustains(GmView, offer),
                     ReactionKind.Shelter => (shelterTaking = Math.Clamp(gm.ShelterAmount(GmView, offer), 0, offer.ImpactWounds)) > 0,
-                    ReactionKind.Interrupt => false,
+                    ReactionKind.Interrupt => gm.Interrupts(GmView, offer),
                     _ => gm.ArrestsShove(GmView, offer),
                 };
 
@@ -4017,7 +4070,7 @@ namespace WoundBound.Game.Combat
             // A fresh wound is what makes Heal worth doing again (Core Rules §4, "Recovery").
             combatant.TendEligible[WoundType.Body] = true;
 
-            if (combatant.Side == Side.Party)
+            if (combatant.DiesLikeACharacter)
             {
                 (combatant.Body, combatant.IsStable) = PlayStateCalculator.ApplyBodyDamage(combatant.Body, combatant.IsStable, amount);
             }
