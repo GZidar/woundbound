@@ -149,6 +149,10 @@ WoundBound.Rules.Catalog.StartingAdversaryInfo Altered(WoundBound.Rules.Catalog.
             : type.IsEnum ? Enum.Parse(type, value, ignoreCase: true)
             // A list of enum values, '+' between them: Traits=HitAndFade+PackTactics.
             : type.IsGenericType && type.GetGenericArguments()[0] is { IsEnum: true } item ? EnumList(item, value)
+            // Spell lines by name, '+' between them: Spells=Blood Mist+Blood Lance — read from the catalogue.
+            : type.IsGenericType && type.GetGenericArguments()[0] == typeof(WoundBound.Rules.Catalog.StartingSpellLineInfo)
+                ? value.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(n => new WoundBound.Rules.Catalog.StartingSpellLineInfo(n, "", "")).ToList()
             : type == typeof(string) ? value
             : Convert.ChangeType(value, type, System.Globalization.CultureInfo.InvariantCulture);
         property.SetValue(copy, parsed);
