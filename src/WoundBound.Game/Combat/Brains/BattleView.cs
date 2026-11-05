@@ -156,12 +156,41 @@ namespace WoundBound.Game.Combat.Brains
 
             // A creature taken in by a phantom wall or figure won't walk into it, or through it — it
             // believes the ground there is held, or solid (the user's ruling: creatures act on belief).
+            // Kept while the map underneath and what the creature believes stay the same.
             var phantoms = encounter.PhantomsSeenBy(combatant).Select(p => p.Position).ToHashSet();
+            var belief = new HashCode();
+            foreach (var illusion in encounter.Illusions)
+            {
+                belief.Add(illusion);
+                belief.Add(encounter.Fools(illusion, combatant));
+            }
+
+            foreach (var at in phantoms)
+            {
+                belief.Add(at);
+            }
+
+            var stamp = belief.ToHashCode();
+            if (believedSquares.TryGetValue((combatant, moves), out var known) && ReferenceEquals(known.From, squares) && known.Stamp == stamp)
+            {
+                return known.Squares;
+            }
+
             bool Blocked(GridPosition sq) => phantoms.Contains(sq) || encounter.BelievesWall(combatant, sq);
-            return squares
-                .Where(o => !Blocked(o.Key) && (encounter.PlanMove(combatant, o.Key) is not { } plan || !plan.Path.Skip(1).Any(Blocked)))
-                .ToDictionary(o => o.Key, o => o.Value);
+            var believed = new Dictionary<GridPosition, int>(squares.Count);
+            foreach (var (square, cost) in squares)
+            {
+                if (!Blocked(square) && (encounter.PlanMove(combatant, square) is not { } plan || !plan.Path.Skip(1).Any(Blocked)))
+                {
+                    believed[square] = cost;
+                }
+            }
+
+            believedSquares[(combatant, moves)] = (squares, stamp, believed);
+            return believed;
         }
+
+        private readonly Dictionary<(Combatant Mover, int Moves), (IReadOnlyDictionary<GridPosition, int> From, int Stamp, IReadOnlyDictionary<GridPosition, int> Squares)> believedSquares = new();
 
         /// <summary>Where <paramref name="mover"/> could get to for <paramref name="moves"/> moves were <paramref name="absent"/> not on the board.</summary>
         public IReadOnlyDictionary<GridPosition, int> SquaresWithinIfAbsent(Combatant mover, Combatant absent, int moves) =>

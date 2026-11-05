@@ -1122,9 +1122,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // that's walking away from it — the party getting clear, or the GM's quarry escaping.
             // Only real figures hold a creature on the board, as the rule counts them: a phantom
             // within Long doesn't, and a wolf scoring its squares against one walks off the field.
-            var nearestReal = View.EnemiesOf(actor).Where(e => !e.IsPhantom).Select(e => actor.DistanceFrom(square, e))
-                .Concat(Hunted(actor, square)).DefaultIfEmpty(int.MaxValue).Min();
-            if (!actor.IsBroken && Math.Max(nearest, nearestReal) > 16 && View.EnemiesOf(actor).Any(e => !e.IsBroken))
+            var nearestReal = View.Illusions.Count == 0 ? nearest
+                : View.EnemiesOf(actor).Where(e => !e.IsPhantom).Select(e => actor.DistanceFrom(square, e))
+                    .Concat(Hunted(actor, square)).DefaultIfEmpty(int.MaxValue).Min();
+            if (!actor.IsBroken && nearestReal > 16 && View.EnemiesOf(actor).Any(e => !e.IsBroken))
             {
                 return -3;
             }
@@ -1167,15 +1168,22 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         private double Guarding(Combatant actor, GridPosition square)
         {
-            if (!actor.IsMartial || actor.Side != Side.Party || !View.EnemiesOf(actor).Any(e => !e.IsBroken && !e.IsPhantom))
+            if (!actor.IsMartial || actor.Side != Side.Party)
             {
                 return 0;
             }
 
-            var charge = View.AlliesOf(actor)
-                .Where(a => a != actor && !a.IsPhantom && !a.IsOutOfFight && (a.Spells.Count > 0 || a.Armour is ArmourWeight.None or ArmourWeight.Light))
-                .OrderByDescending(a => assess.Value(a))
-                .FirstOrDefault();
+            // Whom it guards is the same on every square it weighs: worked out once a decision.
+            if (!guarded.TryGetValue(actor, out var charge))
+            {
+                charge = View.EnemiesOf(actor).Any(e => !e.IsBroken && !e.IsPhantom)
+                    ? View.AlliesOf(actor)
+                        .Where(a => a != actor && !a.IsPhantom && !a.IsOutOfFight && (a.Spells.Count > 0 || a.Armour is ArmourWeight.None or ArmourWeight.Light))
+                        .MaxBy(a => assess.Value(a))
+                    : null;
+                guarded[actor] = charge;
+            }
+
             if (charge is null)
             {
                 return 0;
@@ -1185,6 +1193,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var distance = actor.DistanceFrom(square, charge);
             return distance <= stride ? GuardPull : -GuardPull * Math.Min(2, (distance - stride) / (double)stride);
         }
+
+        private readonly Dictionary<Combatant, Combatant?> guarded = new();
 
         /// <summary>What a swap of loadouts gives up besides the move it costs: a little, so a swap is made only for a real gain.</summary>
         internal const double SwapPrice = 0.2;

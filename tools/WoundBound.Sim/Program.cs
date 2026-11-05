@@ -32,47 +32,13 @@ var seed = Option("--seed", 1);
 var which = Text("--fight", "signpost");
 var gmName = Text("--gm", "simple")!;
 var seats = Text("--party", "all");
-RuleTrials.MinionStamina = Option("--minion-stamina", 1);
 var data = GameData.Load(file => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", file)));
 RuleTrials.IgnoreMorale = args.Contains("--no-morale");
-RuleTrials.Uncapped = args.Contains("--uncapped");
 
-// --extra N: N more of the fight's own adversaries, cycling through them, each on the nearest open
-// square to the one it copies — for calibrating Threat Value against what the brains can do.
 // --setup smart|neutral|poor and --unprepared: how a band met at random is placed (the clearing).
 var setup = Enum.TryParse<SetupSkill>(Text("--setup", "smart"), ignoreCase: true, out var s) ? s : SetupSkill.Smart;
 var prepared = !args.Contains("--unprepared");
 var placementSeed = 7;
-var extra = Option("--extra", 0);
-if (extra > 0)
-{
-    RuleTrials.Reinforce = (present, setting) =>
-    {
-        var copyable = present.Where(c => c.Side == Side.Adversaries && c.Statblock is not null && !c.IsSteed && !c.IsPhantom
-                                          && c.Role != WoundBound.Rules.Enums.AdversaryRole.Solo).ToList();
-        var added = new List<Combatant>();
-        if (copyable.Count == 0)
-        {
-            return added;
-        }
-
-        var taken = present.SelectMany(c => c.Footprint).ToHashSet();
-        for (var i = 0; i < extra; i++)
-        {
-            var original = copyable[i % copyable.Count];
-            var spot = Enumerable.Range(1, 12)
-                .SelectMany(r => Enumerable.Range(-r, 2 * r + 1).SelectMany(dx => Enumerable.Range(-r, 2 * r + 1)
-                    .Select(dy => new GridPosition(original.Position.X + dx, original.Position.Y + dy))))
-                .First(sq => sq.X >= 0 && sq.Y >= 0 && sq.X < 28 && sq.Y < 18 && !setting.IsSolid(sq)
-                             && Footprints.At(sq, original.Across).All(f => !taken.Contains(f) && !setting.IsSolid(f)));
-            var copy = CombatantFactory.FromAdversary(original.Statblock!, $"{original.Name} (more {i + 1})", spot, data.Spells);
-            taken.UnionWith(copy.Footprint);
-            added.Add(copy);
-        }
-
-        return added;
-    };
-}
 // The GM knowledge dial: sheets or seen; left out, it goes with the skill (Best reads the sheets).
 Knowledge? knowledge = Text("--knowledge", null) switch
 {

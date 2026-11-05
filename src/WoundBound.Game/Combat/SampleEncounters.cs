@@ -660,7 +660,7 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The hedge-witches' toll — staged for the game, not taken from a book: the Quickstart's five
-        /// stopped on a daylight road by a Tollroad Bandit and his two Timber Wolves, with three casters
+        /// stopped on a daylight road by a Tollroad Bandit and his three Timber Wolves, with three casters
         /// behind them — a Bog Hex-Caller, who breaks a line with fear; a Hollow Bloodwright, who bleeds
         /// for its Blood Lance; and a Wyrding Chanter, who keeps the ones in front blessed and mended
         /// (GM Reference §7). The hedges either side of the road are rough going.
@@ -680,6 +680,7 @@ namespace WoundBound.Game.Combat
                 Foe("Tollroad Bandit", "Tollroad Bandit", 11, 8),
                 Foe("Timber Wolf", "Timber Wolf", 11, 10),
                 Foe("Timber Wolf", "Second wolf", 12, 6),
+                Foe("Timber Wolf", "Third wolf", 12, 12),
                 Foe("Wyrding Chanter", "Wyrding Chanter", 14, 9),
                 Foe("Hollow Bloodwright", "Hollow Bloodwright", 15, 7),
                 Foe("Bog Hex-Caller", "Bog Hex-Caller", 15, 11),
@@ -917,7 +918,7 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The glamoured mill — staged for the game: the Quickstart's five at an old mill against a
-        /// Tollroad Bandit, the miller's man (another), two Timber Wolves, four Vampire Bats out of the mill's dark (their Opportunity
+        /// Tollroad Bandit, the miller's man (another), two Timber Wolves, two Vampire Bats out of the mill's dark (their Opportunity
         /// bonus is Direct damage), and a Fen Glamourer behind them putting up doubles of itself.
         /// Daylight, open ground.
         /// </summary>
@@ -937,8 +938,6 @@ namespace WoundBound.Game.Combat
                 Foe(data.Adversary("Timber Wolf"), "Timber Wolf", 14, 10),
                 Foe(data.Adversary("Vampire Bat"), "First bat", 13, 6),
                 Foe(data.Adversary("Vampire Bat"), "Second bat", 13, 12),
-                Foe(data.Adversary("Vampire Bat"), "Third bat", 15, 5),
-                Foe(data.Adversary("Vampire Bat"), "Fourth bat", 16, 13),
                 Foe(data.Adversary("Timber Wolf"), "Second wolf", 15, 12),
                 Foe(data.Adversary("Tollroad Bandit"), "Miller's man", 16, 9),
                 Foe(FenGlamourer(data), "Fen Glamourer", 18, 9),
@@ -952,7 +951,7 @@ namespace WoundBound.Game.Combat
         /// A clearing in the woods at dusk — a random encounter, nobody's set piece: trees to stand
         /// behind (full cover), lines of bushes (partial), a scree of broken rock, and the party's own
         /// lights against the gloom. The band met there — four Reedmarsh Skulkers, four Timber Wolves and
-        /// four Bramble Ratkin, none of them quick to break, a Standard Challenge for five at the trial prices — is placed by the GM's
+        /// four Bramble Ratkin, none of them quick to break, a Standard Challenge for five (GM Reference §5) — is placed by the GM's
         /// setup (<see cref="Brains.Placement"/>), anywhere from Short to Long of the party, lying in
         /// wait when <paramref name="prepared"/>.
         /// </summary>
@@ -1033,7 +1032,7 @@ namespace WoundBound.Game.Combat
         /// with crossbows crouched behind stacked crates (full cover; they lean out to shoot, then
         /// pay to duck back), two Roadside Bandits behind overturned carts (partial), and the Tollroad
         /// Bandit at the back. The party comes up the road behind a broken field wall of its own
-        /// (partial), with a gap in it. Daylight. Four of each behind crates and carts at the trial prices
+        /// (partial), with a gap in it. Daylight. Four of each behind crates and carts (GM Reference §5)
         /// (GM Reference §5), a Standard Challenge for five.
         /// </summary>
         public static Encounter Roadblock(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)

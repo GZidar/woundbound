@@ -92,6 +92,9 @@ namespace WoundBound.Game.Combat
 
         public IEnumerable<KeyValuePair<GridPosition, MovePlan>> All => plans;
 
+        /// <summary>How many squares the map reaches.</summary>
+        public int Count => plans.Count;
+
         /// <summary>The eight squares around <paramref name="at"/>, but not a diagonal squeezed between two walls.</summary>
         private static IEnumerable<GridPosition> Neighbours(GridPosition at, Func<GridPosition, bool> isWall)
         {

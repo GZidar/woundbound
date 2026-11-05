@@ -158,10 +158,6 @@ namespace WoundBound.Game.Combat
             Width = width;
             Height = height;
             this.combatants = combatants.ToList();
-            if (RuleTrials.Reinforce is { } reinforce)
-            {
-                this.combatants.AddRange(reinforce(this.combatants, Setting).ToList());
-            }
 
             this.bands = bands;
             this.dice = dice;
@@ -1722,7 +1718,7 @@ namespace WoundBound.Game.Combat
             // A Solo takes its Tier plus one turns by nature, "above and beyond" the cap (Core Rules
             // §9; GM Reference §3, "Solo Actions"); the cap is what everything else is owed.
             mobTurnTaken = false;
-            adversaryTurnsRemaining = (RuleTrials.Uncapped ? Math.Max(adversaryTurnCap.Value, Fighting(Side.Adversaries).Count(a => !a.IsSolo)) : adversaryTurnCap.Value)
+            adversaryTurnsRemaining = adversaryTurnCap.Value
                                       + Fighting(Side.Adversaries).Where(a => a.IsSolo).Sum(a => a.TurnsPerRound);
             BeginNextPartyTurn();
         }
@@ -4321,15 +4317,7 @@ namespace WoundBound.Game.Combat
                 return known.Squares;
             }
 
-            var squares = new Dictionary<GridPosition, int>();
-            foreach (var (square, route) in map.All)
-            {
-                if (route.Cost <= moves)
-                {
-                    squares[square] = route.Cost;
-                }
-            }
-
+            var squares = WithinCost(map, moves);
             squaresWithin[(mover, moves)] = (map, squares);
             return squares;
         }
@@ -4340,10 +4328,37 @@ namespace WoundBound.Game.Combat
         /// As <see cref="SquaresWithin"/>, as though <paramref name="absent"/> weren't on the board —
         /// for a brain weighing what its standing somewhere keeps the other side from reaching.
         /// </summary>
-        internal Dictionary<GridPosition, int> SquaresWithinIfAbsent(Combatant mover, Combatant absent, int moves)
+        internal IReadOnlyDictionary<GridPosition, int> SquaresWithinIfAbsent(Combatant mover, Combatant absent, int moves)
         {
+            // Kept for as long as nobody on the board moves, as MapFor keeps its map: the screening
+            // brains ask it of every enemy, for every square they weigh.
             var reach = Math.Max(1, SquaresFor(mover.Speed, Math.Max(2, MovesAvailable(mover)), mover.HasFootwork));
-            return BuildMap(mover, reach, absent).All.Where(o => o.Value.Cost <= moves).ToDictionary(o => o.Key, o => o.Value.Cost);
+            var stamp = HashCode.Combine(BoardStamp(mover), reach);
+            if (squaresIfAbsent.TryGetValue((mover, absent, moves), out var known) && known.Stamp == stamp)
+            {
+                return known.Squares;
+            }
+
+            var squares = WithinCost(BuildMap(mover, reach, absent), moves);
+            squaresIfAbsent[(mover, absent, moves)] = (stamp, squares);
+            return squares;
+        }
+
+        private readonly Dictionary<(Combatant Mover, Combatant Absent, int Moves), (int Stamp, IReadOnlyDictionary<GridPosition, int> Squares)> squaresIfAbsent = new();
+
+        /// <summary>The squares on <paramref name="map"/> reached for at most <paramref name="moves"/>, with the price of each.</summary>
+        private static Dictionary<GridPosition, int> WithinCost(MovementMap map, int moves)
+        {
+            var squares = new Dictionary<GridPosition, int>(map.Count);
+            foreach (var (square, route) in map.All)
+            {
+                if (route.Cost <= moves)
+                {
+                    squares[square] = route.Cost;
+                }
+            }
+
+            return squares;
         }
 
         private readonly Dictionary<Combatant, (int Stamp, MovementMap Map)> movementMaps = new();

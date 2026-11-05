@@ -11,30 +11,10 @@ namespace WoundBound.Game.Combat
     public static class RuleTrials
     {
         /// <summary>
-        /// The Stamina a Minion gets: 1 as its statblock writes it, or 2 if 1 proves to leave it
-        /// nothing to spend (the user, 2026-11-02: "if that makes minions too useless then we give
-        /// them 2 as well"). Settable so the simulator can compare the two.
-        /// </summary>
-        public static int MinionStamina { get; set; } = 1;
-
-        /// <summary>
         /// For measuring, never for play: every creature fights to the last wound, whatever its
         /// statblock's breaking point says — what Morale is worth to a fight's difficulty.
         /// </summary>
         public static bool IgnoreMorale { get; set; }
-
-        /// <summary>
-        /// For measuring, never for play: every adversary takes a turn each round, however many
-        /// outnumber the party — what the turn cap (Core Rules §9) holds back from a crowd.
-        /// </summary>
-        public static bool Uncapped { get; set; }
-
-        /// <summary>
-        /// For measuring, never for play: creatures added to every fight as it is set up — what a
-        /// bigger budget does to a fight, for calibrating Threat Value (GM Reference §5). Handed the
-        /// fight's combatants and its setting; returns the newcomers.
-        /// </summary>
-        public static Func<IReadOnlyList<Combatant>, Setting, IEnumerable<Combatant>>? Reinforce { get; set; }
 
         /// <summary>
         /// A statblock's Stamina under the trial floor: only a Minion stands on so little; everything
@@ -42,6 +22,6 @@ namespace WoundBound.Game.Combat
         /// that starts a turn on 0 falls unconscious, so 1 is a creature that can never spend.
         /// </summary>
         public static int StaminaFor(AdversaryRole role, Tier tier, int written) =>
-            role == AdversaryRole.Minion ? MinionStamina : Math.Max(written, (int)tier + 1);
+            role == AdversaryRole.Minion ? 1 : Math.Max(written, (int)tier + 1);
     }
 }
