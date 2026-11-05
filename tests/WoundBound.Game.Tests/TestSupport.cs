@@ -39,6 +39,24 @@ public static class TestPrompts
 
 public static class TestData
 {
-    public static GameData Load() =>
-        GameData.Load(file => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestData", file)));
+    /// <summary>
+    /// The catalogue, with the Bramble Ratkin pinned to the numbers the scripted dice in these
+    /// tests were written against (+0 to hit, d4, Body 3, DT 11, ST 11). The tests are about the
+    /// rules, not the catalogue's prices: re-costing the ratkin to the Minion row (2026-11-06) is a
+    /// change to the creature, not to anything a test here checks.
+    /// </summary>
+    public static GameData Load()
+    {
+        var data = GameData.Load(file => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "TestData", file)));
+        return new GameData
+        {
+            RangeBands = data.RangeBands,
+            Weapons = data.Weapons,
+            Environment = data.Environment,
+            Spells = data.Spells,
+            Adversaries = data.Adversaries.Select(a => a.Name == "Bramble Ratkin"
+                ? a with { BodyMax = 3, DodgeThreshold = 11, StabilityThreshold = 11, AttackModifier = 0, DamageModifier = 0 }
+                : a).ToList(),
+        };
+    }
 }

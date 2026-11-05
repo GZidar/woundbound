@@ -254,6 +254,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 value *= 1 + 1.5 * CastingLeft(c) * Spread(c);
             }
+            else if (c.HasRangedAttack && !c.IsDefenceless)
+            {
+                // Something that shoots is the next thing after a caster (the user, 2026-11-06): the
+                // front line can stand between the back line and a blade, never an arrow, so it picks
+                // its victim wherever the fight is — worth a premium wherever there's a back line to reach.
+                value *= 1 + RangedPremium * Spread(c, ranged: true);
+            }
             else if (SuspectedCaster(c) is var suspected and > 0)
             {
                 // Not known yet, only guessed from the look of them: worth a share of a caster's
@@ -271,12 +278,49 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// worth whatever harm they do it, like anybody; nor does a caster with only single-target
         /// spells earn it.
         /// </summary>
-        private double Spread(Combatant c)
+        private double Spread(Combatant c, bool ranged = false)
         {
-            var area = c.Spells.Any(s => s.Target == SpellTarget.Many && s.SpellType is SpellType.Harm or SpellType.Control && CastsLeft(c, s) > 0);
+            var area = ranged || c.Spells.Any(s => s.Target == SpellTarget.Many && s.SpellType is SpellType.Harm or SpellType.Control && CastsLeft(c, s) > 0);
             var targets = view.EnemiesOf(c).Count(e => !e.IsPhantom && !e.IsOutOfFight);
             return area ? Math.Min(1, (targets - 1) / 3.0) : 0;
         }
+
+        /// <summary>The share added to the worth of something that shoots, at the most (<see cref="RawValue"/>).</summary>
+        public const double RangedPremium = 0.5;
+
+        /// <summary>
+        /// How much more <paramref name="actor"/> wants <paramref name="target"/> than its worth alone
+        /// says. Worth already puts casters first, then whatever shoots, then the rest (the user,
+        /// 2026-11-06, for both sides) — "unless already engaged": a creature standing in melee with
+        /// an enemy fights what is in front of it rather than breaking off for the back line. On top
+        /// of that, a character's training: a Nimble one closes on whatever shoots or casts, using
+        /// their speed to get there first; a Martial one takes on the heavy hitters they're built to
+        /// hold.
+        /// </summary>
+        public static double Doctrine(Combatant actor, Combatant target)
+        {
+            if (target.IsDefenceless)
+            {
+                return 1;
+            }
+
+            var engaged = !actor.IsTiny && (actor.CanReach(target) || target.CanReach(actor)) && !target.HasRangedAttack && target.Spells.Count == 0
+                ? Engaged : 1;
+            if (actor.Side != Side.Party)
+            {
+                return engaged;
+            }
+
+            if (actor.IsNimble && (target.HasRangedAttack || target.Spells.Count > 0))
+            {
+                return Math.Max(engaged, 1.3);
+            }
+
+            return Math.Max(engaged, actor.IsMartial && target.Role is AdversaryRole.Brute or AdversaryRole.Juggernaut or AdversaryRole.Solo ? 1.2 : 1);
+        }
+
+        /// <summary>How much more a creature wants the enemy it's already in melee with (<see cref="Doctrine"/>).</summary>
+        public const double Engaged = 1.5;
 
         private double RawPerWound(Combatant c) => RawValue(c) / Math.Max(1, c.IsMinion ? 1 : c.Body);
 

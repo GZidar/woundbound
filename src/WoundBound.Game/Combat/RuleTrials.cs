@@ -43,33 +43,5 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public static int StaminaFor(AdversaryRole role, Tier tier, int written) =>
             role == AdversaryRole.Minion ? MinionStamina : Math.Max(written, (int)tier + 1);
-
-        /// <summary>
-        /// A creature's Threat Value under the trial prices (the user, 2026-11-05: "skirmisher at 0.5,
-        /// brute at 1, tiny at 0.25"): the sims put a T1 role-table creature at about two-thirds of
-        /// its written price, and with the turn cap kept, a budget is better spent on more bodies —
-        /// more to cut through, and another fighting as each drops. A Tiny creature costs 0.25
-        /// whatever its Role; every other Role keeps the GM Reference's price. The Tier discount
-        /// applies as written (GM Reference §5).
-        /// </summary>
-        public static double ThreatValue(Combatant creature, Tier partyTier)
-        {
-            if (creature.Role is not { } role)
-            {
-                return 1;
-            }
-
-            var price = creature.IsTiny ? 0.25 : role switch
-            {
-                AdversaryRole.Skirmisher => 0.5,
-                AdversaryRole.Brute => 1,
-                _ => ChallengeCalculator.ThreatValue(role),
-            };
-            return price * ChallengeCalculator.TierDiscount(creature.Tier, partyTier);
-        }
-
-        /// <summary>The GM Reference's own Threat Value for a creature, as written — for setting beside the trial's.</summary>
-        public static double WrittenThreatValue(Combatant creature, Tier partyTier) =>
-            creature.Role is { } role ? ChallengeCalculator.ThreatValue(role, creature.Tier, partyTier) : 1;
     }
 }

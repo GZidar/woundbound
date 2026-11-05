@@ -24,6 +24,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         Exploit,
         DuckBack,
         Search,
+        SwapLoadout,
         End,
     }
 
@@ -511,6 +512,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     worth = Math.Min(worth, Math.Min(0.1 * assess.Value(target), 1.0));
                 }
 
+                worth *= Assessor.Doctrine(actor, target);
+
                 var advantage = false;
                 if (bonusAvailable && !Encounter.BonusIsExtraAttack(actor) && Encounter.BonusAttackRefusal(actor, manoeuvre: null) is null)
                 {
@@ -635,6 +638,27 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
                     var worth = assess.Worth(assess.Blow(actor, thrown, target, plan.DamageDieSides, assess.PlanThreshold(target, plan)), target) - price;
                     yield return new Option(OptionKind.Throw, worth, $"throw the {thrown.Name} at {target.Name}", Target: target);
+                }
+            }
+
+            // The loadout at the ready, where it does better from here than the one in hand (the user,
+            // 2026-11-06: "can I reach an opponent and hit them with a sword? If no, swap loadout and
+            // use my bow"): the bow when nothing is in reach, the blade again once they've closed.
+            // A swap costs a move, so it's made where the character stands, with an action left to use it.
+            if (actor.Build is { } build && at == actor.Position && actor.ReadyWeapon is { } ready
+                && View.MovesAvailable(actor) >= 2 && actor.ActionsRemaining >= 1
+                && (!checkRules || BattleView.SwapRefusal(actor) is null))
+            {
+                var other = AttackProfile.ForWeapon(build, ready);
+                double BestWith(AttackProfile profile) => enemies.Where(e => !e.IsDefenceless && !e.IsPhantom)
+                    .Select(e => View.PlanAttackWith(actor, profile, at, e) is { CanAttack: true } plan
+                        ? assess.Worth(assess.Blow(actor, profile, e, plan.DamageDieSides, assess.PlanThreshold(e, plan)), e) * Assessor.Doctrine(actor, e)
+                        : 0)
+                    .DefaultIfEmpty(0).Max();
+                var gain = BestWith(other);
+                if (gain > BestWith(actor.Attack) + SwapPrice)
+                {
+                    yield return new Option(OptionKind.SwapLoadout, gain - SwapPrice, $"swap to the {ready.Name}", Weapon: ready);
                 }
             }
 
@@ -1124,7 +1148,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // of reach, a stride from somebody to bite: it darts in, bites, and fades back next
             // turn, while its kin takes its place beside the target.
             var fadesBack = !keepsDistance && actor.HasHitAndFade && actor.Role == AdversaryRole.Skirmisher;
-            return actor.Role switch
+            return Guarding(actor, square) + actor.Role switch
             {
                 _ when keepsDistance => nearest <= 1 ? -0.6 : nearest <= 4 ? 0.4 : nearest <= 8 ? 0.1 : -0.1,
                 _ when fadesBack => nearest <= 1 ? -0.4 : nearest <= View.SquaresFor(actor.Speed, 1) + 1 ? 0.3 : 0,
@@ -1132,6 +1156,41 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 _ => 0,
             };
         }
+
+        /// <summary>
+        /// A Martial character's pull to stay by the party's soft ones (the user, 2026-11-06, from
+        /// their own play: "I want to damage something each round but I don't want to move too far
+        /// away from the squishy ones"): a little for standing within a stride of whoever the other
+        /// side would most like to reach — a caster, or the lightest-armoured — and a growing cost
+        /// for leaving them further behind than that. Small beside a blow, so a swing still comes
+        /// first; it settles where to stand when one square serves as well as another.
+        /// </summary>
+        private double Guarding(Combatant actor, GridPosition square)
+        {
+            if (!actor.IsMartial || actor.Side != Side.Party || !View.EnemiesOf(actor).Any(e => !e.IsBroken && !e.IsPhantom))
+            {
+                return 0;
+            }
+
+            var charge = View.AlliesOf(actor)
+                .Where(a => a != actor && !a.IsPhantom && !a.IsOutOfFight && (a.Spells.Count > 0 || a.Armour is ArmourWeight.None or ArmourWeight.Light))
+                .OrderByDescending(a => assess.Value(a))
+                .FirstOrDefault();
+            if (charge is null)
+            {
+                return 0;
+            }
+
+            var stride = View.SquaresFor(actor.Speed, 1);
+            var distance = actor.DistanceFrom(square, charge);
+            return distance <= stride ? GuardPull : -GuardPull * Math.Min(2, (distance - stride) / (double)stride);
+        }
+
+        /// <summary>What a swap of loadouts gives up besides the move it costs: a little, so a swap is made only for a real gain.</summary>
+        internal const double SwapPrice = 0.2;
+
+        /// <summary>The most <see cref="Guarding"/> adds for standing by the party's soft ones.</summary>
+        internal const double GuardPull = 0.3;
 
         /// <summary>
         /// What standing on <paramref name="square"/> sets up for next turn: the best blow within a
@@ -1146,7 +1205,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var distance = actor.DistanceFrom(square, enemy);
                 foreach (var attack in actor.Attacks)
                 {
-                    var worth = assess.Worth(assess.Blow(actor, attack, enemy, attack.DamageDieSides, assess.Dodge(enemy)), enemy);
+                    var worth = assess.Worth(assess.Blow(actor, attack, enemy, attack.DamageDieSides, assess.Dodge(enemy)), enemy)
+                                * Assessor.Doctrine(actor, enemy);
                     anywhere = Math.Max(anywhere, worth);
                     var reachable = attack.IsRanged
                         ? View.PlanAttackWith(actor, attack, square, enemy).CanAttack

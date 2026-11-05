@@ -96,7 +96,9 @@ namespace WoundBound.Game.Combat
                 [Ability.Focus] = -1,
                 [Ability.Presence] = 1,
             },
-            Weapons = { CombatantFactory.InHand(data.Weapon("Battleaxe")) },
+            // A Light Crossbow at the ready (the user, 2026-11-06: missing from the sheet): "can I reach
+            // them with the axe? If not, the crossbow" — a Power weapon, so it shoots on his Strength.
+            Weapons = { CombatantFactory.InHand(data.Weapon("Battleaxe")), CombatantFactory.AtTheReady(data.Weapon("Light Crossbow")) },
             Shields = { CombatantFactory.ShieldInHand("Buckler", ShieldWeight.Light) },
             Armour = { new ArmourDefinition { Name = "Chainmail", Weight = ArmourWeight.Medium, IsEquipped = true } },
         };
@@ -565,7 +567,7 @@ namespace WoundBound.Game.Combat
         /// <summary>
         /// The Ferry Shrine ambush with the Quickstart's own five caught mid-ford — Salla, Drovan,
         /// Joren, Mirella and Elthric — against two Skirmishers each: six Reedmarsh Skulkers and four
-        /// Bandit Ambushers, a Standard Challenge at the trial prices (<see cref="RuleTrials.ThreatValue"/>). The Skulkers have no Cowardice, so this one is fought out.
+        /// Bandit Ambushers, a Standard Challenge (GM Reference §5). The Skulkers have no Cowardice, so this one is fought out.
         /// </summary>
         public static Encounter FerryShrineWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
@@ -615,7 +617,7 @@ namespace WoundBound.Game.Combat
         /// <summary>
         /// The Quickstart's five around their campfire, set on in the night by a Tollroad Bandit and
         /// his brother, their three Timber Wolves, and three Bandit Ambushers on the rough ground to
-        /// either side — a Standard fight's budget for five at the trial prices (<see cref="RuleTrials.ThreatValue"/>). Elthric sits by the fire.
+        /// either side — a Standard fight's budget for five (GM Reference §5). Elthric sits by the fire.
         /// </summary>
         public static Encounter CampfireAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
@@ -1017,7 +1019,7 @@ namespace WoundBound.Game.Combat
         /// pay to duck back), two Roadside Bandits behind overturned carts (partial), and the Tollroad
         /// Bandit at the back. The party comes up the road behind a broken field wall of its own
         /// (partial), with a gap in it. Daylight. Four of each behind crates and carts at the trial prices
-        /// (<see cref="RuleTrials.ThreatValue"/>), a Standard Challenge for five.
+        /// (GM Reference §5), a Standard Challenge for five.
         /// </summary>
         public static Encounter Roadblock(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
@@ -1084,8 +1086,13 @@ namespace WoundBound.Game.Combat
         /// creatures are worth (GM Reference §5, Threat Value).
         /// </summary>
         public static Encounter Bench(GameData data, IDiceRoller dice, Brains.IGmBrain? gm, StartingAdversaryInfo foe, int count,
-            StartingAdversaryInfo? second = null, int secondCount = 0)
+            StartingAdversaryInfo? second = null, int secondCount = 0, bool cover = false)
         {
+            // With cover: the clearing's trees, bushes and scree, in daylight — the same field with
+            // somewhere to hide, to tell what open ground does to a price from what the creature does.
+            var setting = cover
+                ? WoodlandAtDusk with { Name = "Open ground with cover", Visibility = Setting.Daylight.Visibility, Cause = Setting.Daylight.Cause }
+                : Setting.Daylight with { Name = "Open ground" };
             var combatants = new List<Combatant>
             {
                 CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
@@ -1102,18 +1109,25 @@ namespace WoundBound.Game.Combat
             {
                 var step = Footprints.AcrossFor(kind.Size) + 1;
                 var perRank = Math.Max(1, (FieldHeight - 2) / step);
-                for (var i = 0; i < many; i++)
+                var placed = 0;
+                for (var i = 0; placed < many; i++)
                 {
                     var (rank, file) = (i / perRank, i % perRank);
                     var at = new GridPosition(x + (rank * step), 1 + (file * step));
-                    combatants.Add(CombatantFactory.FromAdversary(kind, $"{kind.Name} {i + 1}", at, data.Spells));
+                    if (setting.CoverPieces.ContainsKey(at))
+                    {
+                        continue;  // nobody starts in a tree
+                    }
+
+                    combatants.Add(CombatantFactory.FromAdversary(kind, $"{kind.Name} {placed + 1}", at, data.Spells));
+                    placed++;
                 }
 
                 x += ((many + perRank - 1) / perRank) * step;
             }
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: Setting.Daylight with { Name = "Open ground" }, environment: data.Environment);
+                setting: setting, environment: data.Environment);
         }
 
         /// <summary>

@@ -147,18 +147,32 @@ WoundBound.Rules.Catalog.StartingAdversaryInfo Altered(WoundBound.Rules.Catalog.
         object? parsed = value.Length == 0 && !type.IsValueType ? (type.IsArray ? Array.CreateInstance(type.GetElementType()!, 0)
                 : type.IsGenericType ? Activator.CreateInstance(typeof(List<>).MakeGenericType(type.GetGenericArguments()[0])) : null)
             : type.IsEnum ? Enum.Parse(type, value, ignoreCase: true)
+            // A list of enum values, '+' between them: Traits=HitAndFade+PackTactics.
+            : type.IsGenericType && type.GetGenericArguments()[0] is { IsEnum: true } item ? EnumList(item, value)
             : type == typeof(string) ? value
             : Convert.ChangeType(value, type, System.Globalization.CultureInfo.InvariantCulture);
         property.SetValue(copy, parsed);
     }
 
     return copy;
+
+    static object EnumList(Type item, string value)
+    {
+        var list = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(item))!;
+        foreach (var one in value.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            list.Add(Enum.Parse(item, one, ignoreCase: true));
+        }
+
+        return list;
+    }
 }
 
 Encounter Stage(IDiceRoller dice) => which switch
 {
     "bench" => SampleEncounters.Bench(data, dice, Gm(), BenchFoe(), benchCount,
-        Text("--foe2", null) is { } foe2 ? Altered(data.Adversary(foe2), Text("--set2", null)) : null, Option("--count2", 0)),
+        Text("--foe2", null) is { } foe2 ? Altered(data.Adversary(foe2), Text("--set2", null)) : null, Option("--count2", 0),
+        cover: args.Contains("--cover")),
     "solo" => SampleEncounters.FighterVersusRatkin(data, dice, Gm()),
     "party" => SampleEncounters.PartyVersusAmbush(data, dice, Gm(), ambush: true),
     "signpost4" => SampleEncounters.SignpostAmbush(data, dice, Gm(), fourPlayers: true, ambush: true),
@@ -310,10 +324,8 @@ if (Text("--show", null) is { } show && int.TryParse(show, out var shown))
     {
         static string Named(double multiplier) => new[] { (0.75, "Easy"), (1.0, "Standard"), (1.5, "Hard"), (2.0, "Deadly") }
             .FirstOrDefault(d => multiplier <= d.Item1 + 1e-9, (99, "over Deadly")).Item2;
-        var spend = foes.Sum(f => RuleTrials.ThreatValue(f, partyTier));
-        var written = foes.Sum(f => RuleTrials.WrittenThreatValue(f, partyTier));
-        Console.WriteLine($"Cost: Threat {spend:0.##} for {party.Count} PCs = {spend / party.Count:0.##}× ({Named(spend / party.Count)}) at the trial prices; "
-                          + $"{written:0.##} = {written / party.Count:0.##}× ({Named(written / party.Count)}) as written.");
+        var spend = foes.Sum(f => f.Role is { } role ? WoundBound.Rules.Calculation.ChallengeCalculator.ThreatValue(role, f.Tier, partyTier) : 1);
+        Console.WriteLine($"Cost: Threat {spend:0.##} for {party.Count} PCs = {spend / party.Count:0.##}× ({Named(spend / party.Count)}).");
     }
 }
 

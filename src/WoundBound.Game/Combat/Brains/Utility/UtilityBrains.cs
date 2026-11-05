@@ -266,6 +266,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.StandUp => new GmStep.StandUp(),
                 OptionKind.BreakFree => new GmStep.BreakFree(),
                 OptionKind.RegainFooting => new GmStep.RegainFooting(),
+                OptionKind.SwapLoadout => new GmStep.SwapLoadout(),
                 _ => GmStep.End,
             };
 
@@ -577,6 +578,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.BreakFree => new PartyStep.BreakFree(),
                 OptionKind.TakeUpWeapon => new PartyStep.TakeUpWeapon(),
                 OptionKind.RegainFooting => new PartyStep.RegainFooting(),
+                OptionKind.SwapLoadout => new PartyStep.Swap(),
                 _ => PartyStep.End,
             };
         }
