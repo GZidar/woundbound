@@ -1,3 +1,4 @@
+using WoundBound.Rules.Catalog;
 using WoundBound.Game.Combat;
 using WoundBound.Game.Data;
 
@@ -59,4 +60,23 @@ public static class TestData
                 : a).ToList(),
         };
     }
+}
+
+/// <summary>
+/// The Quickstart bandits at the numbers the scripted dice in these tests were written against
+/// (Body 6, Mind and Soul 4, the sword and the crossbow d6, the knife d4+2). The tests are about
+/// the rules, so re-costing the bandits to the Skirmisher row (2026-11-06) leaves them alone.
+/// </summary>
+public static class TestBandits
+{
+    public static StartingAdversaryInfo Roadside { get; } = SampleEncounters.RoadsideBandit with
+    {
+        BodyMax = 6, MindMax = 4, SoulMax = 4, DamageDie = "d6", DamageModifier = 0,
+    };
+
+    public static StartingAdversaryInfo Ambusher { get; } = SampleEncounters.BanditAmbusher with
+    {
+        BodyMax = 6, MindMax = 4, SoulMax = 4, DamageDie = "d6", DamageModifier = 0,
+        MoreAttacks = [new StartingAttackInfo("Rusty Knife", Modifier: 2, DamageDiceCount: 1, DamageDie: "d4", DamageModifier: 2)],
+    };
 }

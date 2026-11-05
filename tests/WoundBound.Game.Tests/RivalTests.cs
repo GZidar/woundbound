@@ -18,7 +18,7 @@ public class RivalTests
         var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 5));
         var rival = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(6, 5), Side.Adversaries);
         // A bandit across the field keeps the fight going once the rival is down.
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(16, 5));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(16, 5));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [fighter, rival, bandit], Data.RangeBands,
             new ScriptedDice(dice), new SimpleGmBrain());
         encounter.DeclineFreeChoices();
@@ -42,7 +42,7 @@ public class RivalTests
     [Fact]
     public void AStatblockFoe_OnNoBody_IsSimplyOut()
     {
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(1, 1));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(1, 1));
 
         bandit.Body = 0;
 

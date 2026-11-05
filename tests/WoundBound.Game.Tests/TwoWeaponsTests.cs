@@ -10,7 +10,7 @@ public class TwoWeaponsTests
 
     private static Combatant Bandit(string name, int x, int y)
     {
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, name, new GridPosition(x, y));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, name, new GridPosition(x, y));
         bandit.Stamina = 0;
         return bandit;
     }

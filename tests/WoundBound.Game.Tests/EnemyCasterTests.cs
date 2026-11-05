@@ -84,7 +84,7 @@ public class EnemyCasterTests
     public void TheChanter_HasItsSpellsRows_CastsAtPlusOne_AndHealsThroughBleeding()
     {
         var chanter = Foe("Wyrding Chanter", 6, 4);
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(6, 5));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(6, 5));
         bandit.Body = 2;
         var encounter = Facing([], chanter, bandit);
 

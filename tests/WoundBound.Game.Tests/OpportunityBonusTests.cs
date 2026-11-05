@@ -34,7 +34,7 @@ public class OpportunityBonusTests
     /// <summary>The Dumb Fighter (Light armour) beside a bandit whose Opportunity row reads <paramref name="opportunity"/>, with one Opportunity banked.</summary>
     private static (Encounter Encounter, Combatant Fighter, Combatant Bandit) Fight(string opportunity, IGmBrain gm, params int[] dice)
     {
-        var info = SampleEncounters.RoadsideBandit with { OpportunityText = opportunity };
+        var info = TestBandits.Roadside with { OpportunityText = opportunity };
         var encounter = new Encounter(12, 10, new[]
         {
             CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 4)),
@@ -122,7 +122,7 @@ public class OpportunityBonusTests
             Step = (view, turn) => turn.HasAttacked ? null : new GmStep.Attack(view.Characters.First(c => c.Name == "The Dumb Fighter"), WithBonus: true,
                 Manoeuvre: new Manoeuvre(WeaponManoeuvre.Cleave, view.Characters.First(c => c.Name == "Joren Blacke"))),
         };
-        var info = SampleEncounters.RoadsideBandit with { OpportunityText = "Cleave" };
+        var info = TestBandits.Roadside with { OpportunityText = "Cleave" };
         var encounter = new Encounter(12, 10, new[]
         {
             CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 4)),
@@ -212,7 +212,7 @@ public class OpportunityBonusTests
         var encounter = new Encounter(12, 10, new[]
         {
             CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(1, 4)),
-            CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(6, 4)),
+            CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(6, 4)),
             CombatantFactory.FromAdversary(Data.Adversary("Wyrding Chanter"), "Chanter", new GridPosition(7, 4), Data.Spells),
         }, Data.RangeBands, new ScriptedDice(), gm);
         encounter.BankedOpportunities = 1;
@@ -319,7 +319,7 @@ public class PoisonPricingTests
     public void APoisonedBlow_IsWorthMore_ExceptAgainstNoLivingBody()
     {
         var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 4));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(5, 4));
         var encounter = new Encounter(12, 10, new[] { fighter, bandit }, Data.RangeBands, new ScriptedDice());
         var assess = new Game.Combat.Brains.Utility.Assessor(new BattleView(encounter));
         var plain = bandit.Attack;
@@ -351,7 +351,7 @@ public class OffHandBonusTests
 
     private static (Encounter Encounter, Combatant Fighter, Combatant Bandit) Fight(IGmBrain gm, params int[] dice)
     {
-        var info = SampleEncounters.RoadsideBandit with { OpportunityText = "Off-hand attack (d4)" };
+        var info = TestBandits.Roadside with { OpportunityText = "Off-hand attack (d4)" };
         var encounter = new Encounter(12, 10, new[]
         {
             CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 4)),
@@ -364,7 +364,7 @@ public class OffHandBonusTests
     [Fact]
     public void AStatblock_NamingAnOffHandAttack_HasAnOffHandBlow()
     {
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit with { OpportunityText = "Off-hand attack (d4)" }, "Bandit", new GridPosition(0, 0));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside with { OpportunityText = "Off-hand attack (d4)" }, "Bandit", new GridPosition(0, 0));
 
         Assert.Equal(OpportunityBonusKind.OffHand, bandit.OpportunityBonus.Kind);
         Assert.Equal(4, bandit.OffHandAttack!.DamageDieSides);

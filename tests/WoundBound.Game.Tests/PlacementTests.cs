@@ -19,10 +19,10 @@ public class PlacementTests
 
     private static List<Combatant> Band() =>
     [
-        CombatantFactory.FromAdversary(SampleEncounters.BanditAmbusher, "Crossbow", new GridPosition(0, 0)),
+        CombatantFactory.FromAdversary(TestBandits.Ambusher, "Crossbow", new GridPosition(0, 0)),
         CombatantFactory.FromAdversary(Data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(0, 1)),
         CombatantFactory.FromAdversary(Data.Adversary("Timber Wolf"), "Wolf", new GridPosition(0, 2)),
-        CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(0, 3)),
+        CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(0, 3)),
     ];
 
     private static List<Combatant> Placed(SetupSkill skill, bool prepared = false, Setting? setting = null)

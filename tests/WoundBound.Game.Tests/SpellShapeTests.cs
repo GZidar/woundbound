@@ -52,7 +52,7 @@ public class SpellShapeTests
     {
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(1, 4));
         var bandits = Enumerable.Range(0, 3)
-            .Select(i => CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, $"Bandit {i + 1}", new GridPosition(3 + i, 4)))
+            .Select(i => CombatantFactory.FromAdversary(TestBandits.Roadside, $"Bandit {i + 1}", new GridPosition(3 + i, 4)))
             .ToArray();
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [mirella, .. bandits], Data.RangeBands, new ScriptedDice());
         encounter.TryBeginTurn(mirella);

@@ -12,7 +12,7 @@ public class ProwessTests
         new(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, combatants, Data.RangeBands, new ScriptedDice(dice));
 
     private static Combatant Bandit(string name, int x, int y) =>
-        CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, name, new GridPosition(x, y));
+        CombatantFactory.FromAdversary(TestBandits.Roadside, name, new GridPosition(x, y));
 
     [Fact]
     public void Footwork_AStepIsFree_OnceARound_AndALongMoveCostsOneLess()

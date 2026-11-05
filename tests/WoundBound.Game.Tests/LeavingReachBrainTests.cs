@@ -23,7 +23,7 @@ public class LeavingReachBrainTests
         var neighbour = CombatantFactory.FromCharacter(beside(Data), new GridPosition(4, 5));
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(8, 5));
         mirella.HasCastSpell = true;
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(5, 5));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [neighbour, mirella, bandit], Data.RangeBands, new ScriptedDice());
         bandit.HasMove = true;
         bandit.ActionsRemaining = 1;
@@ -86,7 +86,7 @@ public class LeavingReachBrainTests
         var elthric = CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(Data), new GridPosition(4, 5));
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(8, 5));
         mirella.HasCastSpell = true;
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(5, 5));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [elthric, mirella, bandit],
             Data.RangeBands, new RandomDiceRoller(new Random(3)), new Game.Combat.Brains.Utility.UtilityGmBrain(caution: 1, foresight: Game.Combat.Brains.Utility.Foresight.None));
         encounter.TryBeginTurn(mirella);

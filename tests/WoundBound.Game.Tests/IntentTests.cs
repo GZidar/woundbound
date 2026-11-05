@@ -16,7 +16,7 @@ public class IntentTests
     {
         var salla = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(3, 4));
         var drovan = CombatantFactory.FromCharacter(SampleEncounters.DrovanThale(Data), new GridPosition(0, 4));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(4, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(4, 4));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [salla, drovan, bandit], Data.RangeBands,
             new ScriptedDice(Enumerable.Repeat(3, 20).ToArray()));
 

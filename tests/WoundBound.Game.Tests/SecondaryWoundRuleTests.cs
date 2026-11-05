@@ -20,7 +20,7 @@ public class SecondaryWoundRuleTests
         // a miss.
         var salla = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(3, 4));
         var drovan = CombatantFactory.FromCharacter(SampleEncounters.DrovanThale(Data), new GridPosition(0, 4));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(4, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(4, 4));
         var encounter = Fight([10, 9, 3, 4, 6, 8], salla, drovan, bandit);
 
         encounter.TryBeginTurn(salla);
@@ -51,7 +51,7 @@ public class SecondaryWoundRuleTests
         // Drovan is the one declared at; he Interrupts and simply walks out of the bandit's reach.
         var drovan = CombatantFactory.FromCharacter(SampleEncounters.DrovanThale(Data), new GridPosition(3, 4));
         var salla = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(0, 8));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(4, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(4, 4));
         var encounter = Fight([], salla, drovan, bandit);
 
         encounter.TryBeginTurn(salla);
@@ -75,7 +75,7 @@ public class SecondaryWoundRuleTests
         // within Short, takes the 4 as Soul instead — his chainmail doesn't come into it.
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(2, 4));
         var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 6));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(3, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(3, 4));
         var encounter = Fight([10, 9, 5], mirella, joren, bandit);
 
         encounter.TryBeginTurn(joren);
@@ -99,7 +99,7 @@ public class SecondaryWoundRuleTests
         // The same blow, 4 past Mirella's leather: Joren takes 3 of it, as in the Core Rules example, and she takes 1.
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(2, 4));
         var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 6));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(3, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(3, 4));
         var encounter = Fight([10, 9, 5], mirella, joren, bandit);
 
         encounter.TryBeginTurn(joren);
@@ -120,7 +120,7 @@ public class SecondaryWoundRuleTests
         // Mirella on 2 Body with 4 coming: taking 3 leaves her on 1, and keeps two of Joren's Soul spare.
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(2, 4));
         var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 6));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(3, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(3, 4));
         var encounter = Fight([], mirella, joren, bandit);
         mirella.Body = 2;
         var offer = new PendingReaction(ReactionKind.Shelter, joren, mirella, null, 0, "", ImpactWounds: 4);

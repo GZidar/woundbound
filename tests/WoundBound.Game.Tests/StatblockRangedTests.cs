@@ -37,7 +37,7 @@ public class StatblockRangedTests
 
         Assert.True(plan.CanAttack);
         Assert.Equal("Worn Crossbow", plan.Profile!.Name);
-        Assert.Equal((14, 6), (plan.DodgeThreshold, plan.DamageDieSides!.Value));
+        Assert.Equal((14, 4, 2), (plan.DodgeThreshold, plan.DamageDieSides!.Value, plan.Profile.DamageModifier));
     }
 
     [Fact]
@@ -60,8 +60,9 @@ public class StatblockRangedTests
         var plan = encounter.PlanAttack(ambusher, fighter);
 
         Assert.True(plan.CanAttack);
+        // The knife is the secondary attack: the Attack bonus, but no damage bonus (GM Reference §3).
         Assert.Equal("Rusty Knife", plan.Profile!.Name);
-        Assert.Equal((4, 2), (plan.DamageDieSides!.Value, plan.Profile.DamageModifier));
+        Assert.Equal((4, 0), (plan.DamageDieSides!.Value, plan.Profile.DamageModifier));
     }
 
     [Fact]

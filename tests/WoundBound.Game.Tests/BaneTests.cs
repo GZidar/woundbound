@@ -22,7 +22,7 @@ public class BaneTests
             CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(7, 4)),
             CombatantFactory.FromCharacter(SampleEncounters.DrovanThale(Data), new GridPosition(2, 6)),
         ];
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(6, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(6, 4));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [mirella, .. others, bandit], Data.RangeBands,
             new ScriptedDice(), environment: Data.Environment);
         encounter.TryBeginTurn(mirella);

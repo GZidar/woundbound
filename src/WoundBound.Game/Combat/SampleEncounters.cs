@@ -341,19 +341,19 @@ namespace WoundBound.Game.Combat
         /// lantern-bearer at the signpost, and his like. Without the book's Cowardice here (see
         /// <see cref="CowardlyBandit"/>).
         /// </summary>
-        public static StartingAdversaryInfo RoadsideBandit { get; } = QuickstartBandit("Roadside Bandit", "Rusty Sword", die: "d6", damageModifier: 0) with
+        public static StartingAdversaryInfo RoadsideBandit { get; } = QuickstartBandit("Roadside Bandit", "Rusty Sword", die: "d4", damageModifier: 2) with
         {
             // A Skirmisher with no ranged attack (GM Reference §3).
             Traits = [AdversaryTrait.HitAndFade],
         };
 
         /// <summary>
-        /// The Quickstart Adventure's Bandit Ambusher: a Worn Crossbow (+2, 1d6), "or Rusty Knife"
-        /// (+2, 1d4+2) for when somebody gets close.
+        /// The Quickstart Adventure's Bandit Ambusher: a Worn Crossbow (+2, 1d4+2), "or Rusty Knife"
+        /// (+2, 1d4) for when somebody gets close — a secondary attack, without the damage bonus.
         /// </summary>
-        public static StartingAdversaryInfo BanditAmbusher { get; } = QuickstartBandit("Bandit Ambusher", "Worn Crossbow", die: "d6", damageModifier: 0) with
+        public static StartingAdversaryInfo BanditAmbusher { get; } = QuickstartBandit("Bandit Ambusher", "Worn Crossbow", die: "d4", damageModifier: 2) with
         {
-            MoreAttacks = [new StartingAttackInfo("Rusty Knife", Modifier: 2, DamageDiceCount: 1, DamageDie: "d4", DamageModifier: 2)],
+            MoreAttacks = [new StartingAttackInfo("Rusty Knife", Modifier: 2, DamageDiceCount: 1, DamageDie: "d4", DamageModifier: 0)],
         };
 
         private static StartingAdversaryInfo QuickstartBandit(string name, string attack, string die, int damageModifier) => new(
@@ -361,9 +361,9 @@ namespace WoundBound.Game.Combat
             Name: name,
             Role: AdversaryRole.Skirmisher,
             Tier: Tier.T1,
-            BodyMax: 6,
-            MindMax: 4,
-            SoulMax: 4,
+            BodyMax: 4,
+            MindMax: 2,
+            SoulMax: 2,
             Stamina: 3,
             DodgeThreshold: 15,
             ResolveThreshold: 12,
@@ -404,6 +404,11 @@ namespace WoundBound.Game.Combat
         /// the Dumb Fighter carries the party's one torch, and everybody else stands in the dark.
         /// The ridge and the trees are broken ground. The opening volley isn't in yet.
         /// </summary>
+        /// <remarks>
+        /// The book now fields two bandits per player (each 0.5 Threat, 2026-11-06). This one keeps
+        /// the old one-per-player count: it is the scripted-dice test bed for a small table, and a
+        /// fight for the sim is <see cref="SignpostWithCasters"/>, which has the book's numbers.
+        /// </remarks>
         /// <param name="cowardly">The bandits as the book has them, with Cowardice — for testing how foes break and run.</param>
         /// <param name="fourPlayers">
         /// The book's table of four: Joren Blacke joins the party, and the fourth bandit — a second
@@ -445,16 +450,21 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The signpost with the Quickstart's own party of five — Salla, Drovan, Joren, Mirella and
-        /// Elthric, the two casters among them — against one Skirmisher each: the lantern-bearer, the
-        /// bandit round the corner, and three Bandit Ambushers. At night Mirella's lantern and
-        /// Elthric's torch are the party's lights.
+        /// Elthric, the two casters among them — against two Skirmishers each, as the book now has it
+        /// (0.5 Threat apiece, 2026-11-06): the lantern-bearer and a second bandit at the signpost, two
+        /// round the corner, and six Bandit Ambushers, two each on the ridge, in the trees and by the
+        /// stones ("with multiple spellcasters two extra Bandit Ambushers"). At night Mirella's lantern
+        /// and Elthric's torch are the party's lights.
         /// </summary>
-        public static Encounter SignpostWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, Setting? setting = null, bool ambush = false)
+        /// <param name="cowardly">The bandits as the book has them, with Cowardice.</param>
+        public static Encounter SignpostWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, Setting? setting = null, bool ambush = false, bool cowardly = false)
         {
+            var roadside = cowardly ? CowardlyBandit(RoadsideBandit) : RoadsideBandit;
+            var ambusher = cowardly ? CowardlyBandit(BanditAmbusher) : BanditAmbusher;
             setting ??= ambush ? SignpostAmbushNight : SignpostNight;
             var dy = ambush ? 6 : 0;
             var dark = setting.IsUnlit;
-            var lanternBearer = CombatantFactory.FromAdversary(RoadsideBandit, "Lantern-bearer", new GridPosition(6, 4 + dy));
+            var lanternBearer = CombatantFactory.FromAdversary(roadside, "Lantern-bearer", new GridPosition(6, 4 + dy));
             lanternBearer.StatblockLights = dark ? 1 : 0;
 
             var combatants = new List<Combatant>
@@ -465,10 +475,15 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(MirellaVask(data, lantern: dark), new GridPosition(0, 4 + dy)),
                 CombatantFactory.FromCharacter(ElthricDane(data, torch: dark), new GridPosition(0, 3 + dy)),
                 lanternBearer,
-                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the ridge", ambush ? new GridPosition(3, 3) : new GridPosition(7, 1)), ambush),
-                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the trees", ambush ? new GridPosition(3, 16) : new GridPosition(7, 6)), ambush),
-                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the stones", new GridPosition(9, 5 + dy)), ambush),
-                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit round the corner", new GridPosition(11, 3 + dy)),
+                CombatantFactory.FromAdversary(roadside, "Bandit at the signpost", new GridPosition(7, 4 + dy)),
+                Lurking(CombatantFactory.FromAdversary(ambusher, "Ambusher on the ridge", ambush ? new GridPosition(3, 3) : new GridPosition(7, 1)), ambush),
+                Lurking(CombatantFactory.FromAdversary(ambusher, "Second ambusher on the ridge", ambush ? new GridPosition(5, 3) : new GridPosition(8, 1)), ambush),
+                Lurking(CombatantFactory.FromAdversary(ambusher, "Ambusher in the trees", ambush ? new GridPosition(3, 16) : new GridPosition(7, 6)), ambush),
+                Lurking(CombatantFactory.FromAdversary(ambusher, "Second ambusher in the trees", ambush ? new GridPosition(5, 16) : new GridPosition(8, 6)), ambush),
+                Lurking(CombatantFactory.FromAdversary(ambusher, "Ambusher by the stones", new GridPosition(9, 5 + dy)), ambush),
+                Lurking(CombatantFactory.FromAdversary(ambusher, "Second ambusher by the stones", new GridPosition(10, 5 + dy)), ambush),
+                CombatantFactory.FromAdversary(roadside, "Bandit round the corner", new GridPosition(11, 3 + dy)),
+                CombatantFactory.FromAdversary(roadside, "Second bandit round the corner", new GridPosition(12, 3 + dy)),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,

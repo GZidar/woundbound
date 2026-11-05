@@ -73,7 +73,7 @@ public class FortitudeTests
     public void APoisonedHit_ThatMeetsFortitude_TakesHold_DirectOnTopOfTheWeapon()
     {
         var salla = Salla(2, 4);
-        var bandit = Bandit(SampleEncounters.RoadsideBandit with { AttackEffect = Venom }, 3, 4);
+        var bandit = Bandit(TestBandits.Roadside with { AttackEffect = Venom }, 3, 4);
         var before = salla.Body;
 
         var encounter = BanditSwingsAt(salla, bandit);
@@ -87,7 +87,7 @@ public class FortitudeTests
     {
         var salla = Salla(2, 4);
         // A Blessing on her blood: only a Buff or Bane moves Fortitude (Core Rules §10).
-        var bandit = Bandit(SampleEncounters.RoadsideBandit with { AttackEffect = Venom }, 3, 4);
+        var bandit = Bandit(TestBandits.Roadside with { AttackEffect = Venom }, 3, 4);
 
         var encounter = BanditSwingsAt(salla, bandit,
             () => salla.ThresholdModifiers.Add(new ThresholdModifier { Threshold = ThresholdType.Fortitude, Amount = 20, Source = "Blessing" }));
@@ -100,7 +100,7 @@ public class FortitudeTests
     public void APoisonedHit_ArmourTookWhole_DeliversNothing()
     {
         var salla = Salla(2, 4);
-        var bandit = Bandit(SampleEncounters.RoadsideBandit with { AttackEffect = Venom, DamageDie = "d4", DamageModifier = -10 }, 3, 4);
+        var bandit = Bandit(TestBandits.Roadside with { AttackEffect = Venom, DamageDie = "d4", DamageModifier = -10 }, 3, 4);
 
         var encounter = BanditSwingsAt(salla, bandit);
 
@@ -110,7 +110,7 @@ public class FortitudeTests
     [Fact]
     public void ALineAgainstFortitude_IsRolledAgainstFT_AndRefusedOnTheBodiless()
     {
-        var spores = SampleEncounters.RoadsideBandit with
+        var spores = TestBandits.Roadside with
         {
             AttackName = "Spore Cloud",
             AttackVsThreshold = ThresholdType.Fortitude,

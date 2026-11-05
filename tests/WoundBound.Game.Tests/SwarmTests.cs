@@ -127,7 +127,7 @@ public class SwarmTests
         var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(3, 4));
         var salla = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(4, 4));
         var outside = CombatantFactory.FromCharacter(SampleEncounters.DrovanThale(Data), new GridPosition(5, 4));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(4, 3));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(4, 3));
         var swarm = Ratswarm(3, 3);
         var gm = new OneStepGm((view, turn) => view.Combatants.Contains(swarm) && turn.Actor == swarm
             ? turn.HasAttacked ? GmStep.End : new GmStep.Attack(joren)

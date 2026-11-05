@@ -40,7 +40,7 @@ public class BacklashTests
         // A Roadside Bandit, Mind 2 and Body 6: 4 Mind would empty it. Held at 1, the 3 excess
         // comes off Body, Direct — 3 left, standing.
         var elthric = CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(Data), new GridPosition(2, 4));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(5, 4));
         var encounter = Fight([9, 8, 4], elthric, bandit);
         encounter.TryBeginTurn(elthric);
         var (mind, body) = (bandit.Mind, bandit.Body);
@@ -58,7 +58,7 @@ public class BacklashTests
         // One Mind left, Overclock spent this round: a Spike paid from Mind would Stun him; paid with
         // Backlash it holds him at 1 and takes a Body.
         var elthric = CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(Data), new GridPosition(2, 4));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(5, 4));
         var encounter = Fight([], elthric, bandit);
         encounter.TryBeginTurn(elthric);
         elthric.Mind = 1;
@@ -78,7 +78,7 @@ public class BacklashTests
         // he takes his turn at 1 Mind, and only then is Stunned.
         var drovan = CombatantFactory.FromCharacter(SampleEncounters.DrovanThale(Data), new GridPosition(2, 4));
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(2, 6));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(3, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(3, 4));
         var encounter = Fight([3, 2, 3, 2], drovan, mirella, bandit);
         Assert.True(drovan.HasInterrupt);
         drovan.Mind = 1;

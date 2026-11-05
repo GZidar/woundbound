@@ -30,7 +30,7 @@ public class FleeingTests
     public void BreakingPoints_ComeFromTheStatblock()
     {
         Assert.Equal(Morale.NotAFanatic, CombatantFactory.FromAdversary(Data.Adversary("Tollroad Bandit"), "Bandit", default).Morale);
-        Assert.Equal(Morale.Cowardice, CombatantFactory.FromAdversary(SampleEncounters.CowardlyBandit(SampleEncounters.RoadsideBandit), "Bandit", default).Morale);
+        Assert.Equal(Morale.Cowardice, CombatantFactory.FromAdversary(SampleEncounters.CowardlyBandit(TestBandits.Roadside), "Bandit", default).Morale);
         Assert.Null(CombatantFactory.FromAdversary(Data.Adversary("Bramble Ratkin"), "Ratkin", default).Morale);
     }
 
@@ -40,12 +40,12 @@ public class FleeingTests
         var encounter = Signpost();
         var ridge = Named(encounter, "Ambusher on the ridge");
         KeepTheBearerBack(encounter);
-        ridge.Body = 3; // half of 6 — not below it
+        ridge.Body = 2; // half of 4 — not below it
 
         FighterTakesATurnAndEnds(encounter);
         Assert.False(ridge.IsBroken);
 
-        ridge.Body = 2;
+        ridge.Body = 1;
         encounter.RunAdversaryTurn();
 
         Assert.True(ridge.IsBroken);
@@ -61,7 +61,7 @@ public class FleeingTests
         var ridge = Named(encounter, "Ambusher on the ridge");
         KeepTheBearerBack(encounter);
         ridge.Position = new GridPosition(12, 4);
-        ridge.Body = 2;
+        ridge.Body = 1;
         FighterTakesATurnAndEnds(encounter);
 
         encounter.RunAdversaryTurn();
@@ -83,7 +83,7 @@ public class FleeingTests
         Named(encounter, "Lantern-bearer").Position = new GridPosition(14, 10);
         ridge.Position = new GridPosition(SampleEncounters.FieldWidth - 1, 8);
         Named(encounter, "Salla Rinehart").Position = new GridPosition(SampleEncounters.FieldWidth - 6, 8);
-        ridge.Body = 2;
+        ridge.Body = 1;
         FighterTakesATurnAndEnds(encounter);
 
         encounter.RunAdversaryTurn();
@@ -112,7 +112,7 @@ public class FleeingTests
         var bearer = Named(encounter, "Lantern-bearer");
         var objective = Assert.Single(encounter.Objectives);
         bearer.Position = new GridPosition(12, 4);
-        bearer.Body = 2;
+        bearer.Body = 1;
         Assert.Equal(ObjectiveStatus.InProgress, objective.StatusIn(encounter));
 
         FighterTakesATurnAndEnds(encounter);
@@ -134,7 +134,7 @@ public class FleeingTests
         var ridge = Named(encounter, "Ambusher on the ridge");
         KeepTheBearerBack(encounter);
         ridge.Position = new GridPosition(2, 4);
-        ridge.Body = 2;
+        ridge.Body = 1;
         FighterTakesATurnAndEnds(encounter);
 
         encounter.RunAdversaryTurn();
@@ -165,7 +165,7 @@ public class FleeingTests
         var ridge = Named(encounter, "Ambusher on the ridge");
         KeepTheBearerBack(encounter);
         ridge.Position = new GridPosition(2, 4);
-        ridge.Body = 2;
+        ridge.Body = 1;
         FighterTakesATurnAndEnds(encounter);
         encounter.RunAdversaryTurn();
 

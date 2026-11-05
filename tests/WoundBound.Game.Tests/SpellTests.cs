@@ -21,8 +21,8 @@ public class SpellTests
             CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(2, 4)),
             CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(Data), new GridPosition(2, 3)),
             CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(3, 5)),
-            CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", ToSquare(bandit ?? (5, 3))),
-            CombatantFactory.FromAdversary(SampleEncounters.BanditAmbusher, "Ambusher", ToSquare(ambusher ?? (14, 14))),
+            CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", ToSquare(bandit ?? (5, 3))),
+            CombatantFactory.FromAdversary(TestBandits.Ambusher, "Ambusher", ToSquare(ambusher ?? (14, 14))),
         };
 
         return new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, combatants, Data.RangeBands, new ScriptedDice(dice),

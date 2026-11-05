@@ -27,7 +27,7 @@ public class BindTests
     {
         var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(2, 4));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight,
-            [fighter, CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(15, 15))], Data.RangeBands, new ScriptedDice());
+            [fighter, CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(15, 15))], Data.RangeBands, new ScriptedDice());
         fighter.SetCondition(CharacterCondition.Stuck, true);
         encounter.TryBeginTurn(fighter);
 
@@ -42,7 +42,7 @@ public class BindTests
         // Two in the party, so nobody's turn begins by itself.
         var salla = CombatantFactory.FromCharacter(SampleEncounters.SallaRinehart(Data), new GridPosition(2, 8));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight,
-            [fighter, salla, CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(15, 15))], Data.RangeBands, new ScriptedDice());
+            [fighter, salla, CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(15, 15))], Data.RangeBands, new ScriptedDice());
         fighter.SetCondition(CharacterCondition.Frozen, true);
 
         encounter.TryBeginTurn(fighter);

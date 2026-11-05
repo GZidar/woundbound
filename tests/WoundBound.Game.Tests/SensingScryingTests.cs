@@ -34,7 +34,7 @@ public class SensingScryingTests
     {
         var elthric = CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(Data), new GridPosition(2, 4));
         var chanter = CombatantFactory.FromAdversary(Data.Adversary("Wyrding Chanter"), "Chanter", new GridPosition(6, 4), Data.Spells);
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(6, 5));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(6, 5));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [elthric, chanter, bandit], Data.RangeBands,
             new ScriptedDice(), environment: Data.Environment);
         encounter.TryBeginTurn(elthric);
@@ -80,7 +80,7 @@ public class SensingScryingTests
     public void Scrying_PutsDownAViewingPoint_ThatLastsTheSceneAndRollsNothing()
     {
         var elthric = CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(Data), new GridPosition(2, 4));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(16, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(16, 4));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [elthric, bandit], Data.RangeBands,
             new ScriptedDice(), environment: Data.Environment);
         encounter.TryBeginTurn(elthric);

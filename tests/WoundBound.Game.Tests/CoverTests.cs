@@ -144,7 +144,7 @@ public class CoverTests
     {
         // Mirella at (1, 4); a bandit at (6, 4) crouched behind a pillar at (5, 4).
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(1, 4));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(6, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(6, 4));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [mirella, bandit], Data.RangeBands,
             new ScriptedDice(), setting: With(Cover.Full, (5, 4, 5, 4)), environment: Data.Environment);
         encounter.TryBeginTurn(mirella);

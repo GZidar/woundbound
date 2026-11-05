@@ -14,7 +14,7 @@ public class UtilitySpellTests
 
     private static (Encounter Encounter, Combatant Caster, Combatant Bandit) Night(Combatant caster, Setting? setting = null)
     {
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(8, 4));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(8, 4));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [caster, bandit], Data.RangeBands,
             new ScriptedDice(), setting: setting ?? SampleEncounters.SignpostNight, environment: Data.Environment);
         encounter.TryBeginTurn(caster);

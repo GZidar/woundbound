@@ -31,7 +31,7 @@ public class DisarmSunderTests
     }
 
     private static Combatant Bandit(string name, int x, int y, string? effect = null) =>
-        CombatantFactory.FromAdversary(effect is null ? SampleEncounters.RoadsideBandit : SampleEncounters.RoadsideBandit with { AttackEffect = effect },
+        CombatantFactory.FromAdversary(effect is null ? TestBandits.Roadside : TestBandits.Roadside with { AttackEffect = effect },
             name, new GridPosition(x, y));
 
     private static Encounter Fight(int[] dice, IGmBrain? gm, params Combatant[] combatants) =>
@@ -150,7 +150,7 @@ public class DisarmSunderTests
         var bare = joren.DodgeThreshold;
         var total = Math.Max(bare, joren.StabilityThreshold);
         Assert.True(total < bare + shield, $"the test needs a total between the two DTs, at or over ST {joren.StabilityThreshold}, DT {bare}+{shield}");
-        var die = total - SampleEncounters.RoadsideBandit.AttackModifier;
+        var die = total - TestBandits.Roadside.AttackModifier;
 
         var gm = new OneStepGm((view, turn) => turn.HasAttacked ? GmStep.End : new GmStep.Attack(joren, Manoeuvre: new Manoeuvre(WeaponManoeuvre.Sunder)));
         var encounter = Fight([die / 2, die - die / 2], gm, joren, bandit);
@@ -206,7 +206,7 @@ public class AdversaryTurnTests
         {
             CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(2, 4)),
             CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 6)),
-            CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(12, 5)),
+            CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(12, 5)),
         }, Data.RangeBands, new RandomDiceRoller(new Random(4)), new Game.Combat.Brains.Utility.UtilityGmBrain(foresight: Game.Combat.Brains.Utility.Foresight.None));
         encounter.BankedOpportunities = 3;
 

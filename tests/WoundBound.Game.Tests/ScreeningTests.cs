@@ -19,7 +19,7 @@ public class ScreeningTests
     {
         var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(5, 5));
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(4, 5));
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(8, 5));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(8, 5));
         var setting = corridor
             ? Setting.Daylight with { Walls = Setting.Squares((0, 0, 27, 4), (0, 6, 27, 17)) }
             : Setting.Daylight;

@@ -26,7 +26,7 @@ public class AdversaryStaminaTests
     {
         var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 5));
         fighter.Stamina = 1;
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(5, 5));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [fighter, bandit], Data.RangeBands, new ScriptedDice(dice), gm);
         encounter.DeclineFreeChoices();
         encounter.TryBeginTurn(fighter);
@@ -51,7 +51,7 @@ public class AdversaryStaminaTests
     {
         var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 5));
         fighter.Stamina = 1;
-        var bandit = CombatantFactory.FromAdversary(SampleEncounters.RoadsideBandit, "Bandit", new GridPosition(5, 5));
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(5, 5));
         var gm = new StepsGm(new GmStep.Attack(fighter), new GmStep.BuyExtraAction(), new GmStep.Attack(fighter));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [fighter, bandit], Data.RangeBands,
             new ScriptedDice(3, 3, 1, 1, 1, 1), gm);
