@@ -35,10 +35,28 @@ namespace WoundBound.Game.Combat
         private readonly List<SpellEffect> spellEffects = new();
 
         /// <summary>Every spell still at work on the board, by whom and on whom.</summary>
-        public IReadOnlyList<SpellInPlay> SpellsInPlay => spellEffects
-            .Select(e => new SpellInPlay(e.Caster, e.Target, e.Spell.Name, e.Spell.SpellType, e.Sustained,
-                e.Modifier?.Threshold, e.Modifier?.Amount ?? 0, e.Condition))
-            .ToList();
+        public IReadOnlyList<SpellInPlay> SpellsInPlay
+        {
+            get
+            {
+                // The brains ask in their inner loops; a spell's effect never changes once laid, so
+                // the list stands for as long as the same effects are on the board.
+                if (spellsInPlaySeen is { } seen && seen.Count == spellEffects.Count && seen.SequenceEqual(spellEffects))
+                {
+                    return spellsInPlay!;
+                }
+
+                spellsInPlaySeen = [.. spellEffects];
+                spellsInPlay = spellEffects
+                    .Select(e => new SpellInPlay(e.Caster, e.Target, e.Spell.Name, e.Spell.SpellType, e.Sustained,
+                        e.Modifier?.Threshold, e.Modifier?.Amount ?? 0, e.Condition))
+                    .ToList();
+                return spellsInPlay;
+            }
+        }
+
+        private List<SpellEffect>? spellsInPlaySeen;
+        private IReadOnlyList<SpellInPlay>? spellsInPlay;
 
         /// <summary>What <paramref name="caster"/> casting <paramref name="cast"/> from where they stand would come to, or why it can't be cast.</summary>
         public CastPlan PlanCast(Combatant caster, SpellCast cast) => PlanCastFrom(caster, caster.Position, cast, checkTurn: true);

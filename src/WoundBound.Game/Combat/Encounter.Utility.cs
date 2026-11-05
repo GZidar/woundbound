@@ -47,8 +47,16 @@ namespace WoundBound.Game.Combat
         public Terrain GroundAt(GridPosition square)
         {
             var grade = Setting.GroundAt(square);
-            if (Setting.Water.ContainsKey(square)
-                || workings.LastOrDefault(w => w.Lever == Lever.Ground && w.Holds && w.Squares.Contains(square)) is not { } working)
+            Working? working = null;
+            for (var i = workings.Count - 1; i >= 0 && working is null; i--)
+            {
+                if (workings[i] is { Lever: Lever.Ground, Holds: true } w && w.Squares.Contains(square))
+                {
+                    working = w;
+                }
+            }
+
+            if (working is null || Setting.Water.ContainsKey(square))
             {
                 return grade;
             }

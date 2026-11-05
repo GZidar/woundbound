@@ -17,19 +17,30 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// </summary>
     public static class Odds
     {
-        private static readonly Dictionary<(int Margin, bool Advantage, bool Disadvantage), RollOdds> Cache = new();
+        private const int Widest = 30;
+
+        // One slot per margin (-30 to +30) and Advantage/Disadvantage pair, filled the first time it's
+        // asked for. No lock: the brains ask from every thread at once, and a slot is a whole object,
+        // so a reader sees it filled or empty, never half-written; two threads that both find it empty
+        // work out the same odds.
+        private static readonly System.Runtime.CompilerServices.StrongBox<RollOdds>?[] Known = new System.Runtime.CompilerServices.StrongBox<RollOdds>?[(2 * Widest + 1) * 4];
 
         public static RollOdds Of(int modifier, int threshold, bool advantage = false, bool disadvantage = false)
         {
-            var key = (Math.Clamp(modifier - threshold, -30, 30), advantage, disadvantage);
-            lock (Cache)
+            var margin = Math.Clamp(modifier - threshold, -Widest, Widest);
+            var slot = ((margin + Widest) * 4) + (advantage ? 2 : 0) + (disadvantage ? 1 : 0);
+            if (Volatile.Read(ref Known[slot]) is { } known)
             {
-                if (Cache.TryGetValue(key, out var known))
-                {
-                    return known;
-                }
+                return known.Value;
             }
 
+            var odds = WorkOut(margin, advantage, disadvantage);
+            Volatile.Write(ref Known[slot], new System.Runtime.CompilerServices.StrongBox<RollOdds>(odds));
+            return odds;
+        }
+
+        private static RollOdds WorkOut(int margin, bool advantage, bool disadvantage)
+        {
             var dice = RollCalculator.DiceNeeded(advantage, disadvantage);
             var faces = new int[dice];
             double total = 0, success = 0, critSuccess = 0, critFailure = 0;
@@ -38,7 +49,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             {
                 if (at == dice)
                 {
-                    var roll = RollCalculator.Resolve(faces.ToArray(), key.Item1, 0, advantage, disadvantage);
+                    var roll = RollCalculator.Resolve(faces.ToArray(), margin, 0, advantage, disadvantage);
                     total++;
                     if (roll.Success == true)
                     {
@@ -61,13 +72,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             Enumerate(0);
-            var odds = new RollOdds(success / total, critSuccess / total, critFailure / total);
-            lock (Cache)
-            {
-                Cache[key] = odds;
-            }
-
-            return odds;
+            return new RollOdds(success / total, critSuccess / total, critFailure / total);
         }
     }
 }

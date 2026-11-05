@@ -274,7 +274,7 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            var squares = CanMoveItself(creature) ? SquaresWithin(creature, MovesAvailable(creature)) : new Dictionary<GridPosition, int>();
+            var squares = CanMoveItself(creature) ? SquaresWithin(creature, MovesAvailable(creature)) : Nowhere;
             var further = squares
                 .Where(o => RangeBandCalculator.BandForSquares(bands, creature.DistanceFrom(o.Key, source)) is not { } b || b > band)
                 .OrderBy(o => o.Value).ThenByDescending(o => creature.DistanceFrom(o.Key, source))

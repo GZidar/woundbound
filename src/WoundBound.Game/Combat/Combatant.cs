@@ -168,9 +168,23 @@ namespace WoundBound.Game.Combat
         public int ShieldBonus => CoveredBy.Count == 0 ? 0 : CoveredBy.Max(c => InventoryCalculator.ShieldDodgeThresholdBonus(c.Weight));
 
         /// <summary>The shield in this character's hand, if any — the heaviest, should there be two.</summary>
-        public ShieldDefinition? InHandShield => Build is { } build
-            ? InventoryCalculator.InHandShields(build).OrderByDescending(s => s.Weight).FirstOrDefault()
-            : null;
+        public ShieldDefinition? InHandShield
+        {
+            get
+            {
+                // The first of the heaviest, as OrderByDescending(Weight).FirstOrDefault() — asked too often to sort for it.
+                ShieldDefinition? heaviest = null;
+                foreach (var shield in Build?.Shields ?? [])
+                {
+                    if (InventoryCalculator.IsInHandShield(shield) && (heaviest is null || shield.Weight > heaviest.Weight))
+                    {
+                        heaviest = shield;
+                    }
+                }
+
+                return heaviest;
+            }
+        }
 
         /// <summary>A Heavy shield held with no weapon in hand: one raise covers the bearer and an ally (Core Rules §9, "Bracing").</summary>
         public bool IsShieldBraced => InHandShield is { } shield
@@ -317,8 +331,25 @@ namespace WoundBound.Game.Combat
 
         /// <summary>What this creature attacks with first — for a character, whatever is in hand; for a foe, its first attack line.</summary>
         public AttackProfile Attack => Build is { } build
-            ? AttackProfile.ForWeapon(build, InHandWeapon)
+            ? WeaponAttack(build, InHandWeapon)
             : (StatblockLinesNow.Count > 0 ? StatblockLinesNow[0] : null) ?? throw new InvalidOperationException($"{Name} has neither a character sheet nor a statblock attack.");
+
+        // The last weapon attack worked out, kept for as long as the same weapon is in hand: a
+        // character's sheet doesn't change mid-fight, only which weapon is swung, and the brains ask
+        // for Attack and Reach many thousands of times a turn.
+        private (CharacterBuild Build, WeaponDefinition? Weapon, AttackProfile Profile)? lastWeaponAttack;
+
+        private AttackProfile WeaponAttack(CharacterBuild build, WeaponDefinition? weapon)
+        {
+            if (lastWeaponAttack is { } last && ReferenceEquals(last.Build, build) && ReferenceEquals(last.Weapon, weapon))
+            {
+                return last.Profile;
+            }
+
+            var profile = AttackProfile.ForWeapon(build, weapon);
+            lastWeaponAttack = (build, weapon, profile);
+            return profile;
+        }
 
         /// <summary>Every attack it could make: a character's weapon in hand, or each of a foe's attack lines.</summary>
         public IReadOnlyList<AttackProfile> Attacks => (Build is not null ? [Attack] : StatblockLinesNow) is var own && SteedAttack is { } hooves
@@ -360,17 +391,63 @@ namespace WoundBound.Game.Combat
         /// The weapon in hand — the main one, where two are: whichever isn't the Light off-hand
         /// weapon. Null when fighting unarmed or for a generic foe.
         /// </summary>
-        public WeaponDefinition? InHandWeapon => Build is { } build
-            ? InventoryCalculator.InHandWeapons(build) is var inHand && inHand.Count == 2 && OffHandOf(inHand) is { } off
-                ? inHand.First(w => w != off)
-                : inHand.FirstOrDefault()
-            : null;
+        public WeaponDefinition? InHandWeapon
+        {
+            get
+            {
+                if (Build is not { } build)
+                {
+                    return null;
+                }
+
+                // As InventoryCalculator.InHandWeapons, without making a list each time it's asked.
+                WeaponDefinition? first = null, second = null;
+                var count = 0;
+                foreach (var weapon in build.Weapons)
+                {
+                    if (InventoryCalculator.IsInHandWeapon(weapon))
+                    {
+                        (first, second) = count == 0 ? (weapon, second) : count == 1 ? (first, weapon) : (first, second);
+                        count++;
+                    }
+                }
+
+                // Where two are in hand, the off-hand is the last Light one; the main hand is the other.
+                return count == 2 && second!.Weight != WeaponWeight.Light && first!.Weight == WeaponWeight.Light ? second : first;
+            }
+        }
 
         /// <summary>
         /// The second weapon of a Two Weapons loadout, which must be Light (Core Rules §9, "Two
         /// Weapons"); null for anyone holding one weapon, or none. Where both are Light, the second.
         /// </summary>
-        public WeaponDefinition? OffHandWeapon => Build is { } build ? OffHandOf(InventoryCalculator.InHandWeapons(build)) : null;
+        public WeaponDefinition? OffHandWeapon
+        {
+            get
+            {
+                if (Build is not { } build)
+                {
+                    return null;
+                }
+
+                // As OffHandOf(InventoryCalculator.InHandWeapons(build)), without making the list.
+                WeaponDefinition? first = null, second = null;
+                var count = 0;
+                foreach (var weapon in build.Weapons)
+                {
+                    if (InventoryCalculator.IsInHandWeapon(weapon))
+                    {
+                        (first, second) = count == 0 ? (weapon, second) : count == 1 ? (first, weapon) : (first, second);
+                        count++;
+                    }
+                }
+
+                return count != 2 ? null
+                    : second!.Weight == WeaponWeight.Light ? second
+                    : first!.Weight == WeaponWeight.Light ? first
+                    : null;
+            }
+        }
 
         private static WeaponDefinition? OffHandOf(IReadOnlyList<WeaponDefinition> inHand) =>
             inHand.Count == 2 ? inHand.LastOrDefault(w => w.Weight == WeaponWeight.Light) : null;

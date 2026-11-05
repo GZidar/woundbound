@@ -103,15 +103,15 @@ namespace WoundBound.Game.Combat
 
         /// <summary>The phantom figures <paramref name="creature"/> takes for real.</summary>
         public IEnumerable<Combatant> PhantomsSeenBy(Combatant creature) =>
-            illusions.Where(i => i.Phantom is not null && Fools(i, creature)).Select(i => i.Phantom!);
+            illusions.Count == 0 ? [] : illusions.Where(i => i.Phantom is not null && Fools(i, creature)).Select(i => i.Phantom!);
 
         /// <summary>Squares <paramref name="creature"/> believes solid: phantom walls it is taken in by.</summary>
         public bool BelievesWall(Combatant creature, GridPosition square) =>
-            illusions.Any(i => i.Form == IllusionForm.Wall && i.Squares.Contains(square) && Fools(i, creature));
+            illusions.Count > 0 && illusions.Any(i => i.Form == IllusionForm.Wall && i.Squares.Contains(square) && Fools(i, creature));
 
         /// <summary>The Body <paramref name="creature"/> believes it has: its own, less any wound it feels and hasn't taken.</summary>
         public int BelievedBody(Combatant creature) =>
-            creature.Body - illusions.Where(i => i.Form == IllusionForm.Wound && Fools(i, creature)).Sum(i => i.FeltWounds);
+            illusions.Count == 0 ? creature.Body : creature.Body - illusions.Where(i => i.Form == IllusionForm.Wound && Fools(i, creature)).Sum(i => i.FeltWounds);
 
         private bool HasIllusionActive(Combatant caster) => illusions.Any(i => i.Caster == caster);
 
@@ -335,7 +335,9 @@ namespace WoundBound.Game.Combat
             CheckMorale();
         }
 
-        private int MiddleRangeSquares() => bands.Bands.Where(b => b.Name == DistanceBand.Middle).Select(b => b.MaxSquares).DefaultIfEmpty(8).First();
+        private int MiddleRangeSquares() => middleRangeSquares ??= bands.Bands.Where(b => b.Name == DistanceBand.Middle).Select(b => b.MaxSquares).DefaultIfEmpty(8).First();
+
+        private int? middleRangeSquares;
 
         /// <summary>
         /// A Search check against the Deceit: on a success the searcher perceives the Illusion for

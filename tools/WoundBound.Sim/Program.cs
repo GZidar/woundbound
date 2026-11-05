@@ -135,7 +135,7 @@ Encounter Stage(IDiceRoller dice) => which switch
     "glamour" => SampleEncounters.GlamouredMill(data, dice, Gm()),
     "roadblock" => SampleEncounters.Roadblock(data, dice, Gm(), ambush: true),
     "gnoll" => SampleEncounters.GnollRaid(data, dice, Gm(), ambush: true),
-    "clearing" => SampleEncounters.WoodlandClearing(data, dice, Gm(), setup, prepared, placementSeed++),
+    "clearing" => SampleEncounters.WoodlandClearing(data, dice, Gm(), setup, prepared, placementSeed + dice.Roll(1000)),
     "guardians" => SampleEncounters.ShrineGuardians(data, dice, Gm()),
     "stag" => SampleEncounters.HollowStagInTheBirchwood(data, dice, Gm()),
     _ => SampleEncounters.SignpostAmbush(data, dice, Gm(), ambush: true),
@@ -323,7 +323,17 @@ if (Option("--day", 0) is var perDay and > 0)
     return;
 }
 
+var clock = System.Diagnostics.Stopwatch.StartNew();
 var reports = parties.Select(p => Simulator.Run(Stage, p, fights, seed)).ToList();
+// --stats: what the run cost the machine — for speed work, where allocation is the cost that counts.
+if (args.Contains("--stats"))
+{
+    var played = Math.Max(1, reports.Sum(r => r.Fights.Count));
+    Console.WriteLine($"Stats: {clock.Elapsed.TotalSeconds:0.0} s wall, {System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime.TotalSeconds:0} s CPU, "
+                      + $"{GC.GetTotalAllocatedBytes() / 1e9 / played:0.00} GB allocated per fight, GCs {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)}, "
+                      + $"{GC.GetTotalPauseDuration().TotalSeconds:0.0} s paused.");
+}
+
 Console.WriteLine(Simulator.Table(reports));
 Console.WriteLine();
 Console.WriteLine(Simulator.AttritionTable(reports));

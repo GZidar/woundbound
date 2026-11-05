@@ -335,7 +335,9 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>The far edge of Short, in squares — Shelter's reach.</summary>
-        private int ShortRangeSquares => bands.Bands.Where(b => b.Name == DistanceBand.Short).Select(b => b.MaxSquares).DefaultIfEmpty(4).First();
+        private int ShortRangeSquares => shortRangeSquares ??= bands.Bands.Where(b => b.Name == DistanceBand.Short).Select(b => b.MaxSquares).DefaultIfEmpty(4).First();
+
+        private int? shortRangeSquares;
 
         private void OfferShelter(Combatant hurt, int amount, WoundType type, Queue<Combatant> shelterers, Action<int> then)
         {

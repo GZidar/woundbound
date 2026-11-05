@@ -746,9 +746,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public double BestHarmFrom(Combatant actor, GridPosition square, IEnumerable<Combatant> worthChasing)
         {
             double best = 0;
-            var targets = worthChasing.Where(e => e.DistanceTo(square) <= 8).ToList();
-            foreach (var spell in actor.Spells.Where(s => s.SpellType == SpellType.Harm && s.Target == SpellTarget.One))
+            List<Combatant>? targets = null;
+            foreach (var spell in actor.Spells)
             {
+                if (spell.SpellType != SpellType.Harm || spell.Target != SpellTarget.One)
+                {
+                    continue;
+                }
+
+                // Only gathered for a creature with a single-target Harm to throw: most have none.
+                targets ??= worthChasing.Where(e => e.DistanceTo(square) <= 8).ToList();
                 foreach (var enemy in targets)
                 {
                     var plan = View.PlanCastFrom(actor, square, new SpellCast(spell) { Target = enemy });

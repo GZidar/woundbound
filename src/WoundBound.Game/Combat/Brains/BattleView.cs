@@ -149,7 +149,7 @@ namespace WoundBound.Game.Combat.Brains
             }
 
             var squares = encounter.SquaresWithin(combatant, moves);
-            if (!encounter.Illusions.Any(i => i.Form is IllusionForm.Wall or IllusionForm.Figure && encounter.Fools(i, combatant)))
+            if (encounter.Illusions.Count == 0 || !encounter.Illusions.Any(i => i.Form is IllusionForm.Wall or IllusionForm.Figure && encounter.Fools(i, combatant)))
             {
                 return squares;
             }
@@ -190,7 +190,7 @@ namespace WoundBound.Game.Combat.Brains
         /// is taken in by standing between can't be made — as far as it knows, there's stone in the way.
         /// </summary>
         private AttackPlan Believed(Combatant attacker, GridPosition from, GridPosition to, AttackPlan plan) =>
-            plan.CanAttack && from.DistanceTo(to) > 1 && !Sight.Clear(from, to, sq => encounter.BelievesWall(attacker, sq))
+            plan.CanAttack && encounter.Illusions.Count > 0 && from.DistanceTo(to) > 1 && !Sight.Clear(from, to, sq => encounter.BelievesWall(attacker, sq))
                 ? plan with { Refusal = "As far as it knows, there's a wall in the way." }
                 : plan;
 
@@ -252,8 +252,14 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>Everybody still fighting on the other side from <paramref name="combatant"/>.</summary>
         /// <remarks>As <paramref name="combatant"/> believes it: a phantom figure it is taken in by is one of them.</remarks>
-        public IEnumerable<Combatant> EnemiesOf(Combatant combatant) =>
-            encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party).Where(Sees).Concat(encounter.PhantomsSeenBy(combatant));
+        public IEnumerable<Combatant> EnemiesOf(Combatant combatant)
+        {
+            var fighting = encounter.Fighting(combatant.Side == Side.Party ? Side.Adversaries : Side.Party);
+            // Out of the fog and with no phantoms about — most of the time — it's just who's fighting.
+            return FoggedFor is null && encounter.Illusions.Count == 0
+                ? fighting
+                : fighting.Where(Sees).Concat(encounter.PhantomsSeenBy(combatant));
+        }
 
         /// <summary>Everybody still fighting on <paramref name="combatant"/>'s own side, themselves included.</summary>
         public IEnumerable<Combatant> AlliesOf(Combatant combatant) => encounter.Fighting(combatant.Side);

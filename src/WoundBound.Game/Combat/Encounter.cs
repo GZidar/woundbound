@@ -276,19 +276,30 @@ namespace WoundBound.Game.Combat
         private int LightStamp()
         {
             var hash = new HashCode();
-            foreach (var carrier in combatants.Where(c => c.CarriedLights > 0 && c.OccupiesSquare))
+            foreach (var carrier in combatants)
             {
-                hash.Add(carrier);
-                hash.Add(carrier.Position);
-                hash.Add(carrier.CarriedLights);
+                if (carrier.CarriedLights is var lights and > 0 && carrier.OccupiesSquare)
+                {
+                    hash.Add(carrier);
+                    hash.Add(carrier.Position);
+                    hash.Add(lights);
+                }
             }
 
-            hash.Add(lightsOnTheGround.Count);
-            hash.Add(spentFires.Count);
-            foreach (var working in workings.Where(w => w.Lever == Lever.Light && w.Holds))
+            foreach (var light in lightsOnTheGround)
             {
-                hash.Add(working);
+                hash.Add(light);
             }
+
+            hash.Add(spentFires.Count);
+            foreach (var working in workings)
+            {
+                if (working.Lever == Lever.Light && working.Holds)
+                {
+                    hash.Add(working);
+                }
+            }
+
             return hash.ToHashCode();
         }
 
@@ -322,12 +333,46 @@ namespace WoundBound.Game.Combat
                 return EnvironmentCalculator.VisibilityOfTarget(tables, Setting.Visibility, Setting.Cause, target?.CarriedLights ?? 0);
             }
 
-            var sources = combatants
-                .Where(c => c != target && c.CarriedLights > 0 && c.OccupiesSquare)
-                .SelectMany(c => Enumerable.Repeat(c.Position, c.CarriedLights))
-                .Concat(Enumerable.Repeat(square, target?.CarriedLights ?? 0))
-                .Concat(lightsOnTheGround)
-                .ToList();
+            // In the dark the answer turns only on where the lights are — kept by the lights' stamp,
+            // so a light only supposed for a moment (DodgeModifierWith) keeps its own answers too.
+            var key = (LightStamp(), target, square);
+            if (!darkKnown.TryGetValue(key, out var known))
+            {
+                if (darkKnown.Count > 8192)
+                {
+                    darkKnown.Clear();
+                }
+
+                known = WorkOutVisibilityInTheDark(tables, target, square);
+                darkKnown[key] = known;
+            }
+
+            return known;
+        }
+
+        private readonly Dictionary<(int Stamp, Combatant? Target, GridPosition Square), Visibility> darkKnown = new();
+
+        private Visibility WorkOutVisibilityInTheDark(EnvironmentTables tables, Combatant? target, GridPosition square)
+        {
+
+            var sources = new List<GridPosition>();
+            foreach (var c in combatants)
+            {
+                if (c != target && c.CarriedLights is var lights and > 0 && c.OccupiesSquare)
+                {
+                    for (var k = 0; k < lights; k++)
+                    {
+                        sources.Add(c.Position);
+                    }
+                }
+            }
+
+            for (var k = target?.CarriedLights ?? 0; k > 0; k--)
+            {
+                sources.Add(square);
+            }
+
+            sources.AddRange(lightsOnTheGround);
 
             // Lights pool (Core Rules §9, "Lights together"): a light within one light's reach of
             // another counts with it, and through it with every light the other is pooled with — a
@@ -352,12 +397,21 @@ namespace WoundBound.Game.Combat
                 }
             }
 
-            int LightsIn(int root)
+            // Each pool's count, made once: its carried and dropped lights, and the best conjured light in it.
+            var carriedIn = new int[nodes.Count];
+            var castIn = new int?[nodes.Count];
+            for (var i = 0; i < sources.Count; i++)
             {
-                var carried = Enumerable.Range(0, sources.Count).Count(i => Root(i) == root);
-                var cast = Enumerable.Range(0, conjured.Count).Where(k => Root(sources.Count + k) == root).Select(k => conjured[k].Grade).DefaultIfEmpty(0).Max();
-                return carried + cast;
+                carriedIn[Root(i)]++;
             }
+
+            for (var k = 0; k < conjured.Count; k++)
+            {
+                var root = Root(sources.Count + k);
+                castIn[root] = Math.Max(castIn[root] ?? int.MinValue, conjured[k].Grade);
+            }
+
+            int LightsIn(int root) => carriedIn[root] + (castIn[root] ?? 0);
 
             // Each light lights the square at the band it is from it, by its whole pool's count.
             // A built fire holds its grade further, and pools with nothing: it needs no help.
@@ -523,7 +577,9 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>The furthest a band reaches, in squares — Long's 16.</summary>
-        public int LongRangeSquares => bands.Bands.Max(b => b.MaxSquares);
+        public int LongRangeSquares => longRangeSquares ??= bands.Bands.Max(b => b.MaxSquares);
+
+        private int? longRangeSquares;
 
         public int Height { get; }
 
@@ -704,7 +760,9 @@ namespace WoundBound.Game.Combat
         public IReadOnlyDictionary<GridPosition, int> ReachableSquares(Combatant combatant) =>
             CanMoveItself(combatant)
                 ? SquaresWithin(combatant, MovesAvailable(combatant))
-                : new Dictionary<GridPosition, int>();
+                : Nowhere;
+
+        private static readonly IReadOnlyDictionary<GridPosition, int> Nowhere = new Dictionary<GridPosition, int>();
 
         /// <summary>
         /// Whether <paramref name="combatant"/> may change square under its own power: not while
@@ -1118,7 +1176,14 @@ namespace WoundBound.Game.Combat
                 DistanceBand.Long => TargetRange.Long,
                 _ => TargetRange.BeyondLong,
             };
-            var shot = WeaponCalculator.ShotAt(attack.Weapon!, attack.DamageModifier, range);
+            // The same weapon at the same band always shoots the same: worked out once, words and all.
+            var shotKey = (attack.Weapon!, attack.DamageModifier, range);
+            if (!shots.TryGetValue(shotKey, out var shot))
+            {
+                shot = WeaponCalculator.ShotAt(attack.Weapon!, attack.DamageModifier, range);
+                shots[shotKey] = shot;
+            }
+
             if (shot.CanAttack && !CanBeTargeted(target, targetAt ?? target.Position, distance, attacker))
             {
                 return Refused("Too dark to see them — nothing can be targeted beyond Close at Visibility None.");
@@ -1141,6 +1206,8 @@ namespace WoundBound.Game.Combat
 
             AttackPlan Refused(string why) => new(why, 0, 0, null, why, attack);
         }
+
+        private readonly Dictionary<(WeaponDefinition Weapon, int DamageModifier, TargetRange Range), RangedShot> shots = new();
 
         /// <summary>
         /// Why <paramref name="combatant"/> can't swap their loadout in hand for the one at the
@@ -4200,8 +4267,30 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>Every free square <paramref name="mover"/> could reach for at most <paramref name="moves"/> moves, with the price of each.</summary>
-        internal Dictionary<GridPosition, int> SquaresWithin(Combatant mover, int moves) =>
-            MapFor(mover).All.Where(o => o.Value.Cost <= moves).ToDictionary(o => o.Key, o => o.Value.Cost);
+        internal IReadOnlyDictionary<GridPosition, int> SquaresWithin(Combatant mover, int moves)
+        {
+            // Kept for as long as the map it was read from: the brains ask the same question of the
+            // same board many times over while weighing a turn.
+            var map = MapFor(mover);
+            if (squaresWithin.TryGetValue((mover, moves), out var known) && ReferenceEquals(known.Map, map))
+            {
+                return known.Squares;
+            }
+
+            var squares = new Dictionary<GridPosition, int>();
+            foreach (var (square, route) in map.All)
+            {
+                if (route.Cost <= moves)
+                {
+                    squares[square] = route.Cost;
+                }
+            }
+
+            squaresWithin[(mover, moves)] = (map, squares);
+            return squares;
+        }
+
+        private readonly Dictionary<(Combatant Mover, int Moves), (MovementMap Map, IReadOnlyDictionary<GridPosition, int> Squares)> squaresWithin = new();
 
         /// <summary>
         /// As <see cref="SquaresWithin"/>, as though <paramref name="absent"/> weren't on the board —

@@ -28,10 +28,40 @@ namespace WoundBound.Game.Combat.Brains.Utility
     }
 
     /// <summary>
+    /// Why an option was put forward, in words — written out only when somebody reads it. A brain
+    /// weighs many thousands of options a turn and shows a handful, so the words for a move to
+    /// every square in reach are kept as their makings, not spelled out.
+    /// </summary>
+    public sealed class Reason : IEquatable<Reason>
+    {
+        private string? text;
+        private readonly Func<string>? write;
+
+        private Reason(string? text, Func<string>? write) => (this.text, this.write) = (text, write);
+
+        /// <summary>Words put off until they're read.</summary>
+        public static Reason Later(Func<string> write) => new(null, write);
+
+        public static implicit operator Reason(string text) => new(text, null);
+
+        public static implicit operator string(Reason reason) => reason.ToString();
+
+        public override string ToString() => text ??= write!();
+
+        public bool Contains(string part) => ToString().Contains(part, StringComparison.Ordinal);
+
+        public bool Equals(Reason? other) => other is not null && (ReferenceEquals(this, other) || ToString() == other.ToString());
+
+        public override bool Equals(object? obj) => obj is Reason other && Equals(other);
+
+        public override int GetHashCode() => ToString().GetHashCode(StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The next thing a creature could do, with what the whole plan it begins is worth: a move
     /// that sets up a blow is scored as the blow from the square it leads to.
     /// </summary>
-    public sealed record Option(OptionKind Kind, double Score, string Why,
+    public sealed record Option(OptionKind Kind, double Score, Reason Why,
         GridPosition? Square = null, Combatant? Target = null, AttackProfile? With = null,
         CombatAction? Action = null, ControlAction? Control = null, bool WithBonus = false, SpellCast? Cast = null,
         Manoeuvre? Manoeuvre = null, NimbleExploit? Exploit = null, OptionKind? Then = null, Illusion? Illusion = null,
@@ -183,7 +213,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var standing = Position(actor, square) - Peril(actor, square) - care * assess.Exposure(actor, square)
                                - care * leaving
                                + 0.5 * Approach(actor, square);
-                var first = moved ? new Option(OptionKind.Move, 0, $"to {square}", Square: square) : null;
+                var first = moved ? new Option(OptionKind.Move, 0, Reason.Later(() => $"to {square}"), Square: square) : null;
 
                 if (actions > 0)
                 {
@@ -193,14 +223,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         // A move made for an act carries the whole of it — which blow, which hand, which
                         // Opportunity — so whoever plays the plan through can make it as it was weighed.
                         options.Add(first is null ? act with { Score = score }
-                            : act with { Kind = OptionKind.Move, Score = score, Why = $"{first.Why}, then {act.Why}", Square = square, Then = act.Kind });
+                            : act with { Kind = OptionKind.Move, Score = score, Why = Reason.Later(() => $"{first.Why}, then {act.Why}"), Square = square, Then = act.Kind });
                     }
                 }
 
                 var waiting = standing;
                 options.Add(first is null
                     ? new Option(OptionKind.End, waiting, "hold here")
-                    : first with { Score = waiting, Why = $"{first.Why}, and wait" });
+                    : first with { Score = waiting, Why = Reason.Later(() => $"{first.Why}, and wait") });
             }
 
             // Slip first, where the best way out of here draws blades worth more than the Stamina.
@@ -226,7 +256,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 {
                     var score = Position(actor, square) - Peril(actor, square) - care * assess.Exposure(actor, square)
                                 - care * assess.LeavingCost(actor, square) + 0.5 * Approach(actor, square);
-                    options.Add(new Option(OptionKind.Move, score, $"dash to {square} ({cost} moves)", Square: square));
+                    options.Add(new Option(OptionKind.Move, score, Reason.Later(() => $"dash to {square} ({cost} moves)"), Square: square));
                 }
             }
 

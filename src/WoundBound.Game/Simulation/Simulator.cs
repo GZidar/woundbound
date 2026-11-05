@@ -99,17 +99,10 @@ namespace WoundBound.Game.Simulation
         /// <param name="party">Plays the party. Brains may hold state, so one is made per fight.</param>
         public static TacticReport Run(Func<IDiceRoller, Encounter> stage, Func<IPartyBrain> party, int fights, int seed = 1, int maxRounds = 50)
         {
-            var results = new List<FightResult>(fights);
-            string? name = null;
-
-            for (var i = 0; i < fights; i++)
-            {
-                var brain = party();
-                name ??= brain.Name;
-                results.Add(PlayOne(stage(new RandomDiceRoller(new Random(seed + i))), brain, maxRounds));
-            }
-
-            return new TacticReport(name ?? "(none)", results);
+            // Each fight stands alone on its own seed, so they play side by side; the results keep seed order.
+            var results = new FightResult[fights];
+            Parallel.For(0, fights, i => results[i] = PlayOne(stage(new RandomDiceRoller(new Random(seed + i))), party(), maxRounds));
+            return new TacticReport(fights > 0 ? party().Name : "(none)", results.ToList());
         }
 
         public static FightResult PlayOne(Encounter encounter, IPartyBrain party, int maxRounds = 50)
@@ -154,8 +147,9 @@ namespace WoundBound.Game.Simulation
         public static IReadOnlyList<DayResult> RunDays(Func<IDiceRoller, Encounter> stage, Func<IPartyBrain> party, int days, int fightsPerDay, int seed = 1, int maxRounds = 50,
             Func<IReadOnlyList<Combatant>, IDiceRoller, Skills.SkillChallengeResult>? opening = null)
         {
-            var results = new List<DayResult>(days);
-            for (var day = 0; day < days; day++)
+            // Each day stands alone on its own seeds, so they play side by side; the results keep day order.
+            var results = new DayResult[days];
+            Parallel.For(0, days, day =>
             {
                 var fights = new List<FightResult>();
                 Skills.SkillChallengeResult? opened = null;
@@ -195,8 +189,8 @@ namespace WoundBound.Game.Simulation
                     carried = encounter.Combatants.Where(c => c.Side == Side.Party).ToDictionary(c => c.Name, ShortRest);
                 }
 
-                results.Add(new DayResult(fights, fightsPerDay) { Opening = opened });
-            }
+                results[day] = new DayResult(fights, fightsPerDay) { Opening = opened };
+            });
 
             return results;
         }
