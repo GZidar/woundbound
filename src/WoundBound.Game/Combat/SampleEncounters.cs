@@ -1099,8 +1099,9 @@ namespace WoundBound.Game.Combat
         /// nothing in the place to favour either side, so what the fight costs the party is what the
         /// creatures are worth (GM Reference §5, Threat Value).
         /// </summary>
+        /// <param name="partyTier">The Tier the five are advanced to (<see cref="AtTier"/>).</param>
         public static Encounter Bench(GameData data, IDiceRoller dice, Brains.IGmBrain? gm, StartingAdversaryInfo foe, int count,
-            StartingAdversaryInfo? second = null, int secondCount = 0, bool cover = false)
+            StartingAdversaryInfo? second = null, int secondCount = 0, bool cover = false, Tier partyTier = Tier.T1)
         {
             // With cover: the clearing's trees, bushes and scree, in daylight — the same field with
             // somewhere to hide, to tell what open ground does to a price from what the creature does.
@@ -1109,11 +1110,11 @@ namespace WoundBound.Game.Combat
                 : Setting.Daylight with { Name = "Open ground" };
             var combatants = new List<Combatant>
             {
-                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
-                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
-                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
-                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
-                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+                CombatantFactory.FromCharacter(AtTier(SallaRinehart(data), partyTier), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(AtTier(JorenBlacke(data), partyTier), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(AtTier(DrovanThale(data), partyTier), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(AtTier(MirellaVask(data), partyTier), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(AtTier(ElthricDane(data), partyTier), new GridPosition(3, 7)),
             };
 
             // A second statblock, where there is one, drawn up in front of the first.
@@ -1142,6 +1143,42 @@ namespace WoundBound.Game.Combat
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
                 setting: setting, environment: data.Environment);
+        }
+
+        /// <summary>
+        /// <paramref name="build"/> advanced to the middle of <paramref name="tier"/> (Core Rules §5):
+        /// Rank 4 at T2, Rank 7 at T3. The Tier's attribute bonus goes where a player would put it:
+        /// the ability the character fights or casts with at T2, and that and Vitality at T3. Its
+        /// spells are cast at its Tier, as a caster of that Tier may (their dice and cost follow,
+        /// Core Rules §11). The kit stays as it was. T1 is the build as it stands.
+        /// </summary>
+        public static CharacterBuild AtTier(CharacterBuild build, Tier tier)
+        {
+            if (tier == Tier.T1)
+            {
+                return build;
+            }
+
+            var fightsWith = build.ClassPrinciple switch
+            {
+                ClassPrinciple.Martial => Ability.Strength,
+                ClassPrinciple.Nimble => Ability.Agility,
+                ClassPrinciple.Cerebral => Ability.Focus,
+                _ => Ability.Presence,
+            };
+            build.Rank = tier == Tier.T2 ? 4 : 7;
+            build.TierBumps[Tier.T2] = [fightsWith];
+            if (tier == Tier.T3)
+            {
+                build.TierBumps[Tier.T3] = [fightsWith, fightsWith == Ability.Vitality ? Ability.Strength : Ability.Vitality];
+            }
+
+            foreach (var spell in build.Spells)
+            {
+                spell.SpellTier = tier;
+            }
+
+            return build;
         }
 
         /// <summary>
