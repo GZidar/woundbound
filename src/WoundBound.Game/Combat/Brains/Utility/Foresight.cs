@@ -18,7 +18,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// in <see cref="UtilityGmBrain.GmCaution"/>: an adversary is there to challenge the party, and is
     /// worth keeping only for the harm it does later (the user's direction, 2026-11-05).
     /// </param>
-    public sealed record Foresight(int Candidates, int Games, int Rounds, double OwnWorth = UtilityGmBrain.GmCaution)
+    /// <param name="Others">
+    /// Who plays the GM's creatures in those games once the plan weighed is made: a quick brain, or
+    /// the GM's own at its best, without looking ahead itself — dearer, but a game played further
+    /// ahead is only as good as the play in it.
+    /// </param>
+    public sealed record Foresight(int Candidates, int Games, int Rounds, double OwnWorth = UtilityGmBrain.GmCaution,
+        GamesPlayedBy Others = GamesPlayedBy.Quick)
     {
         /// <summary>Four plans, a dozen games each, to the end of the round.</summary>
         public static Foresight Default { get; } = new(4, 12, 0);
@@ -40,6 +46,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         /// <summary>Whether a GM with this foresight looks ahead at all.</summary>
         public bool LooksAhead => Candidates >= 2 && Games >= 1;
+    }
+
+    /// <summary>Who plays the GM's side in the games a GM looks ahead on.</summary>
+    public enum GamesPlayedBy
+    {
+        /// <summary>The simple GM: closes and strikes.</summary>
+        Quick,
+
+        /// <summary>The utility GM at Best, knowing what the GM looking ahead knows, not looking ahead itself.</summary>
+        Best,
     }
 
     public partial class UtilityGmBrain
@@ -81,7 +97,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             double?[,] outcomes;
             try
             {
-                outcomes = PlayForward(view.Encounter, turn, candidates, seeds, worth, sight);
+                outcomes = PlayForward(view.Encounter, turn, candidates, seeds, worth, sight, Knowledge, PeersThroughFog);
             }
             catch (AggregateException)
             {
@@ -125,7 +141,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// luck — all side by side, and where each game left the GM: null for one a refusal cut short.
         /// </summary>
         private static double?[,] PlayForward(Encounter live, GmTurn turn, IReadOnlyList<Option> candidates, int[] seeds,
-            IReadOnlyList<(Combatant Creature, double Worth)> worth, Foresight sight)
+            IReadOnlyList<(Combatant Creature, double Worth)> worth, Foresight sight, Knowledge knowledge, bool peers)
         {
             var steps = candidates.Select(option => (First: StepFor(option, turn),
                 Then: option.Kind == OptionKind.Move && option.Then is { } next ? FollowUp(option with { Kind = next, Square = null }, turn) : null)).ToList();
@@ -136,7 +152,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var map = forkMap ??= new Dictionary<object, object?>(ReferenceEqualityComparer.Instance);
                 try
                 {
-                    var quick = new FollowThrough(new SimpleGmBrain());
+                    var quick = new FollowThrough(sight.Others == GamesPlayedBy.Best
+                        ? new UtilityGmBrain(BrainSkill.Best, new Random(seeds[g]), knowledge, peers: peers, foresight: Foresight.None)
+                        : new SimpleGmBrain());
                     var fork = live.Fork(new RandomDiceRoller(new Random(seeds[g])), quick, out var counterpart, map);
                     if (steps[c].Then is { } then)
                     {
@@ -233,17 +251,18 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>
-        /// The quick GM of a game looked ahead on, which first sees the plan being weighed through: the
-        /// blow, spell or hand a move was made for, once the move is made.
+        /// The GM of a game looked ahead on, which first sees the plan being weighed through — the blow,
+        /// spell or hand a move was made for, once the move is made — and leaves every other choice to
+        /// <paramref name="inner"/>.
         /// </summary>
-        private sealed class FollowThrough(IGmBrain quick) : SimpleGmBrain
+        private sealed class FollowThrough(IGmBrain inner) : IGmBrain
         {
             private Combatant? actor;
             private GmStep? planned;
 
             public void Plan(Combatant who, GmStep step) => (actor, planned) = (who, step);
 
-            public override GmStep NextStep(BattleView view, GmTurn turn)
+            public GmStep NextStep(BattleView view, GmTurn turn)
             {
                 if (planned is { } step && turn.Actor == actor && turn.Actor.ActionsRemaining > 0)
                 {
@@ -252,8 +271,30 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
 
                 planned = null;
-                return quick.NextStep(view, turn);
+                return inner.NextStep(view, turn);
             }
+
+            public bool PeersThroughFog => inner.PeersThroughFog;
+
+            public Combatant ChooseOwedTurn(BattleView view) => inner.ChooseOwedTurn(view);
+
+            public Combatant? ChooseExtraTurn(BattleView view) => inner.ChooseExtraTurn(view);
+
+            public GmCloseIn? NextCloseIn(BattleView view, IReadOnlyList<Combatant> stillIdle) => inner.NextCloseIn(view, stillIdle);
+
+            public bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => inner.StrikesAtLeaver(view, adversary, leaver);
+
+            public bool PanicDodges(BattleView view, PendingReaction reaction) => inner.PanicDodges(view, reaction);
+
+            public bool StandsFirm(BattleView view, PendingReaction reaction) => inner.StandsFirm(view, reaction);
+
+            public bool ArrestsShove(BattleView view, PendingReaction reaction) => inner.ArrestsShove(view, reaction);
+
+            public bool Backlashes(BattleView view, PendingReaction reaction) => inner.Backlashes(view, reaction);
+
+            public bool Sustains(BattleView view, PendingReaction reaction) => inner.Sustains(view, reaction);
+
+            public int ShelterAmount(BattleView view, PendingReaction reaction) => inner.ShelterAmount(view, reaction);
         }
     }
 }
