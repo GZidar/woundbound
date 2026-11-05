@@ -9,9 +9,16 @@ public class StandingYourGroundTests
 {
     private static readonly Game.Data.GameData Data = TestData.Load();
 
-    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Fight(IGmBrain? gm, params int[] dice)
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Fight(IGmBrain? gm, params int[] dice) => Stage(true, gm, dice);
+
+    /// <summary>The same stage with the ratkin played as Brutes, one to a turn: as Minions they act together as a mob (Core Rules §9).</summary>
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Crowd(IGmBrain? gm, params int[] dice) => Stage(false, gm, dice);
+
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Crowd(params int[] dice) => Crowd(null, dice);
+
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Stage(bool asMinions, IGmBrain? gm, int[] dice)
     {
-        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), gm);
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), gm, asMinions);
         return (encounter, encounter.Combatants.Single(c => c.Side == Side.Party), encounter.Combatants.Single(c => c.Name == "Ratkin Biter"));
     }
 
@@ -118,7 +125,7 @@ public class StandingYourGroundTests
     [Fact]
     public void ItEnds_AtTheStartOfTheirNextTurn()
     {
-        var (encounter, fighter, _) = Fight();
+        var (encounter, fighter, _) = Crowd();
         encounter.TryStandGround(CombatAction.Dodge);
         encounter.EndTurn();
 
@@ -142,7 +149,7 @@ public class StandingYourGroundTests
     {
         // The Biter braces (DT 11 → 13) and bites at Disadvantage: 2, 3 and 4 keep 2+3 = 5, a miss.
         // It's still braced on the fighter's next turn.
-        var (encounter, fighter, biter) = Fight(new BracingBrain(), 2, 3, 4);
+        var (encounter, fighter, biter) = Crowd(new BracingBrain(), 2, 3, 4);
         fighter.Position = new GridPosition(6, 2);
         encounter.EndTurn();
 

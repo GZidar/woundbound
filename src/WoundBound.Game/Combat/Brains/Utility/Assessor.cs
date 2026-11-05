@@ -775,7 +775,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <param name="harried">An enemy reckoned Harried by the mover first: its reaction rolls at Disadvantage (Core Rules §9, "Harry").</param>
         public (double Cost, double DropChance) LeavingRisk(Combatant mover, GridPosition to, Combatant? harried = null)
         {
-            if (mover.IsSlipping)
+            if (mover.IsSlipping || mover.CanFade)
             {
                 return (0, 0);
             }

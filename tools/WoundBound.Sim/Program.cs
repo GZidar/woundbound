@@ -1,16 +1,16 @@
 // Bot v bot: plays a sample fight many times over with each way of playing the party, the GM's
 // brain held fixed, and prints how each one fared.
 //
-//   dotnet run --project tools/WoundBound.Sim -- [--fight signpost|signpost4|casters|ford|fordcasters|camp|witches|rivals|party|solo] [--gm simple|tripping|best|balanced|poor] [--party all|presets|utility] [--fights 1000] [--seed 1] [--show N]
+//   dotnet run --project tools/WoundBound.Sim -- [--fight signpost|signpost4|casters|ford|fordcasters|camp|witches|rivals|rivals2..4|party|solo|...] [--gm simple|tripping|best|balanced|poor] [--party all|presets|utility] [--fights 1000] [--seed 1] [--show N]
 //
 //   signpost (the default): the Dumb Fighter, Salla Rinehart and Drovan Thale v the Quickstart's
 //     signpost bandits, who break and run; the lantern-bearer mustn't get away.
 //   signpost4: the book's table of four — Joren Blacke joins, and so does a second Roadside Bandit.
 //   casters: the Quickstart's own five — Salla, Drovan, Joren, Mirella and Elthric — v five bandits.
 //   ford: the same three, ambushed mid-ford at the Ferry Shrine at Longreach Crossing (Inner Sea Loom).
-//   fordcasters: the Quickstart's five, casters among them, ambushed mid-ford by three Skulkers and two Ambushers.
-//   witches: the Quickstart's five on a hedge road v a Tollroad Bandit, his wolf, a Bog Hex-Caller, a Hollow Bloodwright and a Wyrding Chanter.
-//   camp: the Quickstart's five round their campfire at night, set on by a Tollroad Bandit, two wolves and two Ambushers.
+//   fordcasters: the Quickstart's five, casters among them, ambushed mid-ford by six Skulkers and four Ambushers.
+//   witches: the Quickstart's five on a hedge road v a Tollroad Bandit, two wolves, a Bog Hex-Caller, a Hollow Bloodwright and a Wyrding Chanter.
+//   camp: the Quickstart's five round their campfire at night, set on by two Tollroad Bandits, three wolves and three Ambushers.
 //   party: the same three v a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin.
 //   solo: the Dumb Fighter v three Bramble Ratkin.
 //
@@ -117,8 +117,48 @@ IGmBrain Gm() => gmName switch
     _ => new SimpleGmBrain(),
 };
 
+// --fight bench --foe NAME --count N: the Quickstart five v N of one statblock on open ground — for pricing it.
+var benchFoe = Text("--foe", "Timber Wolf")!;
+var benchCount = Option("--count", 5);
+WoundBound.Rules.Catalog.StartingAdversaryInfo BenchFoe() => Altered(benchFoe switch
+{
+    "Roadside Bandit" => SampleEncounters.RoadsideBandit,
+    "Bandit Ambusher" => SampleEncounters.BanditAmbusher,
+    "Fen Glamourer" => SampleEncounters.FenGlamourer(data),
+    _ => data.Adversary(benchFoe),
+}, Text("--set", null));
+
+// --set Field=Value,...: the bench's statblock with numbers changed — for pricing a statblock as it's
+// tuned. Any property of the statblock: BodyMax=4, DamageDie=d6, Role=Minion, Traits= (none), Features= (none).
+WoundBound.Rules.Catalog.StartingAdversaryInfo Altered(WoundBound.Rules.Catalog.StartingAdversaryInfo info, string? changes)
+{
+    if (changes is null)
+    {
+        return info;
+    }
+
+    var copy = info with { };
+    foreach (var change in changes.Split(',', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var (name, value) = change.Split('=', 2) is [var k, var v] ? (k.Trim(), v.Trim()) : throw new ArgumentException($"--set wants Field=Value, not {change}");
+        var property = typeof(WoundBound.Rules.Catalog.StartingAdversaryInfo).GetProperty(name)
+                       ?? throw new ArgumentException($"A statblock has no {name}.");
+        var type = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+        object? parsed = value.Length == 0 && !type.IsValueType ? (type.IsArray ? Array.CreateInstance(type.GetElementType()!, 0)
+                : type.IsGenericType ? Activator.CreateInstance(typeof(List<>).MakeGenericType(type.GetGenericArguments()[0])) : null)
+            : type.IsEnum ? Enum.Parse(type, value, ignoreCase: true)
+            : type == typeof(string) ? value
+            : Convert.ChangeType(value, type, System.Globalization.CultureInfo.InvariantCulture);
+        property.SetValue(copy, parsed);
+    }
+
+    return copy;
+}
+
 Encounter Stage(IDiceRoller dice) => which switch
 {
+    "bench" => SampleEncounters.Bench(data, dice, Gm(), BenchFoe(), benchCount,
+        Text("--foe2", null) is { } foe2 ? Altered(data.Adversary(foe2), Text("--set2", null)) : null, Option("--count2", 0)),
     "solo" => SampleEncounters.FighterVersusRatkin(data, dice, Gm()),
     "party" => SampleEncounters.PartyVersusAmbush(data, dice, Gm(), ambush: true),
     "signpost4" => SampleEncounters.SignpostAmbush(data, dice, Gm(), fourPlayers: true, ambush: true),
@@ -128,6 +168,7 @@ Encounter Stage(IDiceRoller dice) => which switch
     "camp" => SampleEncounters.CampfireAmbush(data, dice, Gm(), ambush: true),
     "witches" => SampleEncounters.HedgeWitchesToll(data, dice, Gm()),
     "rivals" => SampleEncounters.RivalBand(data, dice, Gm()),
+    "rivals2" or "rivals3" or "rivals4" => SampleEncounters.RivalBand(data, dice, Gm(), count: which[^1] - '0'),
     "swarm" => SampleEncounters.RatswarmOnTheCauseway(data, dice, Gm()),
     "swarmopen" => SampleEncounters.RatswarmOnTheCauseway(data, dice, Gm(), openGround: true),
     "champion" => SampleEncounters.ChampionOnTheGreen(data, dice, Gm()),
@@ -144,25 +185,27 @@ Encounter Stage(IDiceRoller dice) => which switch
 var tactics = PartyTactics.Presets;
 var fight = which switch
 {
+    "bench" => $"Salla, Drovan, Joren, Mirella and Elthric v {benchCount} × {benchFoe}{(Text("--set", null) is { } set ? $" ({set})" : "")} on open ground",
     "solo" => "The Dumb Fighter v three Bramble Ratkin",
     "party" => "The Dumb Fighter, Salla and Drovan v a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin",
     "signpost4" => "The Dumb Fighter, Salla, Drovan and Joren v four signpost bandits (objective: take the lantern-bearer)",
     "casters" => "Salla, Drovan, Joren, Mirella and Elthric v five signpost bandits (objective: take the lantern-bearer)",
     "ford" => "The Dumb Fighter, Salla and Drovan, ambushed mid-ford at Longreach Crossing by two Skulkers and an Ambusher",
-    "witches" => "Salla, Drovan, Joren, Mirella and Elthric v a Tollroad Bandit, his wolf, and three casters: Hex-Caller, Bloodwright, Chanter",
+    "witches" => "Salla, Drovan, Joren, Mirella and Elthric v a Tollroad Bandit, his two wolves, and three casters: Hex-Caller, Bloodwright, Chanter",
     "rivals" => "Salla, Drovan, Joren, Mirella and Elthric v the Grey Lanterns, a rival company of five built from the same rules",
-    "swarm" => "Salla, Drovan, Joren, Mirella and Elthric v a Fenmoor Ratswarm and four Bramble Ratkin on the fen causeway",
-    "swarmopen" => "Salla, Drovan, Joren, Mirella and Elthric v a Fenmoor Ratswarm and four Bramble Ratkin on open ground",
+    "rivals2" or "rivals3" or "rivals4" => $"Salla, Drovan, Joren, Mirella and Elthric v {which[^1]} of the Grey Lanterns, rivals built from the same rules",
+    "swarm" => "Salla, Drovan, Joren, Mirella and Elthric v two Fenmoor Ratswarms and eight Bramble Ratkin on the fen causeway",
+    "swarmopen" => "Salla, Drovan, Joren, Mirella and Elthric v two Fenmoor Ratswarms and eight Bramble Ratkin on open ground",
     "champion" => "Salla, Drovan, Joren, Mirella and Elthric v a Noble Champion and two retainers on the village green",
-    "outriders" => "Salla, Drovan, Joren, Mirella and Elthric v three Tollroad Bandits on horseback and an ambusher on foot",
-    "glamour" => "Salla, Drovan, Joren, Mirella and Elthric v a Tollroad Bandit, his wolf, two Vampire Bats and a Fen Glamourer at the old mill",
-    "clearing" => $"Salla, Drovan, Joren, Mirella and Elthric met at dusk in a woodland clearing by two skulkers, two wolves and two ratkin, placed by a {setup} setup" + (prepared ? ", lying in wait" : string.Empty),
+    "outriders" => "Salla, Drovan, Joren, Mirella and Elthric v four Tollroad Bandits on horseback and two ambushers on foot",
+    "glamour" => "Salla, Drovan, Joren, Mirella and Elthric v two Tollroad Bandits, two wolves, four Vampire Bats and a Fen Glamourer at the old mill",
+    "clearing" => $"Salla, Drovan, Joren, Mirella and Elthric met at dusk in a woodland clearing by four skulkers, four wolves and four ratkin, placed by a {setup} setup" + (prepared ? ", lying in wait" : string.Empty),
     "gnoll" => "Salla, Drovan, Joren, Mirella and Elthric v a Duskfang Gnoll (Rampage) with a Tollroad Bandit and two Roadside Bandits",
-    "roadblock" => "Salla, Drovan, Joren, Mirella and Elthric v a roadblock: two crossbows behind crates, two bandits behind carts, and the Tollroad Bandit",
+    "roadblock" => "Salla, Drovan, Joren, Mirella and Elthric v a roadblock: four crossbows behind crates, four bandits behind carts, and the Tollroad Bandit",
     "guardians" => "Salla, Drovan, Joren, Mirella and Elthric v a Stoneheart Golem and two Animated Suits of Mail in a cloister yard",
     "stag" => "Salla, Drovan, Joren, Mirella and Elthric v the Hollow Stag, a T1 Solo, in the birchwood",
-    "camp" => "Salla, Drovan, Joren, Mirella and Elthric round their campfire at night v a Tollroad Bandit, two Timber Wolves and two Ambushers",
-    "fordcasters" => "Salla, Drovan, Joren, Mirella and Elthric, ambushed mid-ford at Longreach Crossing by three Skulkers and two Ambushers",
+    "camp" => "Salla, Drovan, Joren, Mirella and Elthric round their campfire at night v two Tollroad Bandits, three Timber Wolves and three Ambushers",
+    "fordcasters" => "Salla, Drovan, Joren, Mirella and Elthric, ambushed mid-ford at Longreach Crossing by six Skulkers and four Ambushers",
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 

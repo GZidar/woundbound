@@ -13,9 +13,14 @@ public class ManoeuvreTests
     /// The fighter beside the Biter, facing east: the fighter's unarmed roll is 2d12 + 4 (Tier 1 +
     /// Strength 3), against the Biter's ST 11. It has 1 Stamina, which it would spend standing firm.
     /// </summary>
-    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Beside(IGmBrain? gm, params int[] dice)
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Beside(IGmBrain? gm, params int[] dice) => Stage(true, gm, dice);
+
+    /// <summary>The same stage with the ratkin played as Brutes, one to a turn: as Minions they act together as a mob (Core Rules §9).</summary>
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) BesideCrowd(IGmBrain? gm, params int[] dice) => Stage(false, gm, dice);
+
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Stage(bool asMinions, IGmBrain? gm, int[] dice)
     {
-        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), gm);
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), gm, asMinions);
         var fighter = encounter.Combatants.Single(c => c.Side == Side.Party);
         var biter = encounter.Combatants.Single(c => c.Name == "Ratkin Biter");
         fighter.Position = new GridPosition(6, 2);
@@ -335,7 +340,7 @@ public class ManoeuvreTests
     {
         // Grabbed (9+7 = 16 v ST 15, taken), then on the fighter's turn: 6+5 +4 = 15 against the
         // Biter's ST 11 — out of reach of its standing firm, so it isn't asked.
-        var (encounter, fighter, biter) = Beside(new GrabbingBrain(), 9, 7, 6, 5);
+        var (encounter, fighter, biter) = BesideCrowd(new GrabbingBrain(), 9, 7, 6, 5);
         encounter.EndTurn();
         encounter.RunAdversaryTurn();
         encounter.RespondToReaction(spend: false);

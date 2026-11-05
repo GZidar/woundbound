@@ -628,6 +628,21 @@ namespace WoundBound.Game.Combat
         /// <summary>Pack Tactics: Advantage on its attack whenever a second of its kind is within reach of the same target.</summary>
         public bool HasPackTactics => Traits.Contains(AdversaryTrait.PackTactics);
 
+        /// <summary>Hit and Fade (GM Reference §3, a melee Skirmisher's): once a round, the move straight after an attack draws no reaction for leaving reach.</summary>
+        public bool HasHitAndFade => Traits.Contains(AdversaryTrait.HitAndFade);
+
+        /// <summary>Its next move would be its Hit and Fade: it has attacked on this turn of its own (a reaction strike doesn't count), not moved since, and not faded yet this round.</summary>
+        public bool CanFade => HasHitAndFade && HasAttackedThisTurn && !HasMovedSinceLastAttack && !HasFadedThisRound;
+
+        /// <summary>Has made an attack on its current turn — not as a reaction.</summary>
+        public bool HasAttackedThisTurn { get; internal set; }
+
+        /// <summary>Has used its Hit and Fade this round.</summary>
+        public bool HasFadedThisRound { get; internal set; }
+
+        /// <summary>Is making its Hit and Fade move now: leaving reach on the way draws nothing.</summary>
+        public bool IsFading { get; internal set; }
+
         /// <summary>Resistant to Cutting: Body damage from a Cutting weapon halved, rounding down (Undead).</summary>
         public bool IsResistantToCutting => Traits.Contains(AdversaryTrait.ResistantToCutting);
 

@@ -7,9 +7,14 @@ public class EncounterTests
 {
     private static readonly Game.Data.GameData Data = TestData.Load();
 
-    private static (Encounter Encounter, Combatant Fighter, List<Combatant> Ratkin) Fight(params int[] dice)
+    private static (Encounter Encounter, Combatant Fighter, List<Combatant> Ratkin) Fight(params int[] dice) => Stage(true, dice);
+
+    /// <summary>The same stage with the ratkin played as Brutes, one to a turn: as Minions they act together as a mob (Core Rules §9).</summary>
+    private static (Encounter Encounter, Combatant Fighter, List<Combatant> Ratkin) Crowd(params int[] dice) => Stage(false, dice);
+
+    private static (Encounter Encounter, Combatant Fighter, List<Combatant> Ratkin) Stage(bool asMinions, int[] dice)
     {
-        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice));
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), asMinions: asMinions);
         var fighter = encounter.Combatants.Single(c => c.Side == Side.Party);
         var ratkin = encounter.Combatants.Where(c => c.Side == Side.Adversaries).ToList();
         return (encounter, fighter, ratkin);
@@ -138,12 +143,48 @@ public class EncounterTests
     }
 
     [Fact]
+    public void Minions_ActTogetherAsAMob_InOneOfTheCapsTurns()
+    {
+        // Three ratkin Minions, one fighter: the cap is one turn, and the mob takes it — every
+        // ratkin acts in it, one after another (Core Rules §9, "Minions act as a mob"). The
+        // fighter stays out of reach, so they only move; nobody is left out to close in.
+        var (encounter, _, ratkin) = Fight();
+        var before = ratkin.Select(r => r.Position).ToList();
+        encounter.EndTurn();
+
+        while (encounter.Phase == EncounterPhase.AdversaryTurn)
+        {
+            encounter.RunAdversaryTurn();
+        }
+
+        Assert.Equal(1, encounter.AdversaryTurnsPerRound);
+        Assert.Equal(3, encounter.Log.Count(line => line.StartsWith("Ratkin") && line.Contains(" moves ")));
+        Assert.All(ratkin.Select(r => r.Position).Zip(before), p => Assert.NotEqual(p.Second, p.First));
+        Assert.DoesNotContain(encounter.Log, line => line.Contains("closes in"));
+        Assert.Equal(2, encounter.Round);
+    }
+
+    [Fact]
+    public void TheMob_KeepsActing_AfterItHasSpentTheCapsOneTurn()
+    {
+        // The first ratkin spends the round's only turn; the other two still act in it.
+        var (encounter, _, ratkin) = Fight();
+        encounter.EndTurn();
+
+        encounter.RunAdversaryTurn();
+
+        Assert.Equal(0, encounter.AdversaryTurnsLeft);
+        Assert.Equal(EncounterPhase.AdversaryTurn, encounter.Phase);
+        Assert.Equal(2, ratkin.Count(encounter.MayTakeOwedTurn));
+    }
+
+    [Fact]
     public void TheGm_TakesOneAdversaryTurnPerCharacter_ThenANewRoundBegins()
     {
         // Three ratkin, one fighter: one adversary turn a round (Core Rules §9). The fighter stays
         // out of reach, so the ratkin only move, and no dice are rolled. The two left out of the
         // round's turns close in at its end.
-        var (encounter, _, ratkin) = Fight();
+        var (encounter, _, ratkin) = Crowd();
         var before = ratkin.Select(r => r.Position).ToList();
         encounter.EndTurn();
 

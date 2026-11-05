@@ -1625,14 +1625,22 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            if (owedInGap > 0)
+            if (owedInGap > 0 || MobStillActing)
             {
-                owedInGap--;
-                adversaryTurnsRemaining--;
                 actor = CheckAdversary(gm.ChooseOwedTurn(GmView), "an owed turn");
-                if (!actor.HasTurnLeftThisRound)
+                if (!MayTakeOwedTurn(actor))
                 {
-                    throw new InvalidOperationException($"The GM brain gave {actor.Name} more owed turns this round than it takes; only an Opportunity buys another.");
+                    throw new InvalidOperationException(actor.HasTurnLeftThisRound
+                        ? $"The GM brain gave {actor.Name} an owed turn the cap has none left for."
+                        : $"The GM brain gave {actor.Name} more owed turns this round than it takes; only an Opportunity buys another.");
+                }
+
+                if (!GoesFree(actor))
+                {
+                    owedInGap--;
+                    adversaryTurnsRemaining--;
+                    // The mob's one turn: every Minion acts in it, before anything else does.
+                    mobTurnTaken |= actor.IsMinion && !actor.IsSolo;
                 }
 
                 actor.TurnsTakenThisRound++;
@@ -1689,6 +1697,7 @@ namespace WoundBound.Game.Combat
                 combatant.HasTakenExtraTurnThisRound = false;
                 combatant.HasUsedFreeStep = false;
                 combatant.IsSlipping = false;
+                combatant.HasFadedThisRound = false;
             }
 
             EndSpellsOfFallenCasters(roundEnd: true);
@@ -1712,12 +1721,31 @@ namespace WoundBound.Game.Combat
             adversaryTurnCap = ChallengeCalculator.AdversaryTurnCap(adversaryTurnCap, partyStillToAct.Count);
             // A Solo takes its Tier plus one turns by nature, "above and beyond" the cap (Core Rules
             // §9; GM Reference §3, "Solo Actions"); the cap is what everything else is owed.
+            mobTurnTaken = false;
             adversaryTurnsRemaining = (RuleTrials.Uncapped ? Math.Max(adversaryTurnCap.Value, Fighting(Side.Adversaries).Count(a => !a.IsSolo)) : adversaryTurnCap.Value)
                                       + Fighting(Side.Adversaries).Where(a => a.IsSolo).Sum(a => a.TurnsPerRound);
             BeginNextPartyTurn();
         }
 
         public int AdversaryTurnsPerRound => adversaryTurnCap ?? 0;
+
+        /// <summary>
+        /// Whether the Minions' mob turn has begun this round. All a side's Minions act together
+        /// in one of the cap's turns, every one of them acting in it (the user, 2026-11-06): a
+        /// cheap creature can't earn its price while each one takes a turn the cap could give a
+        /// tougher one.
+        /// </summary>
+        private bool mobTurnTaken;
+
+        /// <summary>Whether <paramref name="creature"/> acts in the mob turn already paid for, costing the cap nothing more.</summary>
+        private bool GoesFree(Combatant creature) => mobTurnTaken && creature.IsMinion && !creature.IsSolo;
+
+        /// <summary>The mob has begun its turn and some of it has still to act: nobody else goes until it's done.</summary>
+        private bool MobStillActing => mobTurnTaken && Fighting(Side.Adversaries).Any(a => a.HasTurnLeftThisRound && GoesFree(a));
+
+        /// <summary>Whether <paramref name="creature"/> could take the GM's next owed turn: it has one left this round, and either it acts in the mob turn under way or the cap still has a turn to give and no mob is still acting.</summary>
+        public bool MayTakeOwedTurn(Combatant creature) =>
+            creature.HasTurnLeftThisRound && (GoesFree(creature) || owedInGap > 0 && !MobStillActing);
 
         /// <summary>The adversary turns the GM still has to take this round.</summary>
         public int AdversaryTurnsLeft => adversaryTurnsRemaining;
@@ -1851,9 +1879,13 @@ namespace WoundBound.Game.Combat
 
             // Each adversary takes one turn a round: with every one still fighting already acted, the
             // turns still owed have nobody to take them — "fewer adversaries, fewer turns" (Core Rules §9).
-            if (owedInGap > 0 && !Fighting(Side.Adversaries).Any(a => a.HasTurnLeftThisRound))
+            if (owedInGap > 0 && !Fighting(Side.Adversaries).Any(a => a.HasTurnLeftThisRound && !GoesFree(a)))
             {
-                Write("Every adversary still fighting has had its turn this round.");
+                if (!Fighting(Side.Adversaries).Any(a => a.HasTurnLeftThisRound))
+                {
+                    Write("Every adversary still fighting has had its turn this round.");
+                }
+
                 adversaryTurnsRemaining = 0;
                 owedInGap = 0;
             }
@@ -1866,7 +1898,7 @@ namespace WoundBound.Game.Combat
                 throw new InvalidOperationException($"The GM brain bought {again.Name} a second extra turn this round; an Opportunity buys only one, unless it's a Solo.");
             }
 
-            if (owedInGap > 0 || extraTurnChosen is not null)
+            if (owedInGap > 0 || extraTurnChosen is not null || MobStillActing)
             {
                 Phase = EncounterPhase.AdversaryTurn;
                 return;
@@ -1996,6 +2028,7 @@ namespace WoundBound.Game.Combat
             var wasStanding = combatant.StandingGround.ToList();
             combatant.ThresholdModifiers = ThresholdModifierCalculator.AtTurnStart(combatant.ThresholdModifiers);
             combatant.HasMovedThisTurn = false;
+            combatant.HasAttackedThisTurn = false;
             combatant.HasWithdrawnThisTurn = false;
             combatant.HasBeenAttackedSinceTurnStart = false;
             combatant.IsRinged = false;
@@ -2591,7 +2624,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private Queue<Combatant> LeavingReachOf(Combatant mover, IReadOnlyList<GridPosition> path) =>
             new(Fighting(mover.Side == Side.Party ? Side.Adversaries : Side.Party)
-                .Where(_ => !mover.IsSlipping)
+                .Where(_ => !mover.IsSlipping && !mover.IsFading)
                 .Select(e => (Enemy: e, At: LeaveIndex(e, mover, path)))
                 .Where(x => x.At is not null)
                 .OrderBy(x => x.At)
@@ -2660,17 +2693,27 @@ namespace WoundBound.Game.Combat
             var plan = PlanMove(mover, square)!;
             var start = mover.Position;
             var paidWith = cost == 0 ? "the free step" : PayMoves(mover, cost);
+            if (mover.CanFade)
+            {
+                // Hit and Fade (GM Reference §3): the move straight after an attack, once a round.
+                mover.IsFading = true;
+                mover.HasFadedThisRound = true;
+                Write($"{mover.Name} fades back after its attack (Hit and Fade): leaving reach draws nothing.");
+            }
+
             mover.HasUsedFreeStep |= cost == 0;
             mover.HasMovedThisTurn = true;
             mover.HasMovedSinceLastAttack = true;
             if (!Swims(mover, plan, paidWith))
             {
+                mover.IsFading = false;
                 then();
                 return;
             }
 
             Relocate(mover, plan.Path, arrivedAt =>
             {
+                mover.IsFading = false;
                 if (!mover.IsOutOfFight)
                 {
                     var from = start;
@@ -3159,6 +3202,7 @@ namespace WoundBound.Game.Combat
 
             target.HasBeenAttackedSinceTurnStart = true;
             attacker.HasMovedSinceLastAttack = false;
+            attacker.HasAttackedThisTurn |= !asReaction;
             ShowFromCover(attacker, [target]);
             var patient = attacker.HoldsPatient;
             var precise = attacker.HoldsPrecise;

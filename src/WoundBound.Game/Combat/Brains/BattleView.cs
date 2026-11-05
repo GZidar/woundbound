@@ -60,7 +60,7 @@ namespace WoundBound.Game.Combat.Brains
 
         /// <summary>The adversaries still fighting that haven't had their turn this round — the ones an owed turn can go to.</summary>
         /// <remarks>A Solo stays on the list until it has taken all its turns.</remarks>
-        public IEnumerable<Combatant> YetToAct => Adversaries.Where(a => a.HasTurnLeftThisRound);
+        public IEnumerable<Combatant> YetToAct => Adversaries.Where(encounter.MayTakeOwedTurn);
 
         /// <summary>The party still fighting.</summary>
         public IEnumerable<Combatant> Characters => encounter.Fighting(Side.Party).Where(Sees);

@@ -9,9 +9,14 @@ public class ReactionAndOpportunityTests
     private sealed record Board(Encounter Encounter, Combatant Fighter, Combatant Biter, Combatant Sneak, Combatant Shiv);
 
     // The fighter's DT is 14 throughout: a panic dodge raises it to 16 for the one attack.
-    private static Board Fight(params int[] dice)
+    private static Board Fight(params int[] dice) => Stage(true, dice);
+
+    /// <summary>The same stage with the ratkin played as Brutes, one to a turn: as Minions they act together as a mob (Core Rules §9).</summary>
+    private static Board Crowd(params int[] dice) => Stage(false, dice);
+
+    private static Board Stage(bool asMinions, int[] dice)
     {
-        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice));
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), asMinions: asMinions);
         Combatant Named(string name) => encounter.Combatants.Single(c => c.Name == name);
         return new Board(encounter, encounter.Combatants.Single(c => c.Side == Side.Party),
             Named("Ratkin Biter"), Named("Ratkin Sneak"), Named("Ratkin Shiv"));
@@ -52,7 +57,7 @@ public class ReactionAndOpportunityTests
     public void Dodging_HandsTheGmAnImmediateOpportunity_WhichItSpendsOnAnExtraTurn()
     {
         // 8+6 = 14 dodged; the GM answers with a second Biter turn on the spot: 3+2, a miss.
-        var board = Fight(8, 6, 3, 2);
+        var board = Crowd(8, 6, 3, 2);
         AdvanceAndEndTurn(board);
         board.Encounter.RunAdversaryTurn();
 
@@ -73,7 +78,7 @@ public class ReactionAndOpportunityTests
     public void TakingTheHit_LandsItAsRolled_AndGivesTheGmNothing()
     {
         // 8+6 = 14 hits; d4 = 3, less 1 for light armour.
-        var board = Fight(8, 6, 3);
+        var board = Crowd(8, 6, 3);
         AdvanceAndEndTurn(board);
         board.Encounter.RunAdversaryTurn();
 
@@ -113,7 +118,7 @@ public class ReactionAndOpportunityTests
     {
         // The extra action is the fighter's one tactical spend at T1, so the 14 can't be dodged:
         // d4 = 2, 1 after armour. Then the banked Opportunity buys Biter a second turn: 2+3, a miss.
-        var board = Fight(8, 6, 2, 2, 3);
+        var board = Crowd(8, 6, 2, 2, 3);
         Assert.True(board.Encounter.TryBuyExtraAction());
         AdvanceAndEndTurn(board);
 
@@ -149,12 +154,15 @@ public class ReactionAndOpportunityTests
     [Fact]
     public void AnImmediateOpportunity_LapsesAtTheSpendersNextTurn_IfNobodyCanUseIt()
     {
-        // Only the Biter is near enough to strike. It's Riposted, nobody else can reach the
-        // fighter this turn, and the GM's Opportunity is gone by the time he acts again.
+        // The Biter is the only ratkin with a turn left: the Shiv is down, and the Sneak, far off,
+        // has had its turn this round (the rest of a mob acts in its turn, and could use the
+        // Opportunity). The Biter is Riposted, nobody is left to use it, and it's gone by the
+        // time the fighter acts again.
         var board = Fight(7, 7);
         board.Biter.Position = new GridPosition(3, 4);
         board.Sneak.Position = new GridPosition(9, 0);
-        board.Shiv.Position = new GridPosition(9, 7);
+        board.Sneak.TurnsTakenThisRound = 1;
+        board.Shiv.Body = 0;
         board.Encounter.EndTurn();
 
         board.Encounter.RunAdversaryTurn();

@@ -7,9 +7,10 @@ public class RoundEndTests
 {
     private static readonly Game.Data.GameData Data = TestData.Load();
 
+    /// <summary>The ratkin are played as Brutes here, one to a turn: as Minions they act together as a mob (Core Rules §9), and the cap would never bite.</summary>
     private static (Encounter Encounter, Combatant Fighter, Combatant Biter, Combatant Sneak, Combatant Shiv) Fight(params int[] dice)
     {
-        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice));
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), asMinions: false);
         Combatant Named(string name) => encounter.Combatants.Single(c => c.Name == name);
         return (encounter, encounter.Combatants.Single(c => c.Side == Side.Party),
             Named("Ratkin Biter"), Named("Ratkin Sneak"), Named("Ratkin Shiv"));
@@ -33,7 +34,7 @@ public class RoundEndTests
         Assert.Equal(5, sneak.Position.DistanceTo(fighter.Position));
         Assert.Equal(4, shiv.Position.DistanceTo(new GridPosition(9, 7)));
         Assert.Equal(5, shiv.Position.DistanceTo(fighter.Position));
-        Assert.Equal(1, sneak.Stamina);
+        Assert.Equal(sneak.StaminaMax, sneak.Stamina);  // closing in spends nothing
         Assert.Equal(2, encounter.Round);
     }
 
@@ -83,7 +84,7 @@ public class RoundEndTests
         // GM still takes the turn that would have followed it, and the cap stays at two.
         var second = SampleEncounters.DumbFighter(Data);
         second.CharacterName = "The Other Fighter";
-        var ratkin = Data.Adversary("Bramble Ratkin");
+        var ratkin = Data.Adversary("Bramble Ratkin") with { Role = WoundBound.Rules.Enums.AdversaryRole.Brute };  // one to a turn, not a mob
         var encounter = new Encounter(SampleEncounters.BoardWidth, SampleEncounters.BoardHeight, new[]
         {
             CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(0, 4)),

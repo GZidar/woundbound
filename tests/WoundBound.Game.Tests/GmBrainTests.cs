@@ -24,9 +24,14 @@ public class GmBrainTests
         public override bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => Reacts;
     }
 
-    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Fight(IGmBrain gm, params int[] dice)
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Fight(IGmBrain gm, params int[] dice) => Stage(true, gm, dice);
+
+    /// <summary>The same stage with the ratkin played as Brutes, one to a turn: as Minions they act together as a mob (Core Rules §9).</summary>
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Crowd(IGmBrain gm, params int[] dice) => Stage(false, gm, dice);
+
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter) Stage(bool asMinions, IGmBrain gm, int[] dice)
     {
-        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), gm);
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), gm, asMinions);
         return (encounter, encounter.Combatants.Single(c => c.Side == Side.Party), encounter.Combatants.Single(c => c.Name == "Ratkin Biter"));
     }
 
@@ -54,6 +59,56 @@ public class GmBrainTests
 
         Assert.Contains(encounter.Log, line => line.StartsWith("Ratkin Biter attacks"));
         Assert.Equal(new GridPosition(7, 2), biter.Position);
+    }
+
+    /// <summary>A fighter and a Timber Wolf beside him: a melee Skirmisher, so it has Hit and Fade (GM Reference §3).</summary>
+    private static (Encounter Encounter, Combatant Fighter, Combatant Wolf) BesideAWolf(IGmBrain gm, params int[] dice)
+    {
+        var fighter = CombatantFactory.FromCharacter(SampleEncounters.DumbFighter(Data), new GridPosition(4, 2));
+        var wolf = CombatantFactory.FromAdversary(Data.Adversary("Timber Wolf"), "Timber Wolf", new GridPosition(5, 2));
+        var encounter = new Encounter(SampleEncounters.BoardWidth, SampleEncounters.BoardHeight, new[] { fighter, wolf },
+            Data.RangeBands, new ScriptedDice(dice), gm);
+        return (encounter, fighter, wolf);
+    }
+
+    [Fact]
+    public void HitAndFade_TheMoveStraightAfterABite_LeavesReachUnchallenged()
+    {
+        // Bite (2+3, a miss), then step two squares off: no reaction is offered.
+        var gm = new TestBrain
+        {
+            Step = (view, turn) => turn.HasAttacked && !turn.HasMoved
+                ? new GmStep.Move(new GridPosition(turn.Actor.Position.X + 2, turn.Actor.Position.Y))
+                : null,
+        };
+        var (encounter, _, wolf) = BesideAWolf(gm, 2, 3);
+        Assert.True(wolf.HasHitAndFade);
+        encounter.EndTurn();
+
+        encounter.RunAdversaryTurn();
+
+        Assert.Null(encounter.Pending);
+        Assert.Equal(new GridPosition(7, 2), wolf.Position);
+        Assert.Contains(encounter.Log, line => line.Contains("Hit and Fade"));
+    }
+
+    [Fact]
+    public void HitAndFade_IsNoHelp_BeforeTheBite()
+    {
+        // Stepping off without biting first is an ordinary leaving: the fighter is offered his reaction.
+        var gm = new TestBrain
+        {
+            Step = (view, turn) => !turn.HasMoved
+                ? new GmStep.Move(new GridPosition(turn.Actor.Position.X + 2, turn.Actor.Position.Y))
+                : GmStep.End,
+        };
+        var (encounter, _, wolf) = BesideAWolf(gm);
+        encounter.EndTurn();
+
+        encounter.RunAdversaryTurn();
+
+        Assert.Equal(ReactionKind.LeaverReaction, encounter.Pending?.Kind);
+        Assert.False(wolf.HasFadedThisRound);
     }
 
     [Fact]
@@ -124,7 +179,7 @@ public class GmBrainTests
                 ? new GmStep.Move(new GridPosition(turn.Actor.Position.X, turn.Actor.Position.Y == 0 ? 1 : 0))
                 : GmStep.End,
         };
-        var (encounter, _, biter) = Fight(gm);
+        var (encounter, _, biter) = Crowd(gm);
         biter.Position = new GridPosition(5, 0);  // near enough to strike, so it's the one the GM picks
         encounter.EndTurn();
 

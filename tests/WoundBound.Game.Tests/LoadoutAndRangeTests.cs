@@ -7,9 +7,14 @@ public class LoadoutAndRangeTests
 {
     private static readonly Game.Data.GameData Data = TestData.Load();
 
-    private static (Encounter Encounter, Combatant Fighter, Combatant Biter, Combatant Sneak) Fight(params int[] dice)
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter, Combatant Sneak) Fight(params int[] dice) => Stage(true, dice);
+
+    /// <summary>The same stage with the ratkin played as Brutes, one to a turn: as Minions they act together as a mob (Core Rules §9).</summary>
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter, Combatant Sneak) Crowd(params int[] dice) => Stage(false, dice);
+
+    private static (Encounter Encounter, Combatant Fighter, Combatant Biter, Combatant Sneak) Stage(bool asMinions, int[] dice)
     {
-        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice));
+        var encounter = SampleEncounters.FighterVersusRatkin(Data, new ScriptedDice(dice), asMinions: asMinions);
         return (encounter,
             encounter.Combatants.Single(c => c.Side == Side.Party),
             encounter.Combatants.Single(c => c.Name == "Ratkin Biter"),
@@ -158,7 +163,7 @@ public class LoadoutAndRangeTests
     {
         // Round 1: no ratkin can be reached on foot with an action to spare, so the fighter swaps
         // to the bow (his move) and shoots the Sneak (8+5 +4 = 17 vs DT 13; d4 = 3, +2).
-        var (encounter, fighter, _, sneak) = Fight(8, 5, 3, 7, 6, 2);
+        var (encounter, fighter, _, sneak) = Crowd(8, 5, 3, 7, 6, 2);
         Assert.True(encounter.TrySwapLoadout());
         encounter.TryAttack(sneak);
         Assert.True(sneak.IsOutOfFight);

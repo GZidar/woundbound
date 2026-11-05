@@ -320,7 +320,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
             if (skill.Uses(Trick.Brace) && hasMove && actions > 0 && !actor.HasMovedThisTurn && View.QuietRounds == 0
                 && (!real || BattleView.StandGroundRefusal(actor, CombatAction.Dodge) is null))
             {
-                var braced = Position(actor, here) - care * assess.Exposure(actor, here, extraDodge: 2);
+                // Peril, and the price of standing out of the fight, as holding this square pays them:
+                // left out, a creature far from anyone found dodging where it stood better than closing,
+                // and idled there until the party left it behind (bench, 2026-11-05). Only the price —
+                // what being in reach sets up is the blow below.
+                var braced = Position(actor, here) - Peril(actor, here) - care * assess.Exposure(actor, here, extraDodge: 2)
+                             + 0.5 * Math.Min(0, Approach(actor, here));
                 var blow = View.EnemiesOf(actor).Select(e => assess.BestAttack(actor, here, e).Worth * 0.55).DefaultIfEmpty(0).Max();
                 options.Add(new Option(OptionKind.StandGround, braced + blow + screen, "stand my ground (Dodge)", Action: CombatAction.Dodge));
             }
@@ -1091,7 +1096,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             // Out past Long of every enemy is out of the fight: for a creature that means to win,
             // that's walking away from it — the party getting clear, or the GM's quarry escaping.
-            if (!actor.IsBroken && nearest > 16 && View.EnemiesOf(actor).Any(e => !e.IsBroken))
+            // Only real figures hold a creature on the board, as the rule counts them: a phantom
+            // within Long doesn't, and a wolf scoring its squares against one walks off the field.
+            var nearestReal = View.EnemiesOf(actor).Where(e => !e.IsPhantom).Select(e => actor.DistanceFrom(square, e))
+                .Concat(Hunted(actor, square)).DefaultIfEmpty(int.MaxValue).Min();
+            if (!actor.IsBroken && Math.Max(nearest, nearestReal) > 16 && View.EnemiesOf(actor).Any(e => !e.IsBroken))
             {
                 return -3;
             }
@@ -1111,9 +1120,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // A caster fights like a Skirmisher: from Short, out of reach.
             var keepsDistance = actor.Role == AdversaryRole.Skirmisher && actor.HasRangedAttack
                                 || actor.Spells.Any(s => s.SpellType == SpellType.Harm);
+            // A melee Skirmisher with Hit and Fade (the user, 2026-11-06) would rather wait just out
+            // of reach, a stride from somebody to bite: it darts in, bites, and fades back next
+            // turn, while its kin takes its place beside the target.
+            var fadesBack = !keepsDistance && actor.HasHitAndFade && actor.Role == AdversaryRole.Skirmisher;
             return actor.Role switch
             {
                 _ when keepsDistance => nearest <= 1 ? -0.6 : nearest <= 4 ? 0.4 : nearest <= 8 ? 0.1 : -0.1,
+                _ when fadesBack => nearest <= 1 ? -0.4 : nearest <= View.SquaresFor(actor.Speed, 1) + 1 ? 0.3 : 0,
                 AdversaryRole.Brute => nearest <= 1 ? 0.3 : 0,
                 _ => 0,
             };
@@ -1126,27 +1140,40 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private double Approach(Combatant actor, GridPosition square)
         {
             var stride = View.SquaresFor(actor.Speed, 1);
-            double best = 0;
+            double best = 0, anywhere = 0;
             foreach (var enemy in Pursued(actor))
             {
                 var distance = actor.DistanceFrom(square, enemy);
                 foreach (var attack in actor.Attacks)
                 {
+                    var worth = assess.Worth(assess.Blow(actor, attack, enemy, attack.DamageDieSides, assess.Dodge(enemy)), enemy);
+                    anywhere = Math.Max(anywhere, worth);
                     var reachable = attack.IsRanged
                         ? View.PlanAttackWith(actor, attack, square, enemy).CanAttack
                         : distance <= attack.Reach + stride;
-                    if (!reachable)
+                    if (reachable)
                     {
-                        continue;
+                        best = Math.Max(best, worth);
                     }
-
-                    best = Math.Max(best, assess.Worth(assess.Blow(actor, attack, enemy, attack.DamageDieSides, assess.Dodge(enemy)), enemy));
                 }
             }
 
             best = Math.Max(best, spells.BestHarmFrom(actor, square, Pursued(actor)));
             var nearest = Pursued(actor).Select(e => actor.DistanceFrom(square, e))
                 .Concat(Hunted(actor, square)).DefaultIfEmpty(0).Min();
+
+            // An adversary is there to do harm (the user, 2026-11-05: it minds a wound only as lost
+            // future damage), so a turn spent getting back into reach is a blow given up, as surely as
+            // being dropped gives it up. Left out, a creature fearing the party's blows walked off the
+            // field until it was beyond Long and gone. A character, or a rival played as one, weighs
+            // its own skin its own way.
+            if (actor.Side == Side.Adversaries && !actor.DiesLikeACharacter && best <= 0 && anywhere > 0)
+            {
+                var reach = actor.Attacks.Select(a => a.IsRanged ? View.LongRangeSquares : a.Reach).DefaultIfEmpty(1).Max();
+                var turnsAway = Math.Max(0, nearest - reach - stride) / (2.0 * Math.Max(1, stride));
+                best -= turnsAway * anywhere;
+            }
+
             return best - 0.05 * nearest;
         }
 

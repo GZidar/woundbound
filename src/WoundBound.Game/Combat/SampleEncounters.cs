@@ -339,7 +339,11 @@ namespace WoundBound.Game.Combat
         /// lantern-bearer at the signpost, and his like. Without the book's Cowardice here (see
         /// <see cref="CowardlyBandit"/>).
         /// </summary>
-        public static StartingAdversaryInfo RoadsideBandit { get; } = QuickstartBandit("Roadside Bandit", "Rusty Sword", die: "d6", damageModifier: 0);
+        public static StartingAdversaryInfo RoadsideBandit { get; } = QuickstartBandit("Roadside Bandit", "Rusty Sword", die: "d6", damageModifier: 0) with
+        {
+            // A Skirmisher with no ranged attack (GM Reference §3).
+            Traits = [AdversaryTrait.HitAndFade],
+        };
 
         /// <summary>
         /// The Quickstart Adventure's Bandit Ambusher: a Worn Crossbow (+2, 1d6), "or Rusty Knife"
@@ -560,8 +564,8 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The Ferry Shrine ambush with the Quickstart's own five caught mid-ford — Salla, Drovan,
-        /// Joren, Mirella and Elthric — against one Skirmisher each: three Reedmarsh Skulkers and two
-        /// Bandit Ambushers. The Skulkers have no Cowardice, so this one is fought out.
+        /// Joren, Mirella and Elthric — against two Skirmishers each: six Reedmarsh Skulkers and four
+        /// Bandit Ambushers, a Standard Challenge at the trial prices (<see cref="RuleTrials.ThreatValue"/>). The Skulkers have no Cowardice, so this one is fought out.
         /// </summary>
         public static Encounter FerryShrineWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
@@ -578,6 +582,11 @@ namespace WoundBound.Game.Combat
                 Lurking(CombatantFactory.FromAdversary(skulker, "Skulker on the bank", new GridPosition(17, 13)), ambush),
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)), ambush),
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the arch", new GridPosition(21, 9)), ambush),
+                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker under the bank", new GridPosition(18, 3)), ambush),
+                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker in the shallows", new GridPosition(19, 14)), ambush),
+                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker by the post", new GridPosition(21, 12)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the hut roof", new GridPosition(24, 8)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the boats", new GridPosition(22, 4)), ambush),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -605,8 +614,8 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The Quickstart's five around their campfire, set on in the night by a Tollroad Bandit and
-        /// his two Timber Wolves, with two Bandit Ambushers on the rough ground to either side — about
-        /// a Standard fight's budget for five (GM Reference §5). Elthric sits by the fire.
+        /// his brother, their three Timber Wolves, and three Bandit Ambushers on the rough ground to
+        /// either side — a Standard fight's budget for five at the trial prices (<see cref="RuleTrials.ThreatValue"/>). Elthric sits by the fire.
         /// </summary>
         public static Encounter CampfireAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
@@ -623,6 +632,9 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromAdversary(wolf, "Wolf from the south", new GridPosition(17, 12)),
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the rocks", new GridPosition(17, 3)), ambush),
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher in the gully", new GridPosition(17, 15)), ambush),
+                CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Second Tollroad Bandit", new GridPosition(21, 11)),
+                CombatantFactory.FromAdversary(wolf, "Wolf from the east", new GridPosition(19, 9)),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the trees", new GridPosition(18, 1)), ambush),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -631,7 +643,7 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The hedge-witches' toll — staged for the game, not taken from a book: the Quickstart's five
-        /// stopped on a daylight road by a Tollroad Bandit and his Timber Wolf, with three casters
+        /// stopped on a daylight road by a Tollroad Bandit and his two Timber Wolves, with three casters
         /// behind them — a Bog Hex-Caller, who breaks a line with fear; a Hollow Bloodwright, who bleeds
         /// for its Blood Lance; and a Wyrding Chanter, who keeps the ones in front blessed and mended
         /// (GM Reference §7). The hedges either side of the road are rough going.
@@ -650,6 +662,7 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(1, 8)),
                 Foe("Tollroad Bandit", "Tollroad Bandit", 11, 8),
                 Foe("Timber Wolf", "Timber Wolf", 11, 10),
+                Foe("Timber Wolf", "Second wolf", 12, 6),
                 Foe("Wyrding Chanter", "Wyrding Chanter", 14, 9),
                 Foe("Hollow Bloodwright", "Hollow Bloodwright", 15, 7),
                 Foe("Bog Hex-Caller", "Bog Hex-Caller", 15, 11),
@@ -664,8 +677,10 @@ namespace WoundBound.Game.Combat
         /// character rules, and fighting for the GM: "build a creature from any rule in this system"
         /// (GM Reference §2). Every rule but Interrupt travels, so they manoeuvre, Slip, Shelter, heal
         /// and cast back — a fight with the back-and-forth T1 statblocks are built not to give.
+        /// <paramref name="count"/> fields only the first so many of them, for pricing a rival built
+        /// from a character sheet (GM Reference §5).
         /// </summary>
-        public static Encounter RivalBand(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        public static Encounter RivalBand(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, int count = 5)
         {
             Combatant Rival(CharacterBuild build, int x, int y) => CombatantFactory.FromCharacter(build, new GridPosition(x, y), Side.Adversaries);
 
@@ -676,12 +691,15 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(2, 11)),
                 CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(2, 9)),
                 CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(1, 8)),
+            };
+            combatants.AddRange(new[]
+            {
                 Rival(BrannocVey(data), 13, 8),
                 Rival(HeskMarrow(data), 13, 10),
                 Rival(IlseVarrow(data), 14, 6),
                 Rival(AldousCrane(data), 16, 9),
                 Rival(SedgeOfTheFen(data), 16, 11),
-            };
+            }.Take(count));
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
                 setting: HedgeRoad, environment: data.Environment);
@@ -805,7 +823,7 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
-        /// The Quickstart's five met by a Fenmoor Ratswarm and the four Bramble Ratkin who herd it —
+        /// The Quickstart's five met by two Fenmoor Ratswarms and the eight Bramble Ratkin who herd them —
         /// on the fen causeway, or, with <paramref name="openGround"/>, on dry open ground where the
         /// party can back off and chip it (GM Reference §3). The rats come first; the ratkin behind.
         /// </summary>
@@ -824,6 +842,11 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromAdversary(ratkin, "Ratkin Biter", new GridPosition(18, 10)),
                 CombatantFactory.FromAdversary(ratkin, "Ratkin Sneak", new GridPosition(19, 8)),
                 CombatantFactory.FromAdversary(ratkin, "Ratkin Shiv", new GridPosition(19, 9)),
+                CombatantFactory.FromAdversary(data.Adversary("Fenmoor Ratswarm"), "Second ratswarm", new GridPosition(16, 10)),
+                CombatantFactory.FromAdversary(ratkin, "Ratkin Nipper", new GridPosition(20, 7)),
+                CombatantFactory.FromAdversary(ratkin, "Ratkin Gnawer", new GridPosition(20, 10)),
+                CombatantFactory.FromAdversary(ratkin, "Ratkin Scab", new GridPosition(21, 8)),
+                CombatantFactory.FromAdversary(ratkin, "Ratkin Tail", new GridPosition(21, 9)),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -866,6 +889,8 @@ namespace WoundBound.Game.Combat
         public static StartingAdversaryInfo FenGlamourer(GameData data) => data.Adversary("Bog Hex-Caller") with
         {
             Name = "Fen Glamourer",
+            Role = AdversaryRole.Adept,
+            Tier = Tier.T1,
             AttackName = "None",
             Notes = "A hedge-glamourer: what it shows you is never quite where it stands.",
             Casting = new AdversaryCasting { Source = MagicSource.AetherMagic, Bonus = 2 },
@@ -875,7 +900,7 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The glamoured mill — staged for the game: the Quickstart's five at an old mill against a
-        /// Tollroad Bandit and his Timber Wolf, two Vampire Bats out of the mill's dark (their Opportunity
+        /// Tollroad Bandit, the miller's man (another), two Timber Wolves, four Vampire Bats out of the mill's dark (their Opportunity
         /// bonus is Direct damage), and a Fen Glamourer behind them putting up doubles of itself.
         /// Daylight, open ground.
         /// </summary>
@@ -895,6 +920,10 @@ namespace WoundBound.Game.Combat
                 Foe(data.Adversary("Timber Wolf"), "Timber Wolf", 14, 10),
                 Foe(data.Adversary("Vampire Bat"), "First bat", 13, 6),
                 Foe(data.Adversary("Vampire Bat"), "Second bat", 13, 12),
+                Foe(data.Adversary("Vampire Bat"), "Third bat", 15, 5),
+                Foe(data.Adversary("Vampire Bat"), "Fourth bat", 16, 13),
+                Foe(data.Adversary("Timber Wolf"), "Second wolf", 15, 12),
+                Foe(data.Adversary("Tollroad Bandit"), "Miller's man", 16, 9),
                 Foe(FenGlamourer(data), "Fen Glamourer", 18, 9),
             };
 
@@ -905,8 +934,8 @@ namespace WoundBound.Game.Combat
         /// <summary>
         /// A clearing in the woods at dusk — a random encounter, nobody's set piece: trees to stand
         /// behind (full cover), lines of bushes (partial), a scree of broken rock, and the party's own
-        /// lights against the gloom. The band met there — two Reedmarsh Skulkers, two Timber Wolves and
-        /// two Bramble Ratkin, none of them quick to break, a Standard Challenge for five — is placed by the GM's
+        /// lights against the gloom. The band met there — four Reedmarsh Skulkers, four Timber Wolves and
+        /// four Bramble Ratkin, none of them quick to break, a Standard Challenge for five at the trial prices — is placed by the GM's
         /// setup (<see cref="Brains.Placement"/>), anywhere from Short to Long of the party, lying in
         /// wait when <paramref name="prepared"/>.
         /// </summary>
@@ -929,6 +958,12 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "Second wolf", new GridPosition(0, 3)),
                 CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Biter", new GridPosition(0, 4)),
                 CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Shiv", new GridPosition(0, 5)),
+                CombatantFactory.FromAdversary(data.Adversary("Reedmarsh Skulker"), "Third skulker", new GridPosition(0, 6)),
+                CombatantFactory.FromAdversary(data.Adversary("Reedmarsh Skulker"), "Fourth skulker", new GridPosition(0, 7)),
+                CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "Third wolf", new GridPosition(0, 8)),
+                CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "Fourth wolf", new GridPosition(0, 9)),
+                CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Sneak", new GridPosition(0, 10)),
+                CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Nipper", new GridPosition(0, 11)),
             };
 
             Brains.Placement.Place(band, party, WoodlandAtDusk, data.Environment, data.RangeBands, FieldWidth, FieldHeight,
@@ -981,7 +1016,8 @@ namespace WoundBound.Game.Combat
         /// with crossbows crouched behind stacked crates (full cover; they lean out to shoot, then
         /// pay to duck back), two Roadside Bandits behind overturned carts (partial), and the Tollroad
         /// Bandit at the back. The party comes up the road behind a broken field wall of its own
-        /// (partial), with a gap in it. Daylight.
+        /// (partial), with a gap in it. Daylight. Four of each behind crates and carts at the trial prices
+        /// (<see cref="RuleTrials.ThreatValue"/>), a Standard Challenge for five.
         /// </summary>
         public static Encounter Roadblock(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
@@ -997,6 +1033,10 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromAdversary(RoadsideBandit, "Bandit at the north cart", new GridPosition(18, 5)),
                 CombatantFactory.FromAdversary(RoadsideBandit, "Bandit at the south cart", new GridPosition(18, 14)),
                 CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(21, 9)),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Third ambusher", new GridPosition(18, 9)), ambush),
+                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Fourth ambusher", new GridPosition(18, 10)), ambush),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Second bandit at the north cart", new GridPosition(18, 4)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Second bandit at the south cart", new GridPosition(18, 15)),
             };
 
             var cover = Setting.CoverOf(Cover.Full, (17, 7, 17, 9), (17, 10, 17, 12));
@@ -1010,9 +1050,9 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
-        /// Outriders on the road — staged for the game: three Tollroad Bandits on
+        /// Outriders on the road — staged for the game: four Tollroad Bandits on
         /// riding horses (Core Rules §9, "Mounts": Fast, a horse's hooves to borrow, a horse to strike
-        /// instead), with an Ambusher and his crossbow on foot behind. Daylight, open ground. The
+        /// instead), with two Ambushers and their crossbows on foot behind. Daylight, open ground. The
         /// outriders' Opportunity bonus is the game's own: extra movement, a horse's burst of speed.
         /// </summary>
         public static Encounter Outriders(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
@@ -1029,10 +1069,51 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.Mounted(CombatantFactory.FromAdversary(rider, "Outrider", new GridPosition(16, 5))),
                 CombatantFactory.Mounted(CombatantFactory.FromAdversary(rider, "Second outrider", new GridPosition(16, 13))),
                 CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on foot", new GridPosition(18, 9)),
+                CombatantFactory.Mounted(CombatantFactory.FromAdversary(rider, "Third outrider", new GridPosition(18, 2))),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Second ambusher on foot", new GridPosition(19, 12)),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
                 setting: Setting.Daylight with { Name = "The open road" }, environment: data.Environment);
+        }
+
+        /// <summary>
+        /// A bench for pricing one statblock: the Quickstart's five on open ground in daylight against
+        /// <paramref name="count"/> of <paramref name="foe"/>, drawn up in ranks twelve squares off —
+        /// nothing in the place to favour either side, so what the fight costs the party is what the
+        /// creatures are worth (GM Reference §5, Threat Value).
+        /// </summary>
+        public static Encounter Bench(GameData data, IDiceRoller dice, Brains.IGmBrain? gm, StartingAdversaryInfo foe, int count,
+            StartingAdversaryInfo? second = null, int secondCount = 0)
+        {
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(6, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(4, 12)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(4, 9)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(3, 7)),
+            };
+
+            // A second statblock, where there is one, drawn up in front of the first.
+            var bands = second is null ? [(foe, count)] : new[] { (second, secondCount), (foe, count) };
+            var x = 18;
+            foreach (var (kind, many) in bands)
+            {
+                var step = Footprints.AcrossFor(kind.Size) + 1;
+                var perRank = Math.Max(1, (FieldHeight - 2) / step);
+                for (var i = 0; i < many; i++)
+                {
+                    var (rank, file) = (i / perRank, i % perRank);
+                    var at = new GridPosition(x + (rank * step), 1 + (file * step));
+                    combatants.Add(CombatantFactory.FromAdversary(kind, $"{kind.Name} {i + 1}", at, data.Spells));
+                }
+
+                x += ((many + perRank - 1) / perRank) * step;
+            }
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "Open ground" }, environment: data.Environment);
         }
 
         /// <summary>
@@ -1120,9 +1201,18 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>One fighter against a pack of three Bramble Ratkin: Minions, so every hit that gets past their (lack of) armour drops one.</summary>
-        public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        /// <param name="asMinions">
+        /// False plays the ratkin as Brutes: Minions take one turn between them as a mob (Core
+        /// Rules §9), so a fight that wants one ratkin a turn, a crowd under the turn cap, can't use
+        /// them as written.
+        /// </param>
+        public static Encounter FighterVersusRatkin(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool asMinions = true)
         {
             var ratkin = data.Adversary("Bramble Ratkin");
+            if (!asMinions)
+            {
+                ratkin = ratkin with { Role = AdversaryRole.Brute };
+            }
 
             var combatants = new List<Combatant>
             {
