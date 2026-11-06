@@ -494,6 +494,12 @@ namespace WoundBound.Game.Combat
         public bool HasBeenSundered { get; internal set; }
 
         /// <summary>
+        /// Blows at it this combat that its defences foiled: turned aside by a shield's own bonus, or
+        /// landed with armour soaking half or more. What makes anyone reach for a Sunder.
+        /// </summary>
+        public int BlowsFoiled { get; internal set; }
+
+        /// <summary>
         /// The manoeuvres a generic foe's Attack line gives it — "may attempt Topple (ST) as a
         /// manoeuvre" — which it may use without being Martial (GM Reference §2, "Borrowing").
         /// </summary>

@@ -3329,12 +3329,33 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            if (shieldGain > 0 && BoostWouldTurn(roll, plan.DodgeThreshold, shieldGain))
+            // Every source of Dodge Threshold stacks with every other (Core Rules §10, "Dodge
+            // Threshold"): a shield goes up first, and where the blow still lands, a panic dodge on
+            // top of it. The shield stays; the dodge is for this blow only.
+            void PanicDodge(int already, string? by)
             {
+                var threshold = plan.DodgeThreshold + already;
+                if (roll.Total < threshold || !BoostWouldTurn(roll, threshold))
+                {
+                    FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, already, by, then);
+                    return;
+                }
+
+                OfferReaction(
+                    new PendingReaction(ReactionKind.PanicDodge, target, attacker, roll, threshold,
+                        $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}{riposte}. " +
+                        "A panic dodge (1 Stamina, +2) would make it miss."),
+                    dodged => FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
+                        already + (dodged ? ThresholdModifierCalculator.ReactionBonus : 0), Together(by, dodged ? "panic dodge" : null), then));
+            }
+
+            if (shieldGain > 0 && BoostWouldTurn(roll, plan.DodgeThreshold, shieldGain + ThresholdModifierCalculator.ReactionBonus))
+            {
+                var alone = BoostWouldTurn(roll, plan.DodgeThreshold, shieldGain);
                 OfferReaction(
                     new PendingReaction(ReactionKind.RaiseShield, target, attacker, roll, plan.DodgeThreshold,
                         $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
-                        $"Raising the shield now (1 Stamina, +{shieldGain}, and it stays up) would make it miss.",
+                        $"Raising the shield now (1 Stamina, +{shieldGain}, and it stays up) would make it miss{(alone ? "" : " with a panic dodge on top")}.",
                         Bonus: shieldGain),
                     raised =>
                     {
@@ -3343,42 +3364,33 @@ namespace WoundBound.Game.Combat
                             RaiseShield(target, target, reactive: true);
                         }
 
-                        FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, raised ? shieldGain : 0, raised ? "shield raised" : null, then);
+                        PanicDodge(raised ? shieldGain : 0, raised ? "shield raised" : null);
                     });
                 return;
             }
 
-            void PanicDodge()
-            {
-                if (!BoostWouldTurn(roll, plan.DodgeThreshold))
-                {
-                    FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, boost: 0, boostedBy: null, then);
-                    return;
-                }
-
-                OfferReaction(
-                    new PendingReaction(ReactionKind.PanicDodge, target, attacker, roll, plan.DodgeThreshold,
-                        $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
-                        "A panic dodge (1 Stamina, +2) would make it miss."),
-                    dodged => FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
-                        dodged ? ThresholdModifierCalculator.ReactionBonus : 0, dodged ? "panic dodge" : null, then));
-            }
-
             if (!OfferCover(attacker, target, roll, plan.DodgeThreshold, $"{attacker.Name}'s {attack.Name}", riposte, expected: null, WoundType.Body,
-                    (gain, by) => FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, gain, by, then), PanicDodge))
+                    PanicDodge, () => PanicDodge(0, null)))
             {
-                PanicDodge();
+                PanicDodge(0, null);
             }
         }
+
+        /// <summary>What turned a blow aside, where more than one thing did: "Joren Blacke's shield, panic dodge".</summary>
+        private static string? Together(string? first, string? then) =>
+            first is null ? then : then is null ? first : $"{first}, {then}";
 
         /// <summary>
         /// The ally best placed to raise a shield over <paramref name="target"/> as a reaction now the
         /// roll against them is known: a Medium or Heavy shield within Reach, a tactical spend still
-        /// open, and a bonus big enough to turn the blow. A Sentinel first, then the bigger shield
+        /// open, and a bonus big enough to turn the blow, alone or with the ally's own panic dodge
+        /// after it. A Sentinel first, then the bigger shield
         /// (Core Rules §9, "Covering somebody else").
         /// </summary>
         private (Combatant Bearer, int Gain)? CoverFor(Combatant target, RollResult roll, int threshold)
         {
+            // The ally's own panic dodge stacks on top, where they can still pay for one.
+            var dodge = TacticalSpendRefusal(target) is null && !target.IsOutOfFight ? ThresholdModifierCalculator.ReactionBonus : 0;
             (Combatant Bearer, int Gain)? best = null;
             foreach (var bearer in combatants)
             {
@@ -3389,7 +3401,7 @@ namespace WoundBound.Game.Combat
                 }
 
                 var gain = Math.Max(0, InventoryCalculator.ShieldDodgeThresholdBonus(bearer.InHandShield!.Weight) - target.ShieldBonus);
-                if (gain == 0 || !BoostWouldTurn(roll, threshold, gain))
+                if (gain == 0 || !BoostWouldTurn(roll, threshold, gain + dodge))
                 {
                     continue;
                 }
@@ -3422,7 +3434,8 @@ namespace WoundBound.Game.Combat
             OfferReaction(
                 new PendingReaction(ReactionKind.CoverAlly, bearer, attacker, roll, threshold,
                     $"{what} rolls {roll.Total} against {target.Name}'s DT {threshold}{riposte}. " +
-                    $"{bearer.Name} raising their shield over {target.Name} now (1 Stamina, +{gain}, and it stays up) would make it miss.",
+                    $"{bearer.Name} raising their shield over {target.Name} now (1 Stamina, +{gain}, and it stays up) would make it miss" +
+                    (BoostWouldTurn(roll, threshold, gain) ? "." : $", with {target.Name}'s panic dodge on top."),
                     Bonus: gain, ExpectedDamage: expected, DamageType: type, Ally: target),
                 raised =>
                 {
@@ -4188,6 +4201,10 @@ namespace WoundBound.Game.Combat
 
                 (rolledDamage, absorbed, dealt) = ByEdge(swung.Edge, target, rolledDamage,
                     InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: precise || bonusDirect || swung.IsDirect));
+                if (absorbed > 0 && 2 * absorbed >= rolledDamage)
+                {
+                    target.BlowsFoiled++;
+                }
                 if (swung.Edge == WeaponEdge.Breaking && target.IsVulnerableToBreaking && !target.IsSwarm)
                 {
                     Write($"{target.Name} is Vulnerable to Breaking: +2 Body from the {swung.Name}.");
@@ -4227,6 +4244,11 @@ namespace WoundBound.Game.Combat
 
             var outcome = new AttackOutcome(attacker, target, roll, plan, rolledDamage, absorbed, dealt, attackerWounded,
                 usedOpportunity, asReaction, dodged, boost, boostedBy);
+            if (ShieldAloneStopped(target, outcome))
+            {
+                target.BlowsFoiled++;
+            }
+
             Write(Describe(outcome));
             Raise(new Struck(outcome));
             then(outcome);

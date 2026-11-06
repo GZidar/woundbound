@@ -169,6 +169,39 @@ public class DisarmSunderTests
         Assert.Equal(joren.BodyMax, joren.Body);
         Assert.Equal(ArmourWeight.Medium, joren.Armour);
     }
+
+    [Fact]
+    public void Sunder_ThatThePanicDodgeOnTopTurned_LeavesTheShieldWhole()
+    {
+        // The Sunder beats Joren's DT behind his raised Heavy shield; his panic dodge on top makes it
+        // miss. The shield alone didn't stop it, so it doesn't break — and a miss sunders nothing else.
+        var build = SampleEncounters.JorenBlacke(Data);
+        build.Shields.Clear();
+        build.Shields.Add(CombatantFactory.ShieldInHand("Tower shield", ShieldWeight.Heavy));
+        var joren = CombatantFactory.FromCharacter(build, new GridPosition(2, 4));
+        var bandit = Bandit("Bandit", 3, 4, effect: "; may attempt Sunder (ST) as a manoeuvre");
+
+        var gm = new OneStepGm((view, turn) => turn.HasAttacked ? GmStep.End : new GmStep.Attack(joren, Manoeuvre: new Manoeuvre(WeaponManoeuvre.Sunder)));
+        var raised = joren.DodgeThreshold + InventoryCalculator.ShieldDodgeThresholdBonus(ShieldWeight.Heavy);
+        var die = raised - TestBandits.Roadside.AttackModifier;  // exactly the raised DT: a hit, unless dodged
+        var encounter = Fight([(die - 1) / 2, die - (die - 1) / 2], gm, joren, bandit);
+        encounter.TryBeginTurn(joren);
+        Assert.True(encounter.TryRaiseShield());
+        encounter.EndTurn();
+        encounter.RunAdversaryTurn();
+
+        var dodge = Assert.IsType<PendingReaction>(encounter.Pending);
+        Assert.Equal(ReactionKind.PanicDodge, dodge.Kind);
+        Assert.True(encounter.RespondToReaction(spend: true));
+        while (encounter.Pending is not null)
+        {
+            encounter.RespondToReaction(false);
+        }
+
+        Assert.Equal(ShieldWeight.Heavy, joren.InHandShield?.Weight);
+        Assert.False(joren.HasBeenSundered);
+        Assert.Equal(joren.BodyMax, joren.Body);
+    }
 }
 
 /// <summary>GM Reference §2: a rival company built from the character rules, fighting for the GM.</summary>

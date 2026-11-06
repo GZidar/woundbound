@@ -279,8 +279,12 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private static bool ShieldAloneStopped(Combatant target, AttackOutcome outcome)
         {
+            // The shield breaks only where its own bonus turned the blow: a panic dodge stacked on
+            // top that the miss needed leaves it whole (Core Rules §9, "The Manoeuvres").
             var shield = target.ShieldBonus;
-            return shield > 0 && outcome.Roll.Total >= outcome.Plan.DodgeThreshold + outcome.Boost - shield;
+            var panic = outcome.BoostedBy?.EndsWith("panic dodge") == true ? ThresholdModifierCalculator.ReactionBonus : 0;
+            var behindShield = outcome.Plan.DodgeThreshold + outcome.Boost - panic;
+            return shield > 0 && outcome.Roll.Total < behindShield && outcome.Roll.Total >= behindShield - shield;
         }
 
         /// <summary>A Sunder that hit: the target's worn armour drops one type for the rest of the combat.</summary>

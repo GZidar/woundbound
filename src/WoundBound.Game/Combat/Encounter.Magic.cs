@@ -822,7 +822,22 @@ namespace WoundBound.Game.Combat
                     Wound(target, type, amount, direct: false, Next);
                 }
 
-                if (!target.IsOutOfFight && shieldGain > 0 && BoostWouldTurn(roll, threshold, shieldGain))
+                // A shield first, and a panic dodge on top where the spell still lands (Core Rules §10).
+                void PanicDodge(int already, string? by)
+                {
+                    var raised = threshold + already;
+                    if (!target.IsOutOfFight && roll.Total >= raised && BoostWouldTurn(roll, raised))
+                    {
+                        OfferReaction(new PendingReaction(ReactionKind.PanicDodge, target, caster, roll, raised,
+                                $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {raised}. A panic dodge (1 Stamina, +2) would make it miss.", ExpectedDamage: expected, DamageType: type),
+                            dodged => Land(already + (dodged ? ThresholdModifierCalculator.ReactionBonus : 0), Together(by, dodged ? "panic dodge" : null)));
+                        return;
+                    }
+
+                    Land(already, by);
+                }
+
+                if (!target.IsOutOfFight && shieldGain > 0 && BoostWouldTurn(roll, threshold, shieldGain + ThresholdModifierCalculator.ReactionBonus))
                 {
                     OfferReaction(new PendingReaction(ReactionKind.RaiseShield, target, caster, roll, threshold,
                             $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. Raising the shield now (1 Stamina, +{shieldGain}, and it stays up) would make it miss.",
@@ -834,27 +849,14 @@ namespace WoundBound.Game.Combat
                                 RaiseShield(target, target, reactive: true);
                             }
 
-                            Land(raised ? shieldGain : 0, "shield raised");
+                            PanicDodge(raised ? shieldGain : 0, raised ? "shield raised" : null);
                         });
                     return;
                 }
 
-                void PanicDodge()
+                if (target.IsOutOfFight || !OfferCover(caster, target, roll, threshold, $"{caster.Name}'s {spell.Name}", string.Empty, expected, type, PanicDodge, () => PanicDodge(0, null)))
                 {
-                    if (!target.IsOutOfFight && BoostWouldTurn(roll, threshold))
-                    {
-                        OfferReaction(new PendingReaction(ReactionKind.PanicDodge, target, caster, roll, threshold,
-                                $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. A panic dodge (1 Stamina, +2) would make it miss.", ExpectedDamage: expected, DamageType: type),
-                            dodged => Land(dodged ? ThresholdModifierCalculator.ReactionBonus : 0, "panic dodge"));
-                        return;
-                    }
-
-                    Land(0, null);
-                }
-
-                if (target.IsOutOfFight || !OfferCover(caster, target, roll, threshold, $"{caster.Name}'s {spell.Name}", string.Empty, expected, type, Land, PanicDodge))
-                {
-                    PanicDodge();
+                    PanicDodge(0, null);
                 }
             }
 

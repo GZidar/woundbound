@@ -36,7 +36,7 @@ public class ShieldCoverTests
         var die = total(mirella) - TestBandits.Roadside.AttackModifier;
         var gm = new OneStepGm((view, turn) => turn.HasAttacked ? GmStep.End : new GmStep.Attack(mirella));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [joren, mirella, bandit], Data.RangeBands,
-            new ScriptedDice([die / 2, die - die / 2, 3]), gm);
+            new ScriptedDice([(die - 1) / 2, die - (die - 1) / 2, 3]), gm);
         encounter.TryBeginTurn(joren);
         encounter.EndTurn();
         encounter.RunAdversaryTurn();
@@ -78,6 +78,31 @@ public class ShieldCoverTests
         Assert.Equal(ReactionKind.PanicDodge, pending.Kind);
         Assert.Same(mirella, pending.Defender);
         Assert.Equal(joren.StaminaMax, joren.Stamina);
+    }
+
+    [Fact]
+    public void TheShieldAndThePanicDodge_Stack()
+    {
+        // Every source of Dodge Threshold stacks (Core Rules §10): a blow one past the shield is
+        // still offered the cover, and then Mirella's own panic dodge on top turns it.
+        var gain = InventoryCalculator.ShieldDodgeThresholdBonus(ShieldWeight.Medium);
+        var (encounter, joren, mirella) = SwingAtMirella(ShieldWeight.Medium, jorenX: 1, m => m.DodgeThreshold + gain + 1);
+        var bare = mirella.DodgeThreshold;
+
+        Assert.Equal(ReactionKind.CoverAlly, encounter.Pending?.Kind);
+        Assert.True(encounter.RespondToReaction(spend: true));
+
+        var dodge = Assert.IsType<PendingReaction>(encounter.Pending);
+        Assert.Equal(ReactionKind.PanicDodge, dodge.Kind);
+        Assert.Same(mirella, dodge.Defender);
+        Assert.Equal(bare + gain, dodge.Threshold);
+        Assert.True(encounter.RespondToReaction(spend: true));
+
+        Assert.Equal(mirella.BodyMax, mirella.Body);
+        Assert.Equal(joren.StaminaMax - 1, joren.Stamina);
+        Assert.Equal(mirella.StaminaMax - 1, mirella.Stamina);
+        Assert.Equal(bare + gain, mirella.DodgeThreshold);
+        Assert.Contains(encounter.Log, line => line.Contains("Joren Blacke's shield, panic dodge") && line.EndsWith("miss."));
     }
 
     [Fact]

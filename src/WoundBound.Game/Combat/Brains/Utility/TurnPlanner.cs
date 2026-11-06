@@ -1067,7 +1067,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         private double SunderWorth(Combatant actor, AttackProfile with, Combatant target, GridPosition at, double takes)
         {
-            if (target.HasBeenSundered || target.IsMinion)
+            // Nobody opens with a Sunder: it's what a fighter reaches for once blow after blow has
+            // been turned by a shield or soaked by armour (the user, 2026-11-06).
+            if (target.HasBeenSundered || target.IsMinion || target.BlowsFoiled < SunderAfterFoiled)
             {
                 return 0;
             }
@@ -1262,6 +1264,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         /// <summary>What a swap of loadouts gives up besides the move it costs: a little, so a swap is made only for a real gain.</summary>
         internal const double SwapPrice = 0.2;
+
+        /// <summary>How many of its blows a target's shield or armour must foil before a Sunder is worth thinking about.</summary>
+        internal const int SunderAfterFoiled = 2;
 
         /// <summary>How much more a Shield Bearer holds to its charge than a creature that merely has a shield.</summary>
         internal const double DedicatedGuard = 8;
