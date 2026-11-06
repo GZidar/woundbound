@@ -1226,7 +1226,7 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// A shrine's guardians — staged for the game, not taken from a book: a Stoneheart Golem (T2
-        /// Brute, Large, Heavy armour, Reach 2) and two Animated Suits of Mail (DT 14), in a ruined
+        /// Juggernaut, Large, Heavy armour, Reach 2) and two Animated Suits of Mail (DT 14), in a ruined
         /// cloister's open yard. Constructs have no Mind or Soul for a Smite, a Mind Spike or a Control
         /// to find, and nothing in them breaks and runs: the blades have to grind them down, which is
         /// where a held Curse on the one they're all hitting earns its Stamina. The Golem's Opportunity
