@@ -126,7 +126,7 @@ namespace WoundBound.Game.Combat.Brains
                 case EncounterPhase.AwaitingReaction when encounter.Pending is { } pending:
                     var spend = pending.Kind switch
                     {
-                        ReactionKind.PanicDodge or ReactionKind.RaiseShield => party.PanicDodges(encounter.View, pending),
+                        ReactionKind.PanicDodge or ReactionKind.RaiseShield or ReactionKind.CoverAlly => party.PanicDodges(encounter.View, pending),
                         ReactionKind.StandFirm or ReactionKind.BraceResolve => party.StandsFirm(encounter.View, pending),
                         ReactionKind.Backlash => party.Backlashes(encounter.View, pending),
                         ReactionKind.Sustain => party.Sustains(encounter.View, pending),

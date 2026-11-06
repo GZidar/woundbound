@@ -352,8 +352,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
             return best.Worth >= 0.4 ? best.Response : LeaverResponse.LetThemGo;
         }
 
-        public override bool PanicDodges(BattleView view, PendingReaction reaction) =>
-            (CanSpare(reaction.Defender) && WorthAvoiding(view, reaction)) || SavesItself(reaction.Defender, reaction);
+        /// <summary>
+        /// Worth the Stamina where it spares enough; a shield over somebody else is worth it too where
+        /// the one it covers is the charge a Sentinel stands guard over.
+        /// </summary>
+        public override bool PanicDodges(BattleView view, PendingReaction reaction) => reaction.Kind == ReactionKind.CoverAlly
+            ? CanSpare(reaction.Defender) && (WorthAvoiding(view, reaction) || (reaction.Defender.Role == AdversaryRole.Sentinel && reaction.Struck.Spells.Count > 0))
+            : (CanSpare(reaction.Defender) && WorthAvoiding(view, reaction)) || SavesItself(reaction.Defender, reaction);
 
         public override bool StandsFirm(BattleView view, PendingReaction reaction) => CanSpare(reaction.Defender);
 
@@ -389,8 +394,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var assess = new Assessor(view);
             var (average, absorbs) = Incoming(reaction);
-            var prevented = Math.Max(0, average - absorbs) * assess.PerWound(reaction.Defender) + (reaction.WouldRiposte ? 1 : 0);
-            return prevented >= 0.4 || reaction.Defender.IsMinion;
+            var prevented = Math.Max(0, average - absorbs) * assess.PerWound(reaction.Struck) + (reaction.WouldRiposte ? 1 : 0);
+            return prevented >= 0.4 || reaction.Struck.IsMinion;
         }
 
         /// <summary>What the blow being answered would do on average, and what armour takes off it — a spell's own dice where it is one.</summary>
@@ -399,7 +404,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var attack = reaction.Attacker.Attack;
             var average = reaction.ExpectedDamage ?? attack.DamageDiceCount * (attack.DamageDieSides + 1) / 2.0 + attack.DamageModifier;
             var absorbs = reaction.DamageType == WoundType.Body
-                ? Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(reaction.Defender.Armour, WoundType.Body, isDirect: false)
+                ? Rules.Calculation.InventoryCalculator.ArmourAbsorbedAgainst(reaction.Struck.Armour, WoundType.Body, isDirect: false)
                 : 0;
             return (average, absorbs);
         }

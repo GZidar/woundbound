@@ -1143,11 +1143,49 @@ namespace WoundBound.Game.Combat
                     placed++;
                 }
 
-                x += ((many + perRank - 1) / perRank) * step;
+                // Sentinels take no rank of their own where there are casters for them to stand
+                // beside: StandGuard moves each next to its charge, so the casters stand just where
+                // they would without them — a caster drawn up a rank further back starts beyond
+                // Long of the party and walks off the board.
+                var casters = bands.SkipWhile(other => !ReferenceEquals(other.Item1, kind)).Skip(1)
+                    .Where(other => other.Item1.Spells is { Count: > 0 }).Sum(other => other.Item2);
+                if (kind.Role != AdversaryRole.Sentinel || many > casters)
+                {
+                    x += ((many + perRank - 1) / perRank) * step;
+                }
             }
 
+            StandGuard(combatants, setting);
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
                 setting: setting, environment: data.Environment);
+        }
+
+        /// <summary>
+        /// Each Sentinel starts where it is meant to be: beside a caster of its own side, the square
+        /// in front of it toward the party where that's free, one Sentinel to a caster.
+        /// </summary>
+        private static void StandGuard(List<Combatant> combatants, Setting setting)
+        {
+            var casters = new Queue<Combatant>(combatants.Where(c => c.Side == Side.Adversaries && c.Spells.Count > 0 && c.Role != AdversaryRole.Sentinel));
+            foreach (var sentinel in combatants.Where(c => c.Side == Side.Adversaries && c.Role == AdversaryRole.Sentinel).ToList())
+            {
+                if (!casters.TryDequeue(out var charge))
+                {
+                    return;
+                }
+
+                var taken = combatants.Where(c => c != sentinel).SelectMany(c => c.Footprint).ToHashSet();
+                var beside = new[] { (-1, 0), (0, 1), (0, -1), (-1, 1), (-1, -1), (1, 0), (1, 1), (1, -1) }
+                    .Select(d => new GridPosition(charge.Position.X + d.Item1, charge.Position.Y + d.Item2))
+                    .Where(sq => sq.X >= 0 && sq.Y >= 0 && sq.X < FieldWidth && sq.Y < FieldHeight
+                                          && !taken.Contains(sq) && !setting.CoverPieces.ContainsKey(sq))
+                    .Select(sq => (GridPosition?)sq)
+                    .FirstOrDefault();
+                if (beside is { } square)
+                {
+                    sentinel.Position = square;
+                }
+            }
         }
 
         /// <summary>

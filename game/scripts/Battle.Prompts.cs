@@ -172,6 +172,7 @@ namespace WoundBoundGame
             ReactionKind.PanicDodge => ("Panic dodge (1 Stamina)", "Take the hit"),
             ReactionKind.StandFirm => ("Stand firm (1 Stamina, +2 ST)", "Let it happen"),
             ReactionKind.RaiseShield => ($"Raise shield (1 Stamina, +{pending.Bonus})", "Take the hit"),
+            ReactionKind.CoverAlly => ($"Shield {pending.Struck.Name} (1 Stamina, +{pending.Bonus})", "Let it land"),
             ReactionKind.Backlash => ($"Backlash ({pending.ImpactWounds} Body)", "Drop to 0"),
             ReactionKind.Sustain => ("Hold it (1 Stamina)", "Let it go"),
             ReactionKind.BraceResolve => ("Steel yourself (1 Stamina, +2)", "Let it take hold"),
@@ -183,7 +184,7 @@ namespace WoundBoundGame
         private static string ReactionIcon(ReactionKind kind) => kind switch
         {
             ReactionKind.PanicDodge => "dodge",
-            ReactionKind.RaiseShield => "raise-shield",
+            ReactionKind.RaiseShield or ReactionKind.CoverAlly => "raise-shield",
             ReactionKind.Backlash => "backlash",
             ReactionKind.Sustain => "sustain",
             ReactionKind.BraceResolve => "resolute",

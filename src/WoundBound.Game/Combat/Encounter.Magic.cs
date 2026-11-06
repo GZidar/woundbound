@@ -839,15 +839,23 @@ namespace WoundBound.Game.Combat
                     return;
                 }
 
-                if (!target.IsOutOfFight && BoostWouldTurn(roll, threshold))
+                void PanicDodge()
                 {
-                    OfferReaction(new PendingReaction(ReactionKind.PanicDodge, target, caster, roll, threshold,
-                            $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. A panic dodge (1 Stamina, +2) would make it miss.", ExpectedDamage: expected, DamageType: type),
-                        dodged => Land(dodged ? ThresholdModifierCalculator.ReactionBonus : 0, "panic dodge"));
-                    return;
+                    if (!target.IsOutOfFight && BoostWouldTurn(roll, threshold))
+                    {
+                        OfferReaction(new PendingReaction(ReactionKind.PanicDodge, target, caster, roll, threshold,
+                                $"{caster.Name}'s {spell.Name} rolls {roll.Total} against {target.Name}'s DT {threshold}. A panic dodge (1 Stamina, +2) would make it miss.", ExpectedDamage: expected, DamageType: type),
+                            dodged => Land(dodged ? ThresholdModifierCalculator.ReactionBonus : 0, "panic dodge"));
+                        return;
+                    }
+
+                    Land(0, null);
                 }
 
-                Land(0, null);
+                if (target.IsOutOfFight || !OfferCover(caster, target, roll, threshold, $"{caster.Name}'s {spell.Name}", string.Empty, expected, type, Land, PanicDodge))
+                {
+                    PanicDodge();
+                }
             }
 
             void Done()

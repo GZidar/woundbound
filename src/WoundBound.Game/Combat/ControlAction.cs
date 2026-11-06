@@ -75,6 +75,14 @@ namespace WoundBound.Game.Combat
         /// it instead, as Soul — once a round (Core Rules §3, "Shelter"). A choice, not a Stamina spend.
         /// </summary>
         Shelter,
+
+        /// <summary>
+        /// An attack is rolled against an ally within Reach of a Medium or Heavy shield, and the roll
+        /// would hit: the bearer may raise it over them now, for 1 Stamina, its whole bonus to their DT,
+        /// and it stays up until the bearer's next turn (Core Rules §9, "Covering somebody else").
+        /// <see cref="PendingReaction.Defender"/> is the bearer, who pays; <see cref="PendingReaction.Ally"/> is who it covers.
+        /// </summary>
+        CoverAlly,
     }
 
     /// <summary>What a character does about an enemy leaving their reach.</summary>

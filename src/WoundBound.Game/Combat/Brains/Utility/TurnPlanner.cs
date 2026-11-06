@@ -512,7 +512,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     worth = Math.Min(worth, Math.Min(0.1 * assess.Value(target), 1.0));
                 }
 
-                worth *= Assessor.Doctrine(actor, target);
+                worth *= Wants(actor, target);
 
                 var advantage = false;
                 if (bonusAvailable && !Encounter.BonusIsExtraAttack(actor) && Encounter.BonusAttackRefusal(actor, manoeuvre: null) is null)
@@ -652,7 +652,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var other = AttackProfile.ForWeapon(build, ready);
                 double BestWith(AttackProfile profile) => enemies.Where(e => !e.IsDefenceless && !e.IsPhantom)
                     .Select(e => View.PlanAttackWith(actor, profile, at, e) is { CanAttack: true } plan
-                        ? assess.Worth(assess.Blow(actor, profile, e, plan.DamageDieSides, assess.PlanThreshold(e, plan)), e) * Assessor.Doctrine(actor, e)
+                        ? assess.Worth(assess.Blow(actor, profile, e, plan.DamageDieSides, assess.PlanThreshold(e, plan)), e) * Wants(actor, e)
                         : 0)
                     .DefaultIfEmpty(0).Max();
                 var gain = BestWith(other);
@@ -1151,10 +1151,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // that's walking away from it — the party getting clear, or the GM's quarry escaping.
             // Only real figures hold a creature on the board, as the rule counts them: a phantom
             // within Long doesn't, and a wolf scoring its squares against one walks off the field.
-            var nearestReal = View.Illusions.Count == 0 ? nearest
-                : View.EnemiesOf(actor).Where(e => !e.IsPhantom).Select(e => actor.DistanceFrom(square, e))
-                    .Concat(Hunted(actor, square)).DefaultIfEmpty(int.MaxValue).Min();
-            if (!actor.IsBroken && nearestReal > 16 && View.EnemiesOf(actor).Any(e => !e.IsBroken))
+            // The rule counts only those still on their feet, so the dying hold nobody here; and an
+            // adversary keeps a couple of squares in hand, or the next character to drop takes it
+            // off the board in the middle of the fight it meant to win.
+            var nearestReal = View.EnemiesOf(actor).Where(e => !e.IsPhantom && !e.IsOutOfFight).Select(e => actor.DistanceFrom(square, e))
+                .Concat(Hunted(actor, square)).DefaultIfEmpty(int.MaxValue).Min();
+            var stayWithin = View.LongRangeSquares - (actor.Side == Side.Adversaries ? 2 : 0);
+            if (!actor.IsBroken && nearestReal > stayWithin && View.EnemiesOf(actor).Any(e => !e.IsBroken))
             {
                 return -3;
             }
@@ -1241,6 +1244,22 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         private readonly Dictionary<Combatant, Combatant?> guarded = new();
 
+        /// <summary>
+        /// <see cref="Assessor.Doctrine"/>, and for a Shield Bearer one thing more: whoever has come
+        /// into melee with its charge is the first thing it strikes (the user, 2026-11-06) — the
+        /// guard's blade is for the foe already at the caster's throat.
+        /// </summary>
+        private double Wants(Combatant actor, Combatant target)
+        {
+            var doctrine = Assessor.Doctrine(actor, target);
+            return actor.IsShieldBearer && !target.IsDefenceless && !target.IsPhantom && GuardedBy(actor) is { } charge && target.CanReach(charge)
+                ? doctrine * AtTheCharge
+                : doctrine;
+        }
+
+        /// <summary>How much more a Shield Bearer wants a foe in melee with its charge than doctrine alone says.</summary>
+        internal const double AtTheCharge = 3;
+
         /// <summary>What a swap of loadouts gives up besides the move it costs: a little, so a swap is made only for a real gain.</summary>
         internal const double SwapPrice = 0.2;
 
@@ -1264,7 +1283,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 foreach (var attack in actor.Attacks)
                 {
                     var worth = assess.Worth(assess.Blow(actor, attack, enemy, attack.DamageDieSides, assess.Dodge(enemy)), enemy)
-                                * Assessor.Doctrine(actor, enemy);
+                                * Wants(actor, enemy);
                     anywhere = Math.Max(anywhere, worth);
                     var reachable = attack.IsRanged
                         ? View.PlanAttackWith(actor, attack, square, enemy).CanAttack

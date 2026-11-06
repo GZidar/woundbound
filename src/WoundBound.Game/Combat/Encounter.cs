@@ -72,6 +72,7 @@ namespace WoundBound.Game.Combat
     /// <param name="ExpectedDamage">For a spell, what a hit would do on average, before armour — its attacker's weapon says nothing about it.</param>
     /// <param name="DamageType">The track that damage lands on.</param>
     /// <param name="Against">For an Interrupt, who the declared action is aimed at.</param>
+    /// <param name="Ally">For a shield raised over somebody else, the ally it covers.</param>
     /// <remarks>
     /// <see cref="Defender"/> is always whoever is being asked — for a reaction to a leaver, the
     /// character whose reach is being left, with the leaver as <see cref="Attacker"/>.
@@ -88,13 +89,17 @@ namespace WoundBound.Game.Combat
         int Bonus = ThresholdModifierCalculator.ReactionBonus,
         double? ExpectedDamage = null,
         WoundType DamageType = WoundType.Body,
-        Combatant? Against = null)
+        Combatant? Against = null,
+        Combatant? Ally = null)
     {
+        /// <summary>Who the blow falls on: the ally a shield would cover, or the one being asked.</summary>
+        public Combatant Struck => Ally ?? Defender;
+
         /// <summary>The Threshold the spend would make it: +2, or for a shield raised, what that shield adds.</summary>
         public int RaisedThreshold => Threshold + Bonus;
 
         /// <summary>Only a Dodge Threshold boost can Riposte (Core Rules §9, "Criticals") — a panic dodge, or a shield raised in time.</summary>
-        public bool WouldRiposte => Kind is ReactionKind.PanicDodge or ReactionKind.RaiseShield && Roll?.IsCritical == true;
+        public bool WouldRiposte => Kind is ReactionKind.PanicDodge or ReactionKind.RaiseShield or ReactionKind.CoverAlly && Roll?.IsCritical == true;
     }
 
     /// <summary>
@@ -979,7 +984,8 @@ namespace WoundBound.Game.Combat
         /// action. Only a Medium or Heavy shield covers somebody else, an ally within the bearer's
         /// Reach; a braced Heavy one covers the bearer and that ally both.
         /// </summary>
-        public static string? ShieldRefusal(Combatant bearer, Combatant? ally = null)
+        /// <param name="reactive">Raised as a reaction, for Stamina: no action needed.</param>
+        public static string? ShieldRefusal(Combatant bearer, Combatant? ally = null, bool reactive = false)
         {
             if (bearer.IsOutOfFight)
             {
@@ -1014,7 +1020,7 @@ namespace WoundBound.Game.Combat
                 }
             }
 
-            return bearer.ActionsRemaining < 1 ? "No action left to raise it with." : bearer.NeedsFooting ? FootingFirst : null;
+            return bearer.ActionsRemaining < 1 && !reactive ? "No action left to raise it with." : bearer.NeedsFooting ? FootingFirst : null;
         }
 
         /// <summary>
@@ -3342,18 +3348,94 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            if (!BoostWouldTurn(roll, plan.DodgeThreshold))
+            void PanicDodge()
             {
-                FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, boost: 0, boostedBy: null, then);
-                return;
+                if (!BoostWouldTurn(roll, plan.DodgeThreshold))
+                {
+                    FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, boost: 0, boostedBy: null, then);
+                    return;
+                }
+
+                OfferReaction(
+                    new PendingReaction(ReactionKind.PanicDodge, target, attacker, roll, plan.DodgeThreshold,
+                        $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
+                        "A panic dodge (1 Stamina, +2) would make it miss."),
+                    dodged => FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
+                        dodged ? ThresholdModifierCalculator.ReactionBonus : 0, dodged ? "panic dodge" : null, then));
             }
 
+            if (!OfferCover(attacker, target, roll, plan.DodgeThreshold, $"{attacker.Name}'s {attack.Name}", riposte, expected: null, WoundType.Body,
+                    (gain, by) => FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction, gain, by, then), PanicDodge))
+            {
+                PanicDodge();
+            }
+        }
+
+        /// <summary>
+        /// The ally best placed to raise a shield over <paramref name="target"/> as a reaction now the
+        /// roll against them is known: a Medium or Heavy shield within Reach, a tactical spend still
+        /// open, and a bonus big enough to turn the blow. A Sentinel first, then the bigger shield
+        /// (Core Rules §9, "Covering somebody else").
+        /// </summary>
+        private (Combatant Bearer, int Gain)? CoverFor(Combatant target, RollResult roll, int threshold)
+        {
+            (Combatant Bearer, int Gain)? best = null;
+            foreach (var bearer in combatants)
+            {
+                if (bearer == target || bearer.Side != target.Side || target.CoveredBy.Any(c => c.Bearer == bearer)
+                    || ShieldRefusal(bearer, target, reactive: true) is not null || TacticalSpendRefusal(bearer) is not null)
+                {
+                    continue;
+                }
+
+                var gain = Math.Max(0, InventoryCalculator.ShieldDodgeThresholdBonus(bearer.InHandShield!.Weight) - target.ShieldBonus);
+                if (gain == 0 || !BoostWouldTurn(roll, threshold, gain))
+                {
+                    continue;
+                }
+
+                if (best is not { } held || (bearer.IsShieldBearer && !held.Bearer.IsShieldBearer)
+                    || (bearer.IsShieldBearer == held.Bearer.IsShieldBearer && gain > held.Gain))
+                {
+                    best = (bearer, gain);
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// Offers the ally best placed to cover <paramref name="target"/> the chance to raise their
+        /// shield over them against this roll; false where nobody could. Taken, the shield goes up
+        /// and stays up until the bearer's next turn, and <paramref name="covered"/> lands the blow
+        /// with its bonus; declined, <paramref name="declined"/> carries on.
+        /// </summary>
+        private bool OfferCover(Combatant attacker, Combatant target, RollResult roll, int threshold, string what, string riposte,
+            double? expected, WoundType type, Action<int, string?> covered, Action declined)
+        {
+            if (CoverFor(target, roll, threshold) is not { } cover)
+            {
+                return false;
+            }
+
+            var (bearer, gain) = cover;
             OfferReaction(
-                new PendingReaction(ReactionKind.PanicDodge, target, attacker, roll, plan.DodgeThreshold,
-                    $"{attacker.Name}'s {attack.Name} rolls {roll.Total} against {target.Name}'s DT {plan.DodgeThreshold}{riposte}. " +
-                    "A panic dodge (1 Stamina, +2) would make it miss."),
-                dodged => FinishAttack(attacker, target, roll, plan, opportunityBonus, asReaction,
-                    dodged ? ThresholdModifierCalculator.ReactionBonus : 0, dodged ? "panic dodge" : null, then));
+                new PendingReaction(ReactionKind.CoverAlly, bearer, attacker, roll, threshold,
+                    $"{what} rolls {roll.Total} against {target.Name}'s DT {threshold}{riposte}. " +
+                    $"{bearer.Name} raising their shield over {target.Name} now (1 Stamina, +{gain}, and it stays up) would make it miss.",
+                    Bonus: gain, ExpectedDamage: expected, DamageType: type, Ally: target),
+                raised =>
+                {
+                    if (!raised)
+                    {
+                        declined();
+                        return;
+                    }
+
+                    RaiseShield(bearer, target, reactive: true);
+                    covered(gain, $"{bearer.Name}'s shield");
+                });
+            return true;
         }
 
         /// <summary>
@@ -3656,7 +3738,7 @@ namespace WoundBound.Game.Combat
             {
                 var takes = offer.Kind switch
                 {
-                    ReactionKind.PanicDodge or ReactionKind.RaiseShield => gm.PanicDodges(GmView, offer),
+                    ReactionKind.PanicDodge or ReactionKind.RaiseShield or ReactionKind.CoverAlly => gm.PanicDodges(GmView, offer),
                     ReactionKind.StandFirm or ReactionKind.BraceResolve => gm.StandsFirm(GmView, offer),
                     ReactionKind.Backlash => gm.Backlashes(GmView, offer),
                     ReactionKind.Sustain => gm.Sustains(GmView, offer),
@@ -3675,6 +3757,7 @@ namespace WoundBound.Game.Combat
                         ReactionKind.StandFirm => $"{defender.Name} stands firm (1 Stamina, +2 ST).",
                         ReactionKind.BraceResolve => $"{defender.Name} steels themselves (1 Stamina, +2).",
                         ReactionKind.Sustain => $"{defender.Name} pays 1 Stamina to keep holding the spell.",
+                        ReactionKind.CoverAlly => $"{defender.Name} raises their shield over {offer.Struck.Name} (1 Stamina).",
                         _ => $"{defender.Name} arrests the shove (1 Stamina).",
                     });
                 }

@@ -154,7 +154,8 @@ namespace WoundBound.Game.Combat.Brains
 
         public virtual bool StrikesAtLeaver(BattleView view, Combatant adversary, Combatant leaver) => !adversary.IsBroken && CanSpare(adversary);
 
-        public virtual bool PanicDodges(BattleView view, PendingReaction reaction) => CanSpare(reaction.Defender) || SavesItself(reaction.Defender, reaction);
+        public virtual bool PanicDodges(BattleView view, PendingReaction reaction) =>
+            CanSpare(reaction.Defender) || (reaction.Kind != ReactionKind.CoverAlly && SavesItself(reaction.Defender, reaction));
 
         public virtual bool StandsFirm(BattleView view, PendingReaction reaction) => CanSpare(reaction.Defender);
 
