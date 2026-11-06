@@ -142,7 +142,8 @@ Encounter Stage(IDiceRoller dice) => which switch
 {
     "bench" => SampleEncounters.Bench(data, dice, Gm(), BenchFoe(), benchCount,
         Text("--foe2", null) is { } foe2 ? Altered(data.Adversary(foe2), Text("--set2", null)) : null, Option("--count2", 0),
-        cover: args.Contains("--cover"), partyTier: Enum.Parse<WoundBound.Rules.Enums.Tier>(Text("--tier", "T1")!, ignoreCase: true)),
+        cover: args.Contains("--cover"), partyTier: Enum.Parse<WoundBound.Rules.Enums.Tier>(Text("--tier", "T1")!, ignoreCase: true),
+        third: Text("--foe3", null) is { } foe3 ? Altered(data.Adversary(foe3), Text("--set3", null)) : null, thirdCount: Option("--count3", 0)),
     "solo" => SampleEncounters.FighterVersusRatkin(data, dice, Gm()),
     "party" => SampleEncounters.PartyVersusAmbush(data, dice, Gm(), ambush: true),
     "signpost4" => SampleEncounters.SignpostAmbush(data, dice, Gm(), fourPlayers: true, ambush: true),

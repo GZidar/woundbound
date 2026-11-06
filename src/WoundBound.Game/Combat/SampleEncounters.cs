@@ -1100,7 +1100,8 @@ namespace WoundBound.Game.Combat
         /// </summary>
         /// <param name="partyTier">The Tier the five are advanced to (<see cref="AtTier"/>).</param>
         public static Encounter Bench(GameData data, IDiceRoller dice, Brains.IGmBrain? gm, StartingAdversaryInfo foe, int count,
-            StartingAdversaryInfo? second = null, int secondCount = 0, bool cover = false, Tier partyTier = Tier.T1)
+            StartingAdversaryInfo? second = null, int secondCount = 0, bool cover = false, Tier partyTier = Tier.T1,
+            StartingAdversaryInfo? third = null, int thirdCount = 0)
         {
             // With cover: the clearing's trees, bushes and scree, in daylight — the same field with
             // somewhere to hide, to tell what open ground does to a price from what the creature does.
@@ -1117,7 +1118,10 @@ namespace WoundBound.Game.Combat
             };
 
             // A second statblock, where there is one, drawn up in front of the first.
-            var bands = second is null ? [(foe, count)] : new[] { (second, secondCount), (foe, count) };
+            // From the front: the second statblock, then the third (a Shield Bearer beside the caster,
+            // say), then the first.
+            var bands = new[] { (second, secondCount), (third, thirdCount), (foe, count) }
+                .Where(b => b.Item1 is not null && b.Item2 > 0).Select(b => (b.Item1!, b.Item2)).ToArray();
             var x = 18;
             foreach (var (kind, many) in bands)
             {
@@ -1133,7 +1137,9 @@ namespace WoundBound.Game.Combat
                         continue;  // nobody starts in a tree
                     }
 
-                    combatants.Add(CombatantFactory.FromAdversary(kind, $"{kind.Name} {placed + 1}", at, data.Spells));
+                    // Two bands of the same statblock are told apart: "Tollroad Bandit (2) 1".
+                    var band = bands.Count(b => b.Item1.Name == kind.Name) > 1 ? $" ({System.Array.FindIndex(bands, b => ReferenceEquals(b.Item1, kind)) + 1})" : "";
+                    combatants.Add(CombatantFactory.FromAdversary(kind, $"{kind.Name}{band} {placed + 1}", at, data.Spells));
                     placed++;
                 }
 

@@ -811,6 +811,35 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var spared = care * (assess.Exposure(actor, at) - assess.Exposure(actor, at, extraDodge: bonus));
                 yield return new Option(OptionKind.RaiseShield, spared, "raise my shield");
             }
+
+            // Or over an ally within Reach, with a Medium or Heavy shield (Core Rules §9, "Covering
+            // somebody else"): worth the blows it turns from them until the bearer's next turn — the
+            // shield bearer's job beside a caster (the user, 2026-11-06).
+            if (skill.Uses(Trick.Shield) && actor.InHandShield is { } cover
+                && Rules.Calculation.InventoryCalculator.CanCoverAnAlly(cover.Weight) && BattleView.ShieldRefusal(actor) is null)
+            {
+                // From wherever this turn's move leaves it: a guard steps beside its charge, then raises.
+                var bonus = Rules.Calculation.InventoryCalculator.ShieldDodgeThresholdBonus(cover.Weight);
+                // A Shield Bearer covers the one it guards and nobody else.
+                var charge = actor.IsShieldBearer ? GuardedBy(actor) : null;
+                foreach (var ally in View.AlliesOf(actor).Where(a => a != actor && !a.IsOutOfFight && !a.IsPhantom && a.ShieldBonus < bonus
+                                                                     && actor.DistanceFrom(at, a) <= actor.Reach && (charge is null || a == charge)))
+                {
+                    if (checkRules && BattleView.ShieldRefusal(actor, ally) is not null)
+                    {
+                        continue;
+                    }
+
+                    var spared = assess.Exposure(ally, ally.Position) - assess.Exposure(ally, ally.Position, extraDodge: bonus - ally.ShieldBonus);
+                    // A Shield Bearer's charge comes before its own skin: the harm a hit on them would cost the side.
+                    if (actor.IsShieldBearer)
+                    {
+                        spared *= 1 + assess.Value(ally) / Math.Max(1, assess.Value(actor));
+                    }
+
+                    yield return new Option(OptionKind.RaiseShield, spared, $"raise my shield over {ally.Name}", Target: ally);
+                }
+            }
         }
 
         /// <summary>
@@ -1168,22 +1197,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         private double Guarding(Combatant actor, GridPosition square)
         {
-            if (!actor.IsMartial || actor.Side != Side.Party)
+            var bearer = actor.InHandShield is { } carried && Rules.Calculation.InventoryCalculator.CanCoverAnAlly(carried.Weight);
+            if (!bearer && (!actor.IsMartial || actor.Side != Side.Party))
             {
                 return 0;
             }
 
-            // Whom it guards is the same on every square it weighs: worked out once a decision.
-            if (!guarded.TryGetValue(actor, out var charge))
-            {
-                charge = View.EnemiesOf(actor).Any(e => !e.IsBroken && !e.IsPhantom)
-                    ? View.AlliesOf(actor)
-                        .Where(a => a != actor && !a.IsPhantom && !a.IsOutOfFight && (a.Spells.Count > 0 || a.Armour is ArmourWeight.None or ArmourWeight.Light))
-                        .MaxBy(a => assess.Value(a))
-                    : null;
-                guarded[actor] = charge;
-            }
-
+            var charge = GuardedBy(actor);
             if (charge is null)
             {
                 return 0;
@@ -1191,13 +1211,41 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var stride = View.SquaresFor(actor.Speed, 1);
             var distance = actor.DistanceFrom(square, charge);
+            if (bearer)
+            {
+                // A shield bearer covers only within its Reach: beside its charge is where it belongs —
+                // and one whose job it is (Shield Bearer) stays there whatever else the fight offers.
+                var weight = actor.IsShieldBearer ? DedicatedGuard : 1;
+                return weight * (distance <= actor.Reach ? 2 * GuardPull : -GuardPull * Math.Min(3, distance / (double)Math.Max(1, actor.Reach)));
+            }
+
             return distance <= stride ? GuardPull : -GuardPull * Math.Min(2, (distance - stride) / (double)stride);
+        }
+
+        /// <summary>Whom <paramref name="actor"/> guards: its side's most valuable caster, or failing one its lightest-armoured — worked out once a decision.</summary>
+        private Combatant? GuardedBy(Combatant actor)
+        {
+            if (!guarded.TryGetValue(actor, out var charge))
+            {
+                // A caster first, the most valuable of them; failing one, the lightest-armoured.
+                var soft = View.EnemiesOf(actor).Any(e => !e.IsBroken && !e.IsPhantom)
+                    ? View.AlliesOf(actor).Where(a => a != actor && !a.IsPhantom && !a.IsOutOfFight).ToList()
+                    : [];
+                charge = soft.Where(a => a.Spells.Count > 0).MaxBy(a => assess.Value(a))
+                         ?? soft.Where(a => a.Armour is ArmourWeight.None or ArmourWeight.Light && a.InHandShield is null).MaxBy(a => assess.Value(a));
+                guarded[actor] = charge;
+            }
+
+            return charge;
         }
 
         private readonly Dictionary<Combatant, Combatant?> guarded = new();
 
         /// <summary>What a swap of loadouts gives up besides the move it costs: a little, so a swap is made only for a real gain.</summary>
         internal const double SwapPrice = 0.2;
+
+        /// <summary>How much more a Shield Bearer holds to its charge than a creature that merely has a shield.</summary>
+        internal const double DedicatedGuard = 8;
 
         /// <summary>The most <see cref="Guarding"/> adds for standing by the party's soft ones.</summary>
         internal const double GuardPull = 0.3;

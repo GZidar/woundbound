@@ -172,6 +172,12 @@ namespace WoundBound.Game.Combat
         {
             get
             {
+                // A statblock's shield is always in hand: a creature has one loadout.
+                if (StatblockShield is { } carried)
+                {
+                    return carried;
+                }
+
                 // The first of the heaviest, as OrderByDescending(Weight).FirstOrDefault() — asked too often to sort for it.
                 ShieldDefinition? heaviest = null;
                 foreach (var shield in Build?.Shields ?? [])
@@ -185,6 +191,9 @@ namespace WoundBound.Game.Combat
                 return heaviest;
             }
         }
+
+        /// <summary>The shield a statblock writes beside its Armour, if any (GM Reference §9).</summary>
+        internal ShieldDefinition? StatblockShield { get; init; }
 
         /// <summary>A Heavy shield held with no weapon in hand: one raise covers the bearer and an ally (Core Rules §9, "Bracing").</summary>
         public bool IsShieldBraced => InHandShield is { } shield
@@ -641,6 +650,9 @@ namespace WoundBound.Game.Combat
 
         /// <summary>Hit and Fade (GM Reference §3, a melee Skirmisher's): once a round, the move straight after an attack draws no reaction for leaving reach.</summary>
         public bool HasHitAndFade => Traits.Contains(AdversaryTrait.HitAndFade);
+
+        /// <summary>Shield Bearer: guards its side's caster, within Reach, its shield over them first.</summary>
+        public bool IsShieldBearer => Role == AdversaryRole.Sentinel || Traits.Contains(AdversaryTrait.ShieldBearer);
 
         /// <summary>Its next move would be its Hit and Fade: it has attacked on this turn of its own (a reaction strike doesn't count), not moved since, and not faded yet this round.</summary>
         public bool CanFade => HasHitAndFade && HasAttackedThisTurn && !HasMovedSinceLastAttack && !HasFadedThisRound;

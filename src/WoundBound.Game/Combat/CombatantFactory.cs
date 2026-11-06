@@ -116,6 +116,7 @@ namespace WoundBound.Game.Combat
                 Casting = casting,
                 StatblockFuel = casting.Source == MagicSource.ElementalMagic && !casting.OfItsElement ? casting.Fuel : 0,
                 StatblockSpells = spells,
+                StatblockShield = foe.StatblockShield,
                 StatblockCastBonus = AdversaryTraitCatalog.CastBonus(info.ToTemplate()),
                 StatblockBleedBonus = AdversarySkillCalculator.Baseline(info.Tier),
             };
@@ -164,6 +165,9 @@ namespace WoundBound.Game.Combat
         private static Combatant Plain(StartingAdversaryInfo info, string name, GridPosition position) => new()
         {
             Statblock = info,
+            StatblockShield = info.Shield is { } weight
+                ? new ShieldDefinition { Name = $"{weight} shield", Weight = weight, IsEquipped = true }
+                : null,
             Name = name,
             Side = Side.Adversaries,
             Position = position,
