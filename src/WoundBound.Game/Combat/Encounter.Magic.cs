@@ -778,7 +778,7 @@ namespace WoundBound.Game.Combat
                 var threshold = target.DodgeThreshold + VisibilityDodgeModifier(target)
                                 + CoverDodgeModifier(caster.Position, target, SpellArea.ShapeOf(cast) == SpellShape.Volume || spell.Range == SpellRange.Touch);
                 target.HasBeenAttackedSinceTurnStart = true;
-                var advantage = cast.Sacrifice || helped || target.IsDefenceless;
+                var advantage = cast.Sacrifice || helped || target.IsOpenToBlows;
                 var disadvantage = AttacksAtDisadvantage(caster) || harried;
                 var roll = RollAgainst(plan.CastBonus, threshold, advantage, disadvantage, caster);
                 var expected = SpellCalculator.HealHarmDiceCount(spell.SpellTier) * (DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target)) + 1) / 2.0
@@ -1118,7 +1118,7 @@ namespace WoundBound.Game.Combat
 
                 var threshold = target.StabilityThreshold;
                 var unshaken = kind == MotionKind.Shift && (target.IsUnshakable || target.IsSolo);
-                var roll = RollAgainst(plan.CastBonus, threshold, cast.Sacrifice || helped || target.IsDefenceless, AttacksAtDisadvantage(caster) || harried || unshaken, caster);
+                var roll = RollAgainst(plan.CastBonus, threshold, cast.Sacrifice || helped || target.IsOpenToBlows, AttacksAtDisadvantage(caster) || harried || unshaken, caster);
 
                 void Resolve(bool stoodFirm)
                 {

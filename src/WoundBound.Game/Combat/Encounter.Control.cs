@@ -70,7 +70,7 @@ namespace WoundBound.Game.Combat
                     return;
                 }
 
-                var roll = RollAgainst(plan.CastBonus, threshold, cast.Sacrifice || helped || target.IsDefenceless,
+                var roll = RollAgainst(plan.CastBonus, threshold, cast.Sacrifice || helped || target.IsOpenToBlows,
                     AttacksAtDisadvantage(caster) || harried || target.Role == AdversaryRole.Solo, caster);
 
                 void Resolve(bool braced)

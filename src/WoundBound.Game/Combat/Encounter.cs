@@ -3267,6 +3267,10 @@ namespace WoundBound.Game.Combat
             {
                 Write($"{target.Name} is defenceless, lying {target.BodyStatus.ToString().ToLowerInvariant()}: Advantage.");
             }
+            else if (target.IsFrozen)
+            {
+                Write($"{target.Name} is Frozen, held fast and defenceless: Advantage.");
+            }
 
             var pack = PackMateOf(attacker, target);
             if (pack is not null)
@@ -3274,7 +3278,7 @@ namespace WoundBound.Game.Combat
                 Write($"{attacker.Name} has Pack Tactics, with {pack.Name} within reach of {target.Name} too: Advantage.");
             }
 
-            var advantage = bonusAdvantage || helped || target.IsDefenceless || sacrifice || patient || pack is not null;
+            var advantage = bonusAdvantage || helped || target.IsOpenToBlows || sacrifice || patient || pack is not null;
             var disadvantage = AttacksAtDisadvantage(attacker) || harried;
             disadvantageWhy[attacker] = DisadvantageReason(attacker, harried);
             var rolled = Enumerable.Range(0, RollCalculator.DiceNeeded(advantage, disadvantage))

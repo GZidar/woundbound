@@ -143,6 +143,24 @@ public class EncounterTests
     }
 
     [Fact]
+    public void AFrozenTarget_IsDefenceless_EveryBlowAtItHasAdvantage()
+    {
+        // A T3 Bind's Frozen (the user, 2026-11-06): held fast, defenceless. 1, 2 and 9: the
+        // Advantage drops the 1, and 2+9 +4 = 15 beats the ratkin's DT 11; d6 = 3.
+        var (encounter, fighter, ratkin) = Fight(1, 2, 9, 3);
+        var target = StandBeside(fighter, ratkin[1]);
+        target.SetCondition(CharacterCondition.Frozen, true);
+
+        Assert.True(target.IsOpenToBlows);
+        Assert.False(target.IsDefenceless);  // held, not beaten: the brains still weigh it as a fighter
+        var outcome = encounter.TryAttack(target)!;
+
+        Assert.Contains(encounter.Log, line => line.Contains("is Frozen, held fast and defenceless: Advantage"));
+        Assert.True(outcome.Roll.AppliedAdvantage);
+        Assert.True(outcome.Roll.Success);
+    }
+
+    [Fact]
     public void Minions_ActTogetherAsAMob_InOneOfTheCapsTurns()
     {
         // Three ratkin Minions, one fighter: the cap is one turn, and the mob takes it — every

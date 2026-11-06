@@ -53,7 +53,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         .Where(c => c.Side == actor.Side && !c.IsOutOfFight)
                         .Select(c => (new SpellCast(spell) { Target = c, Threshold = ThresholdType.Dodge }, (Func<CastPlan, double>)(plan => Denial * BuffWorth(plan, care)))),
                     SpellType.Control when usesTricks => enemies.Where(e => e.ResolveThreshold is not null && !View.IsControlled(e))
-                        .SelectMany(e => (SpellArea.FixedEffectOf(spell) is { } written ? [written] : new[] { ControlEffect.Fear, ControlEffect.Compulsion })
+                        .SelectMany(e => (SpellArea.FixedEffectOf(spell) is { } written ? [written] : new[] { ControlEffect.Fear, ControlEffect.Compulsion, ControlEffect.Confusion })
                             .Select(effect => (new SpellCast(spell) { Target = e, Effect = effect }, (Func<CastPlan, double>)(plan => Denial * ControlWorth(actor, effect, plan))))),
                     SpellType.Illusion when usesTricks => IllusionCasts(actor, spell, at, enemies),
                     SpellType.Bane when usesTricks && spell.Target == SpellTarget.Many => VolumeCorners(spell, enemies.Where(e => !e.IsPhantom))
@@ -681,6 +681,24 @@ namespace WoundBound.Game.Combat.Brains.Utility
             if (effect == ControlEffect.Compulsion)
             {
                 return lands * turns * turnWorth;
+            }
+
+            if (effect == ControlEffect.Confusion)
+            {
+                // Its action goes on a creature in its reach, chosen at random, its own side counted
+                // (the user, 2026-11-06: "strong PCs maybe attack their allies"). Each one of its own
+                // it might strike is a turn taken from it and a blow on its side; with nobody in reach
+                // it spends the turn closing on whoever is nearest, and half a turn is lost.
+                var inReach = View.OnBoard.Where(c => c != target && !c.IsOutOfFight && !c.IsPhantom && target.CanReach(c)).ToList();
+                if (inReach.Count == 0)
+                {
+                    return lands * turns * 0.5 * turnWorth;
+                }
+
+                var own = inReach.Where(c => c.Side == target.Side).ToList();
+                var ownShare = own.Count / (double)inReach.Count;
+                var ownHurt = own.Count == 0 ? 0 : assess.Threat(target) * own.Average(c => assess.PerWound(c));
+                return lands * turns * ownShare * (turnWorth + ownHurt);
             }
 
             // Fear: driven out to Long it is gone from the Challenge for good — as good as down. Nearer,

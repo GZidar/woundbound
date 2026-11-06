@@ -562,7 +562,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private (double Hit, double ExpectedDealt, double Kill) WorkOutBlow(Combatant attacker, AttackProfile attack, Combatant target, int? dieSides, int dodgeThreshold,
             bool advantage, bool disadvantage, bool precise, int woundsAlready, int extraDamage)
         {
-            advantage |= attacker.IsHelped || target.IsDefenceless || attacker.HoldsPatient;
+            advantage |= attacker.IsHelped || target.IsOpenToBlows || attacker.HoldsPatient;
             precise |= attacker.HoldsPrecise;
             disadvantage |= attacker.IsStandingGround || attacker.IsOffGuard || attacker.IsHarried;
 
@@ -721,10 +721,35 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var mustMove = !target.HasRangedAttack && !victims.Any(v => target.CanReach(v));
             return bound switch
             {
-                CharacterCondition.Frozen => turn,
+                CharacterCondition.Frozen => turn + HeldOpenWorth(actor, target),
                 CharacterCondition.Stuck => (mustMove ? 0.8 : 0.1) * turn,
                 _ => mustMove ? 0.3 * turn : 0,
             };
+        }
+
+        /// <summary>
+        /// What holding <paramref name="target"/> Frozen hands the holder's side besides its lost turn:
+        /// Advantage on every blow at it until it breaks free (the user, 2026-11-06), from each of
+        /// them near enough to strike it in the meantime.
+        /// </summary>
+        private double HeldOpenWorth(Combatant actor, Combatant target)
+        {
+            double gain = 0;
+            foreach (var ally in view.AlliesOf(actor).Where(a => !a.IsOutOfFight && !a.IsPhantom))
+            {
+                var stride = view.SquaresFor(ally.Speed, 1);
+                if (ally.DistanceTo(target) > stride + ally.Reach && !ally.HasRangedAttack)
+                {
+                    continue;
+                }
+
+                var attack = ally.Attack;
+                var dodge = Dodge(target);
+                gain += Worth(Blow(ally, attack, target, attack.DamageDieSides, dodge, advantage: true), target)
+                        - Worth(Blow(ally, attack, target, attack.DamageDieSides, dodge), target);
+            }
+
+            return gain;
         }
 
         /// <summary>

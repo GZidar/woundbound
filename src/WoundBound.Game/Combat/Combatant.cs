@@ -202,6 +202,17 @@ namespace WoundBound.Game.Combat
         /// dead (Core Rules §4, "Dying"), or anybody Stunned or Numbed and still breathing ("Like a
         /// dying or stable character, any attack against them rolls with Advantage").
         /// </summary>
+        /// <summary>
+        /// Every blow at it has Advantage: the defenceless, and anybody Frozen by a T3 Bind — held
+        /// fast, neither moving nor acting, and so defenceless while it lasts (the user, 2026-11-06).
+        /// A Frozen creature is not beaten, so the brains keep weighing it as a fighter; this is only
+        /// what its being held hands whoever strikes it.
+        /// </summary>
+        public bool IsOpenToBlows => IsDefenceless || IsFrozen;
+
+        /// <summary>Frozen by a T3 Bind: neither moves nor acts, makes no reactions, and every attack at it has Advantage.</summary>
+        public bool IsFrozen => Conditions.Contains(CharacterCondition.Frozen);
+
         public bool IsDefenceless => !HasFled
             && ((DiesLikeACharacter && BodyStatus is BodyStatus.Dying or BodyStatus.Stable) || (IsDazed && Body > 0));
 
