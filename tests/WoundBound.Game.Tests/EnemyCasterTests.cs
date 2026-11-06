@@ -27,8 +27,11 @@ public class EnemyCasterTests
     public void TheBloodwright_CastsItsAttackLine_AsABloodMagicHarm_AtItsTier()
     {
         // "Blood Lance - +3 v DT / 2d6 Body. Cost: 2 Body wounds" — T2, Small, at Short.
+        // Its list is open — the whole of Blood Magic, at its Tier — with its own Lance first.
         var bloodwright = Foe("Hollow Bloodwright", 5, 4);
-        var lance = Assert.Single(bloodwright.Spells);
+        var lance = bloodwright.Spells[0];
+        Assert.Contains(bloodwright.Spells, s => s.Name == "Blood Mist");
+        Assert.All(bloodwright.Spells, s => Assert.Equal((MagicSource.BloodMagic, Tier.T2), (s.Source, s.SpellTier)));
 
         Assert.Equal(("Blood Lance", MagicSource.BloodMagic, Tier.T2, SpellType.Harm, WoundType.Body),
             (lance.Name, lance.Source, lance.SpellTier, lance.SpellType, lance.DamageType));
@@ -63,17 +66,20 @@ public class EnemyCasterTests
     }
 
     [Fact]
-    public void TheHexCaller_CastsOnlyTheFearItsGlareIsWrittenFor_ForFourRounds()
+    public void TheHexCallersGlare_IsOpen_FearConfusionOrCompulsion_ForFourRounds()
     {
+        // "The caster's choice of Fear, Confusion or Compulsion" (2026-11-06): no effect is fixed,
+        // and the rest of Divine Magic is open to it too.
         var hex = Foe("Bog Hex-Caller", 5, 6);
-        var glare = Assert.Single(hex.Spells);
+        var glare = hex.Spells[0];
         var encounter = Facing([], hex);
         var joren = encounter.Combatants.Single(c => c.Name == "Joren Blacke");
 
-        Assert.Equal((SpellType.Control, Tier.T2), (glare.SpellType, glare.SpellTier));
-        Assert.Equal(ControlEffect.Fear, SpellArea.FixedEffectOf(glare));
-        Assert.Contains("written to cause Fear", encounter.PlanCastFrom(hex, hex.Position,
-            new SpellCast(glare) { Target = joren, Effect = ControlEffect.Compulsion }, checkTurn: false).Refusal);
+        Assert.Equal(("Withering Glare", SpellType.Control, Tier.T2), (glare.Name, glare.SpellType, glare.SpellTier));
+        Assert.Null(SpellArea.FixedEffectOf(glare));
+        Assert.Contains(hex.Spells, s => s.Name == "Stay");
+        Assert.Null(encounter.PlanCastFrom(hex, hex.Position,
+            new SpellCast(glare) { Target = joren, Effect = ControlEffect.Confusion }, checkTurn: false).Refusal);
         Assert.Equal(4, SpellCalculator(glare));
     }
 
@@ -88,15 +94,36 @@ public class EnemyCasterTests
         bandit.Body = 2;
         var encounter = Facing([], chanter, bandit);
 
-        Assert.Equal(["Blessing", "Vital Transfer"], chanter.Spells.Select(s => s.Name));
-        var heal = encounter.PlanCastFrom(chanter, chanter.Position, new SpellCast(chanter.Spells[1]) { Target = bandit }, checkTurn: false);
+        // Its Attack row's Mending Word, then its SPELLS rows, then the rest of Divine Magic.
+        Assert.Equal(["Mending Word", "Blessing", "Vital Transfer"], chanter.Spells.Take(3).Select(s => s.Name));
+        Assert.Contains(chanter.Spells, s => s.Name == "Curse");
+        var transfer = chanter.Spells.Single(s => s.Name == "Vital Transfer");
+        var blessing = chanter.Spells.Single(s => s.Name == "Blessing");
+        var heal = encounter.PlanCastFrom(chanter, chanter.Position, new SpellCast(transfer) { Target = bandit }, checkTurn: false);
         Assert.Null(heal.Refusal);
         Assert.Equal((1, WoundType.Body), (heal.Cost, heal.Track));
         Assert.Contains("never target its own caster",
-            encounter.PlanCastFrom(chanter, chanter.Position, new SpellCast(chanter.Spells[1]) { Target = chanter }, checkTurn: false).Refusal);
+            encounter.PlanCastFrom(chanter, chanter.Position, new SpellCast(transfer) { Target = chanter }, checkTurn: false).Refusal);
 
-        var bless = encounter.PlanCastFrom(chanter, chanter.Position, new SpellCast(chanter.Spells[0]) { Target = bandit }, checkTurn: false);
+        var bless = encounter.PlanCastFrom(chanter, chanter.Position, new SpellCast(blessing) { Target = bandit }, checkTurn: false);
         Assert.Equal((WoundType.Soul, 1), (bless.Track, bless.CastBonus));
+    }
+
+    [Fact]
+    public void TheChantersMendingWord_ReachesShort_AndIsBloodMagicPaidInBody()
+    {
+        // Only Blood Magic heals (Core Rules §11): the Chanter's signature heal reaches an ally three
+        // squares off, and costs Body by the standard formula — 1 at T1, Small, Short.
+        var chanter = Foe("Wyrding Chanter", 6, 4);
+        var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(9, 4));
+        bandit.Body = 2;
+        var encounter = Facing([], chanter, bandit);
+        var word = chanter.Spells[0];
+
+        Assert.Equal(("Mending Word", SpellType.Heal, MagicSource.BloodMagic, SpellRange.Short), (word.Name, word.SpellType, word.Source, word.Range));
+        var plan = encounter.PlanCastFrom(chanter, chanter.Position, new SpellCast(word) { Target = bandit }, checkTurn: false);
+        Assert.Null(plan.Refusal);
+        Assert.Equal((1, WoundType.Body), (plan.Cost, plan.Track));
     }
 
     [Fact]

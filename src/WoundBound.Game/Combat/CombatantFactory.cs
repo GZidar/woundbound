@@ -77,12 +77,23 @@ namespace WoundBound.Game.Combat
                 spells.Add(attackSpell);
             }
 
-            foreach (var line in info.Spells ?? [])
+            // The spells on its block come first — the ones it reaches for — and then the rest of its
+            // tradition: an adversary caster's list is open (the user, 2026-11-06; GM Reference §9,
+            // "On Casters"), every spell of its tradition of up to its own Tier, cast at that Tier. An
+            // Elemental caster keeps to its element.
+            var listed = (info.Spells ?? []).Select(line => spellCatalogue?.FirstOrDefault(s => s.Name == line.Name)).OfType<StartingSpellInfo>();
+            var rest = (spellCatalogue ?? []).Where(s => s.Source == casting.Source
+                && (casting.Source != MagicSource.ElementalMagic || casting.Element is null || s.Element == casting.Element));
+            foreach (var known in listed.Concat(rest))
             {
-                if (spellCatalogue?.FirstOrDefault(s => s.Name == line.Name) is { } known)
+                if (spells.Any(sp => sp.Name == known.Name))
                 {
-                    spells.Add(SpellCalculator.FromReference(known));
+                    continue;
                 }
+
+                var spell = SpellCalculator.FromReference(known);
+                spell.SpellTier = info.Tier;
+                spells.Add(spell);
             }
 
             return new Combatant
@@ -123,7 +134,12 @@ namespace WoundBound.Game.Combat
             }
 
             var touch = info.AttackName.Contains("Touch", StringComparison.OrdinalIgnoreCase);
-            var type = info.AttackVsThreshold switch
+            // A Support's signature heal sits on the Attack row too (GM Reference §3): "(Heal)" in its name.
+            // Only Blood Magic heals (Core Rules §11), so it is Blood Magic whatever the caster's own
+            // tradition, paid in Body by the standard formula; a Divine or Aether caster reaches it
+            // through Bleeding for Power, as the Chanter reaches Vital Transfer.
+            var heal = info.AttackName.Contains("(Heal", StringComparison.OrdinalIgnoreCase);
+            var type = heal ? SpellType.Heal : info.AttackVsThreshold switch
             {
                 ThresholdType.Resolve => SpellType.Control,
                 ThresholdType.Stability => SpellType.Motion,
@@ -132,14 +148,14 @@ namespace WoundBound.Game.Combat
             return new SpellDefinition
             {
                 Name = info.AttackName.Split(" (")[0],
-                Source = casting.Source,
+                Source = heal ? MagicSource.BloodMagic : casting.Source,
                 SpellTier = info.Tier,
                 SpellType = type,
                 Target = SpellTarget.One,
                 Shape = touch ? SpellShape.None : SpellShape.Ray,
                 Size = SpellSize.Small,
                 Range = touch ? SpellRange.Touch : SpellRange.Short,
-                Threshold = info.AttackVsThreshold,
+                Threshold = heal ? null : info.AttackVsThreshold,
                 DamageType = type == SpellType.Harm ? info.DamageType : null,
                 Notes = $"{info.AttackName}. {info.AttackEffect}".Trim(),
             };

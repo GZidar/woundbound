@@ -476,7 +476,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     ? c.MagicAccess.FirstOrDefault(a => a.Source == spell.Source) is { } access ? CharacterCalculator.CastBonus(build, access.CastAbility) : 0
                     : c.StatblockCastBonus;
                 var dice = SpellCalculator.HealHarmDiceCount(spell.SpellTier) * (DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target)) + 1) / 2.0
-                           + (c.Build is { } b ? SpellCalculator.GraceBonus(b, spell) : 0);
+                           + Encounter.GraceOf(c, spell);
                 var absorbs = (spell.DamageType ?? WoundType.Body) == WoundType.Body
                     ? InventoryCalculator.ArmourAbsorbedAgainst(e.Armour, WoundType.Body, isDirect: false)
                     : 0;
@@ -520,7 +520,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var worth = spell.SpellType switch
                 {
                     SpellType.Heal => (SpellCalculator.HealHarmDiceCount(spell.SpellTier) * (DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target)) + 1) / 2.0
-                                       + (c.Build is { } b ? SpellCalculator.GraceBonus(b, spell) : 0))
+                                       + Encounter.GraceOf(c, spell))
                                       * (spell.Target == SpellTarget.Many ? AreaCatch : 1) * (hurtAllies > 0 ? 1 : 0.6),
                     SpellType.Control => 1.5,
                     SpellType.Buff or SpellType.Bane or SpellType.Motion => 0.8,

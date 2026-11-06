@@ -31,6 +31,22 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public IEnumerable<Option> Options(Combatant actor, GridPosition at, bool checkRules, double care, bool usesTricks,
             IReadOnlyCollection<Combatant>? stillToAct = null, bool bonusAvailable = false, bool bankFull = false)
         {
+            var all = Every(actor, at, checkRules, care, usesTricks, stillToAct, bonusAvailable, bankFull);
+            if (!HasFocus(actor))
+            {
+                return all;
+            }
+
+            // A statblock caster reaches past its focus only when nothing within it is worth casting
+            // here (the user, 2026-11-06): its list is open, its habits are not.
+            var list = all.ToList();
+            var focused = list.Where(o => o.Cast is { } cast && InFocus(actor, cast.Spell)).ToList();
+            return focused.Count > 0 ? focused : list;
+        }
+
+        private IEnumerable<Option> Every(Combatant actor, GridPosition at, bool checkRules, double care, bool usesTricks,
+            IReadOnlyCollection<Combatant>? stillToAct, bool bonusAvailable, bool bankFull)
+        {
             this.stillToAct = stillToAct;
             if (actor.Spells.Count == 0)
             {
@@ -47,7 +63,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     SpellType.Harm => enemies
                         .Select(e => (new SpellCast(spell) { Target = e }, (Func<CastPlan, double>)(plan => HarmWorth(actor, spell, plan)))),
                     SpellType.Heal => View.OnBoard
-                        .Where(c => c.Side == actor.Side && c != actor && c.DistanceTo(at) <= 1)
+                        .Where(c => c.Side == actor.Side && c != actor && c.DistanceTo(at) <= HealReach(spell))
                         .Select(c => (Mend(spell, c), (Func<CastPlan, double>)(plan => HealWorth(actor, spell, plan)))),
                     SpellType.Buff when usesTricks => View.OnBoard
                         .Where(c => c.Side == actor.Side && !c.IsOutOfFight)
@@ -98,6 +114,49 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
         }
+
+        /// <summary>
+        /// Whether <paramref name="actor"/> is a statblock caster with a focus to keep to: an Adept,
+        /// Controller or Support. Characters and rivals choose freely, as players do.
+        /// </summary>
+        internal static bool HasFocus(Combatant actor) =>
+            actor.Build is null && actor.Statblock is not null && actor.Role is AdversaryRole.Adept or AdversaryRole.Controller or AdversaryRole.Support;
+
+        /// <summary>
+        /// Whether <paramref name="spell"/> is one <paramref name="actor"/> reaches for first (the user,
+        /// 2026-11-06: casters "should prefer spells within their area of focus"): a spell on its block,
+        /// or one its Role is built around — an Adept's Harm, a Controller's Control, Motion and Bane, a
+        /// Support's Heal and Buff.
+        /// </summary>
+        internal static bool InFocus(Combatant actor, SpellDefinition spell)
+        {
+            if (!HasFocus(actor))
+            {
+                return true;
+            }
+
+            var block = actor.Statblock!;
+            if ((block.Spells ?? []).Any(l => l.Name == spell.Name) || (block.AttackName is { } attack && attack.Split(" (")[0] == spell.Name))
+            {
+                return true;
+            }
+
+            return actor.Role switch
+            {
+                AdversaryRole.Adept => spell.SpellType == SpellType.Harm,
+                AdversaryRole.Controller => spell.SpellType is SpellType.Control or SpellType.Motion or SpellType.Bane,
+                _ => spell.SpellType is SpellType.Heal or SpellType.Buff,
+            };
+        }
+
+        /// <summary>How far a Heal reaches from where it's cast: a hand on the wound at Touch, otherwise its Range band (Core Rules §11).</summary>
+        private static int HealReach(SpellDefinition spell) => spell.Range switch
+        {
+            SpellRange.Touch or SpellRange.Close => 1,
+            SpellRange.Short => 4,
+            SpellRange.Middle => 8,
+            _ => 16,
+        };
 
         private static string Describe(CastPlan plan) =>
             plan.Area.Count > 1 ? $"over {string.Join(", ", plan.Targets.Select(t => t.Name))}" : plan.Targets.Count > 0 ? $"at {plan.Targets[0].Name}" : "at nobody";
@@ -306,7 +365,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var count = SpellCalculator.HealHarmDiceCount(spell.SpellTier);
             var sides = DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target));
-            var grace = caster.Build is { } build ? SpellCalculator.GraceBonus(build, spell) : 0;
+            var grace = Encounter.GraceOf(caster, spell);
             var absorbs = type == WoundType.Body ? InventoryCalculator.ArmourAbsorbedAgainst(target.Armour, WoundType.Body, isDirect: false) : 0;
             var left = type == WoundType.Body ? target.Body : target.Track(type).Current;
 
@@ -345,7 +404,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var patient = plan.Targets[0];
             var track = patient.IsStunned ? WoundType.Mind : patient.IsNumbed ? WoundType.Soul : WoundType.Body;
             var (now, max) = patient.Track(track);
-            var grace = actor.Build is { } build ? SpellCalculator.GraceBonus(build, spell) : 0;
+            var grace = Encounter.GraceOf(actor, spell);
             var average = SpellCalculator.HealHarmDiceCount(spell.SpellTier) * (DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target)) + 1) / 2.0 + grace;
             if (patient.IsOutOfFight)
             {
@@ -475,7 +534,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             var count = SpellCalculator.HealHarmDiceCount(spell.SpellTier);
             var sides = DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target));
-            var grace = caster.Build is { } build ? SpellCalculator.GraceBonus(build, spell) : 0;
+            var grace = Encounter.GraceOf(caster, spell);
             var believed = View.BelievedBody(foe);
             var sums = Sums(count, sides).ToList();
             return sums.Count(sum => (believed - sum - grace) * 2 < foe.BodyMax) / (double)sums.Count;

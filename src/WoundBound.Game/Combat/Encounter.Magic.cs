@@ -737,8 +737,12 @@ namespace WoundBound.Game.Combat
             var rolled = critical
                 ? count * sides + dice.Roll(sides)
                 : Enumerable.Range(0, count).Sum(_ => dice.Roll(sides));
-            return Math.Max(0, rolled + (caster.Build is { } build ? SpellCalculator.GraceBonus(build, spell) : 0));
+            return Math.Max(0, rolled + GraceOf(caster, spell));
         }
+
+        /// <summary>What a caster adds to a Heal or Harm's dice: a character's Grace (Core Rules §11); a statblock caster adds nothing.</summary>
+        public static int GraceOf(Combatant caster, SpellDefinition spell) =>
+            caster.Build is { } build ? SpellCalculator.GraceBonus(build, spell) : 0;
 
         /// <summary>
         /// A Harm spell: one roll for each target it catches, each against that target's own Dodge
