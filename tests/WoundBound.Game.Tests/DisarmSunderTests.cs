@@ -50,6 +50,41 @@ public class DisarmSunderTests
     }
 
     [Fact]
+    public void TheRevenantsAttackLine_NamesAGrabOnAHit()
+    {
+        var revenant = CombatantFactory.FromAdversary(Data.Adversary("Charnel Revenant"), "Revenant", new GridPosition(3, 4));
+        var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 4));
+
+        Assert.Equal([WeaponManoeuvre.Grab], Encounter.ManoeuvresOf(revenant));
+        Assert.Null(Encounter.ManoeuvreRefusal(revenant, joren, new Manoeuvre(WeaponManoeuvre.Grab)));
+        Assert.DoesNotContain(WeaponManoeuvre.Grab, CombatantFactory.ManoeuvresIn("; may attempt Topple (ST) as a manoeuvre"));
+    }
+
+    [Fact]
+    public void TheRevenantsGrab_HoldsWhomItHits_AndNobodyElseCanTakeHoldOfThem()
+    {
+        // 10+9+3 = 22: past Joren's Dodge and his Stability both, and a d8 of 1 leaves him standing. He is Held.
+        var revenant = CombatantFactory.FromAdversary(Data.Adversary("Charnel Revenant"), "Revenant", new GridPosition(3, 4));
+        var joren = CombatantFactory.FromCharacter(SampleEncounters.JorenBlacke(Data), new GridPosition(2, 4));
+        var gm = new OneStepGm((view, turn) => turn.HasAttacked ? GmStep.End : new GmStep.Attack(joren, Manoeuvre: new Manoeuvre(WeaponManoeuvre.Grab)));
+        var encounter = Fight([10, 9, 1], gm, joren, revenant);
+        encounter.EndTurn();
+        encounter.RunAdversaryTurn();
+        while (encounter.Pending is not null)
+        {
+            encounter.RespondToReaction(false);
+        }
+
+        Assert.True(joren.HeldBy == revenant, string.Join("\n", encounter.Log));
+        Assert.Same(joren, revenant.Holding);
+        var second = CombatantFactory.FromAdversary(Data.Adversary("Charnel Revenant"), "Second", new GridPosition(2, 5));
+        Assert.Contains("already has hold", Encounter.ManoeuvreRefusal(second, joren, new Manoeuvre(WeaponManoeuvre.Grab)));
+
+        // Nobody Held can dodge (the user's ruling, 2026-11-07).
+        Assert.Contains("grip", Encounter.StandGroundRefusal(joren, CombatAction.Dodge));
+    }
+
+    [Fact]
     public void Disarm_KnocksTheWeaponToTheirFeet_OffGuard_AndPunchingUntilTheyTakeItUp()
     {
         // 11+10 + Joren's bonus against the bandit's DT 15 and ST 11: a hit, and the sword goes.

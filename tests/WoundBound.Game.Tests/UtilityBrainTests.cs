@@ -61,7 +61,7 @@ public class UtilityBrainTests
 
         if (step is GmStep.Move move)
         {
-            Assert.True(encounter.View.DistanceToNearestCharacter(move.Square) > 1, "it shouldn't step into reach");
+            Assert.True(encounter.View.DistanceToNearestCharacter(move.Square) > 1, $"it shouldn't step into reach: {move.Square}, fighter {fighter.Position}, ridge {ridge.Position}");
         }
         else
         {

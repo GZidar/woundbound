@@ -797,6 +797,11 @@ namespace WoundBound.Game.Combat
                 return "Already moved this turn — standing your ground means making no move at all.";
             }
 
+            if (threshold == ThresholdType.Dodge && combatant.HeldBy is { } holder)
+            {
+                return $"{combatant.Name} is in {holder.Name}'s grip — nobody Held can dodge.";
+            }
+
             if (combatant.StandingGround.Contains(action))
             {
                 return $"Already taking the {action} action — it can't be taken twice in a turn.";
@@ -3741,6 +3746,14 @@ namespace WoundBound.Game.Combat
         private void OfferReaction(PendingReaction offer, Action<bool> then)
         {
             var defender = offer.Defender;
+            // A creature in somebody's grip can't slip a blow (the user's ruling, 2026-11-07): no panic
+            // dodge while Held. A shield it already has in hand still goes up.
+            if (offer.Kind == ReactionKind.PanicDodge && defender.HeldBy is not null)
+            {
+                then(false);
+                return;
+            }
+
             if (!IsFreeChoice(offer.Kind) && TacticalSpendRefusal(defender) is not null)
             {
                 then(false);

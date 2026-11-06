@@ -219,12 +219,20 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public static IReadOnlyList<WeaponManoeuvre> ManoeuvresIn(string? effect)
         {
-            if (string.IsNullOrWhiteSpace(effect) || !effect.Contains("manoeuvre", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(effect))
             {
                 return [];
             }
 
+            // "may Grab (ST) on a hit": the Charnel Revenant's hold, paid and rolled as a manoeuvre is.
+            var grabs = System.Text.RegularExpressions.Regex.IsMatch(effect, @"\bGrab\b.*\bon a hit\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!effect.Contains("manoeuvre", StringComparison.OrdinalIgnoreCase))
+            {
+                return grabs ? [WeaponManoeuvre.Grab] : [];
+            }
+
             return Enum.GetValues<WeaponManoeuvre>()
+                .Where(m => m != WeaponManoeuvre.Grab || grabs)
                 .Where(m => System.Text.RegularExpressions.Regex.IsMatch(effect, $@"\b{m}\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                 .ToList();
         }

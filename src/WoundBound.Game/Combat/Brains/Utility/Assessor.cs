@@ -566,9 +566,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
             precise |= attacker.HoldsPrecise;
             disadvantage |= attacker.IsStandingGround || attacker.IsOffGuard || attacker.IsHarried;
 
-            // A defender who can still spend will raise their DT against a blow it would turn.
+            // A defender who can still spend will raise their DT against a blow it would turn — by a
+            // panic dodge only if nobody has hold of them (the user's ruling, 2026-11-07).
             var answer = BattleView.TacticalSpendRefusal(target) is null && target.Stamina > 1
-                ? Math.Max(ThresholdModifierCalculator.ReactionBonus, target.InHandShield is { } shield && target.ShieldBonus == 0
+                ? Math.Max(target.HeldBy is null ? ThresholdModifierCalculator.ReactionBonus : 0, target.InHandShield is { } shield && target.ShieldBonus == 0
                     ? Rules.Calculation.InventoryCalculator.ShieldDodgeThresholdBonus(shield.Weight)
                     : 0)
                 : 0;
@@ -725,6 +726,67 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 CharacterCondition.Stuck => (mustMove ? 0.8 : 0.1) * turn,
                 _ => mustMove ? 0.3 * turn : 0,
             };
+        }
+
+        /// <summary>
+        /// What holding <paramref name="target"/> beside <paramref name="holder"/> is worth, before
+        /// the chance it lands (Core Rules §9, "Held"): the turn it would have spent on someone it
+        /// would rather hit than whoever is in its reach now, in the difference between the two. A
+        /// fighter pinned to a Revenant is a fighter not reaching the caster behind it. Where there is
+        /// nobody softer to keep it from, a little for the ground it can no longer give or take.
+        /// </summary>
+        public double PinWorth(Combatant holder, Combatant target)
+        {
+            if (target.IsOutOfFight || target.HasRangedAttack)
+            {
+                return 0.1 * Value(target);
+            }
+
+            var victims = view.EnemiesOf(target).Where(e => !e.IsOutOfFight && !e.IsPhantom).ToList();
+            // What it would make of each, as it would choose: the blow's worth, weighed by its doctrine.
+            double Want(Combatant v, GridPosition from) => BestAttack(target, from, v).Worth * Doctrine(target, v);
+            // Held, it can always strike its holder, who has to be beside it to keep hold — and who is
+            // then the foe it's engaged with.
+            var atHolder = Worth(Blow(target, target.Attack, holder, target.Attack.DamageDieSides, Dodge(holder)), holder) * Engaged;
+            var here = victims.Where(v => target.CanReach(v)).Select(v => Want(v, target.Position)).Append(atHolder).Max();
+            var away = victims.Where(v => !target.CanReach(v))
+                .Select(v => view.StrikeSquare(target, v) is { } square ? Want(v, square) : 0).DefaultIfEmpty(0).Max();
+            return 0.1 * Value(target) + Math.Max(0, away - here) + NoDodgeWorth(holder, target);
+        }
+
+        /// <summary>
+        /// What a hold hands the holder's side against a target that can no longer panic dodge (the
+        /// user's ruling, 2026-11-07): the +2 it would have bought taken off every blow from those
+        /// near enough to strike it before it gets loose. Nothing where it couldn't have dodged anyway,
+        /// or carries a shield that would do the same.
+        /// </summary>
+        private double NoDodgeWorth(Combatant holder, Combatant target)
+        {
+            if (BattleView.TacticalSpendRefusal(target) is not null || target.Stamina <= 1
+                || (target.InHandShield is { } shield && target.ShieldBonus == 0
+                    && Rules.Calculation.InventoryCalculator.ShieldDodgeThresholdBonus(shield.Weight) >= ThresholdModifierCalculator.ReactionBonus))
+            {
+                return 0;
+            }
+
+            double gain = 0;
+            var dodge = Dodge(target);
+            foreach (var ally in view.AlliesOf(holder).Append(holder).Distinct().Where(a => !a.IsOutOfFight && !a.IsPhantom))
+            {
+                // Those who'd be at it in melee: a hold keeps a fighter beside its holder, where the
+                // blades are, and an archer's shot is better spent where it was going anyway.
+                var stride = view.SquaresFor(ally.Speed, 1);
+                if (ally.DistanceTo(target) > stride + ally.Reach || ally.HasRangedAttack)
+                {
+                    continue;
+                }
+
+                var attack = ally.Attack;
+                gain += Worth(Blow(ally, attack, target, attack.DamageDieSides, dodge - ThresholdModifierCalculator.ReactionBonus), target)
+                        - Worth(Blow(ally, attack, target, attack.DamageDieSides, dodge), target);
+            }
+
+            return Math.Max(0, gain);
         }
 
         /// <summary>

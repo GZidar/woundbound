@@ -601,6 +601,16 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     }
                 }
 
+                if (permitted.Contains(WeaponManoeuvre.Grab) && target.HeldBy is null)
+                {
+                    var grab = new Manoeuvre(WeaponManoeuvre.Grab);
+                    if (!checkRules || BattleView.ManoeuvreRefusal(actor, target, grab) is null)
+                    {
+                        var held = assess.ManoeuvreChance(actor, with, target, at, assess.Stability(target)) * HoldWorth(actor, target);
+                        yield return new Option(OptionKind.Attack, worth + held - spendCost, $"Grab {target.Name}", Target: target, With: with, Manoeuvre: grab);
+                    }
+                }
+
                 var takes = assess.ManoeuvreChance(actor, with, target, at, assess.Stability(target));
                 foreach (var (kind, gain) in new[]
                 {
@@ -1103,9 +1113,14 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return 0;
             }
 
-            var stake = target.IsBroken ? assess.Value(target) * (View.MustNotEscape(target) ? 1.5 : 1) : 0.1 * assess.Value(target);
-            return assess.ControlChance(actor, target) * stake;
+            return assess.ControlChance(actor, target) * HoldWorth(actor, target);
         }
+
+        /// <summary>What a hold on <paramref name="target"/> is worth, before the chance it lands: most against something running; otherwise what pinning it keeps it from.</summary>
+        private double HoldWorth(Combatant actor, Combatant target) =>
+            target.HeldBy is not null ? 0
+            : target.IsBroken ? assess.Value(target) * (View.MustNotEscape(target) ? 1.5 : 1)
+            : assess.PinWorth(actor, target);
 
         private static bool ControlLegal(Combatant actor, ControlAction control, Combatant target, GridPosition at, bool checkRules)
         {

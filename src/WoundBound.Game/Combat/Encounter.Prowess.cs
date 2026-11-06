@@ -154,6 +154,14 @@ namespace WoundBound.Game.Combat
                 return "A Swarm has no footing to take.";
             }
 
+            if (manoeuvre.Kind == WeaponManoeuvre.Grab
+                && (target.IsSwarm || target.HeldBy is not null || !attacker.HasFreeHand || attacker.Holding is not null))
+            {
+                return target.IsSwarm ? "A Swarm can't be held."
+                    : target.HeldBy is { } holder ? $"{holder.Name} already has hold of {target.Name}."
+                    : $"{attacker.Name} has no free hand to grab with.";
+            }
+
             if (manoeuvre.Kind == WeaponManoeuvre.Disarm && !target.WieldsWeapon)
             {
                 return $"{target.Name} has no weapon in hand to lose.";
@@ -235,6 +243,11 @@ namespace WoundBound.Game.Combat
                         return;
                     case WeaponManoeuvre.Disarm:
                         Write($"Disarm: {total} against {label} {against} — {Disarm(target)}");
+                        then();
+                        return;
+                    case WeaponManoeuvre.Grab:
+                        Write($"Grab: {total} against {label} {against} — {target.Name} is Held.");
+                        TakeHold(attacker, target, offGuard: false);
                         then();
                         return;
                     case WeaponManoeuvre.Topple:
