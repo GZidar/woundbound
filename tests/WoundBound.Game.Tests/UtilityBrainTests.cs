@@ -283,6 +283,28 @@ public class UtilityBrainTests
     }
 
     [Fact]
+    public void AGmThatMeasures_LearnsWhatEachCharacterActuallyDoes_AndKeepsPlaying()
+    {
+        // Each round it plays the fight forward and credits every character with the harm of their
+        // own turns there (the user's direction, 2026-11-07); the fight itself goes on as ever.
+        var gms = new List<UtilityGmBrain>();
+        var report = Simulator.Run(dice =>
+        {
+            var gm = new UtilityGmBrain(BrainSkill.Best, new Random(gms.Count), foresight: Foresight.None) { Measure = new ThreatMeasure(4, 1) };
+            gms.Add(gm);
+            return SampleEncounters.PartyVersusAmbush(Data, dice, gm);
+        }, () => new UtilityPartyBrain(BrainSkill.Best), fights: 2);
+
+        Assert.Equal(2, report.Fights.Count);
+        Assert.All(gms, gm =>
+        {
+            Assert.NotEmpty(gm.MeasuredHarm);
+            Assert.All(gm.MeasuredHarm, m => Assert.Equal(Side.Party, m.Key.Side));
+            Assert.Contains(gm.MeasuredHarm.Values, harm => harm > 0);
+        });
+    }
+
+    [Fact]
     public void AGmThatLooksAhead_WeighsItsPlansByPlayingThemForward_WithinTheRules()
     {
         var gms = new List<UtilityGmBrain>();

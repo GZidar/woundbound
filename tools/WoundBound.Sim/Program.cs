@@ -67,6 +67,14 @@ Foresight? foresight = Text("--foresight", null) switch
         rest is [_, var others] ? Enum.Parse<GamesPlayedBy>(others, ignoreCase: true) : GamesPlayedBy.Quick),
     var sight => throw new ArgumentException($"--foresight wants K,N,R[,own[,quick|best]] or off, not {sight}"),
 };
+// --measure G,R[,weight]: the GM measures the party's threat each round over G games to R rounds past it (ThreatMeasure).
+var measure = Text("--measure", null) switch
+{
+    null => ThreatMeasure.None,
+    var m when m.Split(',') is [var g, var r, .. var w] => new ThreatMeasure(int.Parse(g), int.Parse(r),
+        w is [var wt] ? double.Parse(wt, System.Globalization.CultureInfo.InvariantCulture) : ThreatMeasure.Default.Weight),
+    var m => throw new ArgumentException($"--measure wants G,R[,weight], not {m}"),
+};
 // Every utility GM built, so the look-ahead tally can be summed at the end.
 var utilityGms = new System.Collections.Concurrent.ConcurrentBag<UtilityGmBrain>();
 UtilityGmBrain Kept(UtilityGmBrain gm)
@@ -78,9 +86,9 @@ UtilityGmBrain Kept(UtilityGmBrain gm)
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),
-    "best" => Kept(new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight)),
-    "balanced" => Kept(new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight)),
-    "poor" => Kept(new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight)),
+    "best" => Kept(new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight) { Measure = measure }),
+    "balanced" => Kept(new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight) { Measure = measure }),
+    "poor" => Kept(new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight) { Measure = measure }),
     _ => new SimpleGmBrain(),
 };
 

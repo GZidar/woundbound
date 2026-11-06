@@ -247,9 +247,37 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// no caster at all until they cast again — downed, they're out, cleaned up at the end (the
         /// user's direction, 2026-11-02 and 2026-11-03 — for every brain, not only a Solo's).
         /// </summary>
-        private double RawValue(Combatant c)
+        private double RawValue(Combatant c) => ReckonedValue(c);
+
+        /// <summary>
+        /// The harm and help <paramref name="c"/> does in a turn: as measured, where this round was
+        /// (<see cref="Measured"/>), blended with what the sheet and the board say it should do.
+        /// </summary>
+        private double TurnHarm(Combatant c)
         {
-            var value = 0.5 + (Threat(c) + Support(c)) * Lasts(c);
+            var reckoned = Threat(c) + Support(c);
+            return Measured is { } measured && measured.TryGetValue(c, out var perTurn)
+                ? (1 - MeasuredWeight) * reckoned + MeasuredWeight * perTurn
+                : reckoned;
+        }
+
+        /// <summary>
+        /// What each enemy was seen to do per turn of its own in games played forward from this round's start,
+        /// in wounds dealt and healed (<see cref="UtilityGmBrain.MeasuredHarm"/>) — the harm they
+        /// actually do, where the reckoning below can only assume it. Null where nobody measured.
+        /// </summary>
+        public IReadOnlyDictionary<Combatant, double>? Measured { get; init; }
+
+        /// <summary>How much of a measured creature's worth the measurement sets, 0 to 1.</summary>
+        public double MeasuredWeight { get; init; }
+
+        /// <summary>
+        /// A creature's worth: the harm it does in a turn (<see cref="TurnHarm"/>) over the turns it
+        /// would last, and the doctrine on top — casters first, then whatever shoots.
+        /// </summary>
+        private double ReckonedValue(Combatant c)
+        {
+            var value = 0.5 + TurnHarm(c) * Lasts(c);
             if (KnownCaster(c))
             {
                 value *= 1 + 1.5 * CastingLeft(c) * Spread(c);

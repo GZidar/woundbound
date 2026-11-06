@@ -96,7 +96,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public static Knowledge KnowledgeFor(BrainSkill skill) => skill.Name == BrainSkill.Best.Name ? Knowledge.Sheets : Knowledge.Seen;
 
         /// <summary>An assessor that sees the party as this GM does.</summary>
-        private Assessor Assess(BattleView view) => new(view, Knowledge, Side.Adversaries);
+        private Assessor Assess(BattleView view) => new(view, Knowledge, Side.Adversaries)
+        {
+            Measured = Measure.Measures && measured.Count > 0 ? measured : null,
+            MeasuredWeight = Measure.Weight,
+        };
 
         private TurnPlanner Planner(BattleView view, out Assessor assess)
         {
@@ -156,6 +160,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         public override GmStep NextStep(BattleView view, GmTurn turn)
         {
+            // A new round: what the party actually does, measured from where the fight stands, before
+            // anything is chosen on it (the user's direction, 2026-11-07).
+            MeasureRound(view, turn);
+
             var actor = turn.Actor;
             if (actor.IsBroken)
             {
