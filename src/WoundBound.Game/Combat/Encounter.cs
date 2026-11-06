@@ -1897,7 +1897,7 @@ namespace WoundBound.Game.Combat
                 owedInGap = 0;
             }
 
-            extraTurnChosen = owedInGap == 0 && GmOpportunities > 0 && view.Adversaries.Any(a => a.CanTakeExtraTurn) && gm.ChooseExtraTurn(GmView) is { } bought
+            extraTurnChosen = owedInGap == 0 && GmOpportunities > 0 && !RuleTrials.NoOpportunityTurns && view.Adversaries.Any(a => a.CanTakeExtraTurn) && gm.ChooseExtraTurn(GmView) is { } bought
                 ? CheckAdversary(bought, "an extra turn")
                 : null;
             if (extraTurnChosen is { CanTakeExtraTurn: false } again)

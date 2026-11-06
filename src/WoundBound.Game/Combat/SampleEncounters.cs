@@ -581,8 +581,11 @@ namespace WoundBound.Game.Combat
 
         /// <summary>
         /// The Ferry Shrine ambush with the Quickstart's own five caught mid-ford — Salla, Drovan,
-        /// Joren, Mirella and Elthric — against two Skirmishers each: six Reedmarsh Skulkers and four
-        /// Bandit Ambushers, a Standard Challenge (GM Reference §5). The Skulkers have no Cowardice, so this one is fought out.
+        /// Joren, Mirella and Elthric — against one archer each: three Reedmarsh Skulkers and two
+        /// Bandit Ambushers. Priced as Skirmishers that is only 2.5, but a Skirmisher that shoots
+        /// with every action and never has to close is worth about a Brute (benched 2026-11-06), and
+        /// ten of them left the party nothing (the user, 2026-11-07: halve them). With the ford and the
+        /// ambush on top, five is a hard Standard fight. The Skulkers have no Cowardice, so this one is fought out.
         /// </summary>
         public static Encounter FerryShrineWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
         {
@@ -599,11 +602,6 @@ namespace WoundBound.Game.Combat
                 Lurking(CombatantFactory.FromAdversary(skulker, "Skulker on the bank", new GridPosition(17, 13)), ambush),
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)), ambush),
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the arch", new GridPosition(21, 9)), ambush),
-                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker under the bank", new GridPosition(18, 3)), ambush),
-                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker in the shallows", new GridPosition(19, 14)), ambush),
-                Lurking(CombatantFactory.FromAdversary(skulker, "Skulker by the post", new GridPosition(21, 12)), ambush),
-                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher on the hut roof", new GridPosition(24, 8)), ambush),
-                Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the boats", new GridPosition(22, 4)), ambush),
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
@@ -692,7 +690,7 @@ namespace WoundBound.Game.Combat
         /// <summary>
         /// The Grey Lanterns — a rival company of five, built exactly as the party is, from the same
         /// character rules, and fighting for the GM: "build a creature from any rule in this system"
-        /// (GM Reference §2). Every rule but Interrupt travels, so they manoeuvre, Slip, Shelter, heal
+        /// (GM Reference §2). At 1.5 a Named NPC (GM Reference §5), five of them are a Hard fight for five. Every rule but Interrupt travels, so they manoeuvre, Slip, Shelter, heal
         /// and cast back — a fight with the back-and-forth T1 statblocks are built not to give.
         /// <paramref name="count"/> fields only the first so many of them, for pricing a rival built
         /// from a character sheet (GM Reference §5).

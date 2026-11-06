@@ -8,7 +8,7 @@
 //   signpost4: the book's table of four — Joren Blacke joins, and so does a second Roadside Bandit.
 //   casters: the Quickstart's own five — Salla, Drovan, Joren, Mirella and Elthric — v five bandits.
 //   ford: the same three, ambushed mid-ford at the Ferry Shrine at Longreach Crossing (Inner Sea Loom).
-//   fordcasters: the Quickstart's five, casters among them, ambushed mid-ford by six Skulkers and four Ambushers.
+//   fordcasters: the Quickstart's five, casters among them, ambushed mid-ford by three Skulkers and two Ambushers.
 //   witches: the Quickstart's five on a hedge road v a Tollroad Bandit, two wolves, a Bog Hex-Caller, a Hollow Bloodwright and a Wyrding Chanter.
 //   camp: the Quickstart's five round their campfire at night, set on by two Tollroad Bandits, three wolves and three Ambushers.
 //   party: the same three v a Tollroad Bandit, a Timber Wolf and two Bramble Ratkin.
@@ -34,6 +34,7 @@ var gmName = Text("--gm", "simple")!;
 var seats = Text("--party", "all");
 var data = GameData.Load(file => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "data", file)));
 RuleTrials.IgnoreMorale = args.Contains("--no-morale");
+RuleTrials.NoOpportunityTurns = args.Contains("--no-opp-turns");
 
 // --setup smart|neutral|poor and --unprepared: how a band met at random is placed (the clearing).
 var setup = Enum.TryParse<SetupSkill>(Text("--setup", "smart"), ignoreCase: true, out var s) ? s : SetupSkill.Smart;
@@ -177,7 +178,7 @@ var fight = which switch
     "casters" => "Salla, Drovan, Joren, Mirella and Elthric v five signpost bandits (objective: take the lantern-bearer)",
     "ford" => "The Dumb Fighter, Salla and Drovan, ambushed mid-ford at Longreach Crossing by two Skulkers and an Ambusher",
     "witches" => "Salla, Drovan, Joren, Mirella and Elthric v a Tollroad Bandit, his two wolves, and three casters: Hex-Caller, Bloodwright, Chanter",
-    "rivals" => "Salla, Drovan, Joren, Mirella and Elthric v the Grey Lanterns, a rival company of five built from the same rules",
+    "rivals" => "Salla, Drovan, Joren, Mirella and Elthric v the Grey Lanterns, a rival company of five built from the same rules (Hard: 7.5 Threat)",
     "rivals2" or "rivals3" or "rivals4" => $"Salla, Drovan, Joren, Mirella and Elthric v {which[^1]} of the Grey Lanterns, rivals built from the same rules",
     "swarm" => "Salla, Drovan, Joren, Mirella and Elthric v two Fenmoor Ratswarms and eight Bramble Ratkin on the fen causeway",
     "swarmopen" => "Salla, Drovan, Joren, Mirella and Elthric v two Fenmoor Ratswarms and eight Bramble Ratkin on open ground",
@@ -190,7 +191,7 @@ var fight = which switch
     "guardians" => "Salla, Drovan, Joren, Mirella and Elthric v a Stoneheart Golem and two Animated Suits of Mail in a cloister yard",
     "stag" => "Salla, Drovan, Joren, Mirella and Elthric v the Hollow Stag, a T1 Solo, in the birchwood",
     "camp" => "Salla, Drovan, Joren, Mirella and Elthric round their campfire at night v two Tollroad Bandits, three Timber Wolves and three Ambushers",
-    "fordcasters" => "Salla, Drovan, Joren, Mirella and Elthric, ambushed mid-ford at Longreach Crossing by six Skulkers and four Ambushers",
+    "fordcasters" => "Salla, Drovan, Joren, Mirella and Elthric, ambushed mid-ford at Longreach Crossing by three Skulkers and two Ambushers",
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 
