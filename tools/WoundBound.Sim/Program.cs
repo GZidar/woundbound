@@ -67,15 +67,14 @@ Foresight? foresight = Text("--foresight", null) switch
         rest is [_, var others] ? Enum.Parse<GamesPlayedBy>(others, ignoreCase: true) : GamesPlayedBy.Quick),
     var sight => throw new ArgumentException($"--foresight wants K,N,R[,own[,quick|best]] or off, not {sight}"),
 };
-// --measure G,R[,weight[,own]] or off: left out, it goes with the GM's challenge (ThreatMeasure.For). The GM measures the party's threat each round over G games to R rounds past it (ThreatMeasure); "own" measures its creatures too.
+// --measure G,R[,weight] or off: left out, it goes with the GM's challenge (ThreatMeasure.For). The GM measures the party's threat each round over G games to R rounds past it (ThreatMeasure).
 var measure = Text("--measure", null) switch
 {
     null => null,
     "off" => ThreatMeasure.None,
     var m when m.Split(',') is [var g, var r, .. var w] => new ThreatMeasure(int.Parse(g), int.Parse(r),
-        w is [var wt, ..] ? double.Parse(wt, System.Globalization.CultureInfo.InvariantCulture) : ThreatMeasure.Default.Weight,
-        w is [_, "own"]),
-    var m => throw new ArgumentException($"--measure wants G,R[,weight[,own]], not {m}"),
+        w is [var wt] ? double.Parse(wt, System.Globalization.CultureInfo.InvariantCulture) : ThreatMeasure.Default.Weight),
+    var m => throw new ArgumentException($"--measure wants G,R[,weight] or off, not {m}"),
 };
 // Every utility GM built, so the look-ahead tally can be summed at the end.
 var utilityGms = new System.Collections.Concurrent.ConcurrentBag<UtilityGmBrain>();
@@ -205,7 +204,7 @@ var fight = which switch
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 
-Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}, {(u.PeersThroughFog ? "peering through the fog" : "in the fog")}{(u.Foresight is { LooksAhead: true } f ? $", looking ahead ({f.Candidates} plans, {f.Games} games, {f.Rounds} rounds on, {f.Others.ToString().ToLowerInvariant()} GM in them)" : string.Empty)}{(u.Measure is { Measures: true } tm ? $", measuring {(tm.Own ? "both sides" : "the party")} ({tm.Games} games, {tm.Rounds} rounds on, weight {tm.Weight:0.##})" : string.Empty)}" : string.Empty)}.");
+Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}, {(u.PeersThroughFog ? "peering through the fog" : "in the fog")}{(u.Foresight is { LooksAhead: true } f ? $", looking ahead ({f.Candidates} plans, {f.Games} games, {f.Rounds} rounds on, {f.Others.ToString().ToLowerInvariant()} GM in them)" : string.Empty)}{(u.Measure is { Measures: true } tm ? $", measuring the party ({tm.Games} games, {tm.Rounds} rounds on, weight {tm.Weight:0.##})" : string.Empty)}" : string.Empty)}.");
 Console.WriteLine();
 
 // --show N: play the one fight on seed N with the best utility party (or --show-as balanced|poor), and print its log.

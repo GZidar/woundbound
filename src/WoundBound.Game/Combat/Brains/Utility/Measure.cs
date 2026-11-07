@@ -11,15 +11,17 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// <param name="Games">How many games are played each round.</param>
     /// <param name="Rounds">How many rounds past this one each game runs.</param>
     /// <param name="Weight">How much of a character's worth as a target the measurement sets, 0 to 1; the Assessor's own reckoning sets the rest.</param>
-    /// <param name="Own">Whether it measures its own creatures too, and weighs what losing each would cost by what it actually does.</param>
-    public sealed record ThreatMeasure(int Games, int Rounds, double Weight = 0.7, bool Own = false)
+    /// <remarks>
+    /// It measures the party only (the user's ruling, 2026-11-07): measuring its own creatures as well
+    /// made it guard the ones doing well instead of spending them, and it got weaker (champion 52–64%).
+    /// </remarks>
+    public sealed record ThreatMeasure(int Games, int Rounds, double Weight = 0.7)
     {
         /// <summary>
         /// A dozen games a round, to the end of this one, trusted seven parts in ten. Benched
         /// (2026-11-07, 240 fights each, look-ahead off; party wins): champion 57.5% unmeasured, 50%
         /// measured to the end of this round or the next alike; camp unmoved (76–77%). More games,
         /// more rounds, or a weight from 0.5 to 1 did no better; this round only is the cheapest.
-        /// Measuring the GM's own creatures as well made it weaker (champion 52–64%).
         /// </summary>
         public static ThreatMeasure Default { get; } = new(12, 0);
 
@@ -72,7 +74,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var first = NextStep(view, turn);
             var seeds = Enumerable.Range(0, Measure.Games).Select(_ => random.Next()).ToArray();
             var who = view.Combatants
-                .Where(c => !c.IsPhantom && !c.IsSteed && (c.Side == Side.Party || (Measure.Own && c.Side == Side.Adversaries)))
+                .Where(c => c.Side == Side.Party && !c.IsPhantom && !c.IsSteed)
                 .ToList();
             var harm = new double[seeds.Length, who.Count];
             var turns = new int[seeds.Length, who.Count];

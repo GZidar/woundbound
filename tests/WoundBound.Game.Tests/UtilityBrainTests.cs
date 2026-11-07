@@ -313,26 +313,6 @@ public class UtilityBrainTests
     }
 
     [Fact]
-    public void AGmThatMeasuresItsOwn_CreditsItsCreaturesWithTheHarmTheyDoToTheParty()
-    {
-        var gms = new List<UtilityGmBrain>();
-        Simulator.Run(dice =>
-        {
-            var gm = new UtilityGmBrain(BrainSkill.Best, new Random(gms.Count), foresight: Foresight.None, measure: new ThreatMeasure(4, 1, Own: true));
-            gms.Add(gm);
-            return SampleEncounters.PartyVersusAmbush(Data, dice, gm);
-        }, () => new UtilityPartyBrain(BrainSkill.Best), fights: 3);
-
-        // What it keeps is the last round's measure, when its last creatures may do nothing at all.
-        Assert.All(gms, gm =>
-        {
-            Assert.Contains(gm.MeasuredHarm, m => m.Key.Side == Side.Party);
-            Assert.Contains(gm.MeasuredHarm, m => m.Key.Side == Side.Adversaries);
-        });
-        Assert.Contains(gms.SelectMany(gm => gm.MeasuredHarm), m => m.Key.Side == Side.Adversaries && m.Value > 0);
-    }
-
-    [Fact]
     public void AGmThatLooksAhead_WeighsItsPlansByPlayingThemForward_WithinTheRules()
     {
         var gms = new List<UtilityGmBrain>();
