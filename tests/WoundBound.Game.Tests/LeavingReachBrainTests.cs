@@ -82,13 +82,15 @@ public class LeavingReachBrainTests
     {
         // Harry, so the knife it leaves behind strikes at Disadvantage; 1 Stamina for an action;
         // then out of reach and on to Mirella — its one attack of the round.
-        // A GM that minds its creatures' skin fully: one held less dear just takes the knife.
+        // A GM that minds its creatures' skin fully: one held less dear just takes the knife. On
+        // the reckoning alone: a GM that measures finds Elthric the worse threat, and stays on him.
         var elthric = CombatantFactory.FromCharacter(SampleEncounters.ElthricDane(Data), new GridPosition(4, 5));
         var mirella = CombatantFactory.FromCharacter(SampleEncounters.MirellaVask(Data), new GridPosition(8, 5));
         mirella.HasCastSpell = true;
         var bandit = CombatantFactory.FromAdversary(TestBandits.Roadside, "Bandit", new GridPosition(5, 5));
         var encounter = new Encounter(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight, [elthric, mirella, bandit],
-            Data.RangeBands, new RandomDiceRoller(new Random(3)), new Game.Combat.Brains.Utility.UtilityGmBrain(caution: 1, foresight: Game.Combat.Brains.Utility.Foresight.None));
+            Data.RangeBands, new RandomDiceRoller(new Random(3)), new Game.Combat.Brains.Utility.UtilityGmBrain(caution: 1, foresight: Game.Combat.Brains.Utility.Foresight.None,
+                measure: Game.Combat.Brains.Utility.ThreatMeasure.None));
         encounter.TryBeginTurn(mirella);
         encounter.EndTurn();
         var start = encounter.Log.Count;

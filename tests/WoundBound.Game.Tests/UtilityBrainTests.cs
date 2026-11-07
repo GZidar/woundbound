@@ -283,6 +283,14 @@ public class UtilityBrainTests
     }
 
     [Fact]
+    public void TheChallengeSetsHowTheGmMeasuresTheParty()
+    {
+        Assert.Equal(ThreatMeasure.Default, new UtilityGmBrain(BrainSkill.Best).Measure);
+        Assert.Equal(6, new UtilityGmBrain(BrainSkill.Balanced).Measure.Games);
+        Assert.False(new UtilityGmBrain(BrainSkill.Poor).Measure.Measures);
+    }
+
+    [Fact]
     public void AGmThatMeasures_LearnsWhatEachCharacterActuallyDoes_AndKeepsPlaying()
     {
         // Each round it plays the fight forward and credits every character with the harm of their
@@ -290,7 +298,7 @@ public class UtilityBrainTests
         var gms = new List<UtilityGmBrain>();
         var report = Simulator.Run(dice =>
         {
-            var gm = new UtilityGmBrain(BrainSkill.Best, new Random(gms.Count), foresight: Foresight.None) { Measure = new ThreatMeasure(4, 1) };
+            var gm = new UtilityGmBrain(BrainSkill.Best, new Random(gms.Count), foresight: Foresight.None, measure: new ThreatMeasure(4, 1));
             gms.Add(gm);
             return SampleEncounters.PartyVersusAmbush(Data, dice, gm);
         }, () => new UtilityPartyBrain(BrainSkill.Best), fights: 2);
@@ -302,6 +310,26 @@ public class UtilityBrainTests
             Assert.All(gm.MeasuredHarm, m => Assert.Equal(Side.Party, m.Key.Side));
             Assert.Contains(gm.MeasuredHarm.Values, harm => harm > 0);
         });
+    }
+
+    [Fact]
+    public void AGmThatMeasuresItsOwn_CreditsItsCreaturesWithTheHarmTheyDoToTheParty()
+    {
+        var gms = new List<UtilityGmBrain>();
+        Simulator.Run(dice =>
+        {
+            var gm = new UtilityGmBrain(BrainSkill.Best, new Random(gms.Count), foresight: Foresight.None, measure: new ThreatMeasure(4, 1, Own: true));
+            gms.Add(gm);
+            return SampleEncounters.PartyVersusAmbush(Data, dice, gm);
+        }, () => new UtilityPartyBrain(BrainSkill.Best), fights: 3);
+
+        // What it keeps is the last round's measure, when its last creatures may do nothing at all.
+        Assert.All(gms, gm =>
+        {
+            Assert.Contains(gm.MeasuredHarm, m => m.Key.Side == Side.Party);
+            Assert.Contains(gm.MeasuredHarm, m => m.Key.Side == Side.Adversaries);
+        });
+        Assert.Contains(gms.SelectMany(gm => gm.MeasuredHarm), m => m.Key.Side == Side.Adversaries && m.Value > 0);
     }
 
     [Fact]

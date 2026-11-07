@@ -44,10 +44,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private readonly Random random;
 
         public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null, double caution = GmCaution, bool? peers = null,
-            Foresight? foresight = null)
+            Foresight? foresight = null, ThreatMeasure? measure = null)
         {
             Skill = skill ?? BrainSkill.Best;
             Foresight = foresight ?? Foresight.For(Skill);
+            Measure = measure ?? ThreatMeasure.For(Skill);
             planning = Plays with { Care = Plays.Care * caution };
             this.random = random ?? new Random(1);
             Knowledge = knowledge ?? KnowledgeFor(Skill);

@@ -153,7 +153,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 try
                 {
                     var quick = new FollowThrough(sight.Others == GamesPlayedBy.Best
-                        ? new UtilityGmBrain(BrainSkill.Best, new Random(seeds[g]), knowledge, peers: peers, foresight: Foresight.None)
+                        ? new UtilityGmBrain(BrainSkill.Best, new Random(seeds[g]), knowledge, peers: peers, foresight: Foresight.None, measure: ThreatMeasure.None)
                         : new SimpleGmBrain());
                     var fork = live.Fork(new RandomDiceRoller(new Random(seeds[g])), quick, out var counterpart, map);
                     if (steps[c].Then is { } then)
