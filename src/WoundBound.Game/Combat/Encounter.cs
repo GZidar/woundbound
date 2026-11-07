@@ -122,6 +122,9 @@ namespace WoundBound.Game.Combat
         private readonly List<Combatant> combatants;
         private readonly RangeBandTables bands;
         private readonly IDiceRoller dice;
+
+        /// <summary>The fight's dice — for a GM that cheats by copying them (<see cref="Brains.Utility.Foresight.Prescient"/>).</summary>
+        internal IDiceRoller Dice => dice;
         private readonly List<string> log = new();
         private readonly List<Combatant> partyStillToAct = new();
 

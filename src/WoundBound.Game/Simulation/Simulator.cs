@@ -97,11 +97,15 @@ namespace WoundBound.Game.Simulation
     {
         /// <param name="stage">Sets up a fresh fight on the given dice: the board, the combatants and the GM brain.</param>
         /// <param name="party">Plays the party. Brains may hold state, so one is made per fight.</param>
-        public static TacticReport Run(Func<IDiceRoller, Encounter> stage, Func<IPartyBrain> party, int fights, int seed = 1, int maxRounds = 50)
+        /// <param name="streamDice">Roll each fight on a <see cref="StreamDiceRoller"/>, which a cheating GM can copy.</param>
+        public static TacticReport Run(Func<IDiceRoller, Encounter> stage, Func<IPartyBrain> party, int fights, int seed = 1, int maxRounds = 50,
+            bool streamDice = false)
         {
             // Each fight stands alone on its own seed, so they play side by side; the results keep seed order.
             var results = new FightResult[fights];
-            Parallel.For(0, fights, i => results[i] = PlayOne(stage(new RandomDiceRoller(new Random(seed + i))), party(), maxRounds));
+            Parallel.For(0, fights, i => results[i] = PlayOne(stage(streamDice
+                ? new StreamDiceRoller((ulong)(seed + i))
+                : new RandomDiceRoller(new Random(seed + i))), party(), maxRounds));
             return new TacticReport(fights > 0 ? party().Name : "(none)", results.ToList());
         }
 

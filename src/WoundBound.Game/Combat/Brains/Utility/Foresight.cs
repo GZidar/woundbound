@@ -23,8 +23,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
     /// the GM's own at its best, without looking ahead itself — dearer, but a game played further
     /// ahead is only as good as the play in it.
     /// </param>
+    /// <param name="Prescient">
+    /// A cheat, for finding the ceiling of how well a GM could play (2026-11-07): where the fight's
+    /// dice are a <see cref="StreamDiceRoller"/>, every game is played on a copy of them, so each plan
+    /// is weighed on the rolls it will really get. Never for play.
+    /// </param>
     public sealed record Foresight(int Candidates, int Games, int Rounds, double OwnWorth = UtilityGmBrain.GmCaution,
-        GamesPlayedBy Others = GamesPlayedBy.Quick)
+        GamesPlayedBy Others = GamesPlayedBy.Quick, bool Prescient = false)
     {
         /// <summary>Four plans, a dozen games each, to the end of the round.</summary>
         public static Foresight Default { get; } = new(4, 12, 0);
@@ -155,7 +160,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     var quick = new FollowThrough(sight.Others == GamesPlayedBy.Best
                         ? new UtilityGmBrain(BrainSkill.Best, new Random(seeds[g]), knowledge, peers: peers, foresight: Foresight.None, measure: ThreatMeasure.None)
                         : new SimpleGmBrain());
-                    var fork = live.Fork(new RandomDiceRoller(new Random(seeds[g])), quick, out var counterpart, map);
+                    IDiceRoller dice = sight.Prescient && live.Dice is StreamDiceRoller stream ? stream.Copy() : new RandomDiceRoller(new Random(seeds[g]));
+                    var fork = live.Fork(dice, quick, out var counterpart, map);
                     if (steps[c].Then is { } then)
                     {
                         quick.Plan((Combatant)counterpart(turn.Actor), (GmStep)counterpart(then));

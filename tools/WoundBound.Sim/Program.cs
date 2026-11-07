@@ -67,6 +67,14 @@ Foresight? foresight = Text("--foresight", null) switch
         rest is [_, var others] ? Enum.Parse<GamesPlayedBy>(others, ignoreCase: true) : GamesPlayedBy.Quick),
     var sight => throw new ArgumentException($"--foresight wants K,N,R[,own[,quick|best]] or off, not {sight}"),
 };
+// --stream-dice: fights rolled on copyable dice, as --cheat does — its fair baseline.
+// --cheat: the GM's look-ahead plays every plan on the fight's real coming dice (Foresight.Prescient) — a ceiling, never play.
+var cheat = args.Contains("--cheat");
+if (cheat)
+{
+    foresight = (foresight ?? Foresight.Default) with { Prescient = true };
+}
+
 // --measure G,R[,weight] or off: left out, it goes with the GM's challenge (ThreatMeasure.For). The GM measures the party's threat each round over G games to R rounds past it (ThreatMeasure).
 var measure = Text("--measure", null) switch
 {
@@ -204,7 +212,7 @@ var fight = which switch
     _ => "The Dumb Fighter, Salla and Drovan v the signpost bandits (objective: take the lantern-bearer)",
 };
 
-Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}, {(u.PeersThroughFog ? "peering through the fog" : "in the fog")}{(u.Foresight is { LooksAhead: true } f ? $", looking ahead ({f.Candidates} plans, {f.Games} games, {f.Rounds} rounds on, {f.Others.ToString().ToLowerInvariant()} GM in them)" : string.Empty)}{(u.Measure is { Measures: true } tm ? $", measuring the party ({tm.Games} games, {tm.Rounds} rounds on, weight {tm.Weight:0.##})" : string.Empty)}" : string.Empty)}.");
+Console.WriteLine($"{fight} — {fights} fights per tactic, seeds {seed}–{seed + fights - 1}, GM: {gmName}{(Gm() is UtilityGmBrain u ? $", knowing {u.Knowledge.ToString().ToLowerInvariant()}, {(u.PeersThroughFog ? "peering through the fog" : "in the fog")}{(u.Foresight is { LooksAhead: true } f ? $", looking ahead ({f.Candidates} plans, {f.Games} games, {f.Rounds} rounds on, {f.Others.ToString().ToLowerInvariant()} GM in them{(f.Prescient ? ", CHEATING: knowing the dice" : string.Empty)})" : string.Empty)}{(u.Measure is { Measures: true } tm ? $", measuring the party ({tm.Games} games, {tm.Rounds} rounds on, weight {tm.Weight:0.##})" : string.Empty)}" : string.Empty)}.");
 Console.WriteLine();
 
 // --show N: play the one fight on seed N with the best utility party (or --show-as balanced|poor), and print its log.
@@ -360,7 +368,7 @@ if (Option("--day", 0) is var perDay and > 0)
 }
 
 var clock = System.Diagnostics.Stopwatch.StartNew();
-var reports = parties.Select(p => Simulator.Run(Stage, p, fights, seed)).ToList();
+var reports = parties.Select(p => Simulator.Run(Stage, p, fights, seed, streamDice: cheat || args.Contains("--stream-dice"))).ToList();
 // --stats: what the run cost the machine — for speed work, where allocation is the cost that counts.
 if (args.Contains("--stats"))
 {

@@ -328,4 +328,34 @@ public class UtilityBrainTests
         Assert.True(weighed > 0);
         Assert.True(failed < weighed, $"{failed} games failed over {weighed} decisions");
     }
+
+    [Fact]
+    public void StreamDice_CopiedMidStream_RollOnExactlyAsTheOriginal()
+    {
+        var dice = new StreamDiceRoller(42);
+        for (var i = 0; i < 7; i++)
+        {
+            dice.Roll(20);
+        }
+
+        var copy = dice.Copy();
+        var ahead = Enumerable.Range(0, 50).Select(i => copy.Roll(1 + i % 12)).ToList();
+        Assert.Equal(ahead, Enumerable.Range(0, 50).Select(i => dice.Roll(1 + i % 12)));
+        Assert.All(ahead.Select((r, i) => (r, sides: 1 + i % 12)), x => Assert.InRange(x.r, 1, x.sides));
+    }
+
+    [Fact]
+    public void ACheatingGm_LooksAheadOnTheFightsOwnDice_WithinTheRules()
+    {
+        var gms = new List<UtilityGmBrain>();
+        var report = Simulator.Run(dice =>
+        {
+            var gm = new UtilityGmBrain(BrainSkill.Best, new Random(gms.Count), foresight: Foresight.Default with { Candidates = 3, Games = 2, Prescient = true });
+            gms.Add(gm);
+            return SampleEncounters.PartyVersusAmbush(Data, dice, gm);
+        }, () => new UtilityPartyBrain(BrainSkill.Best), fights: 2, streamDice: true);
+
+        Assert.Equal(2, report.Fights.Count);
+        Assert.True(gms.Sum(g => g.ForesightTally.Weighed) > 0);
+    }
 }
