@@ -1046,6 +1046,45 @@ namespace WoundBound.Game.Combat
                     "Skulkers and their beasts, out at dusk for whatever walks into the clearing"));
         }
 
+        /// <summary>
+        /// A fight on a scene painted in the editor: the Quickstart five on the squares painted for the
+        /// party (or the west side's middle, if none are), against the clearing's band, placed by a
+        /// Smart GM in the zones painted for it (or anywhere Short to Long of the party). Daylight
+        /// unless the scene says otherwise. For trying a painted map out.
+        /// </summary>
+        public static Encounter OnScene(GameData data, IDiceRoller dice, SceneMap scene, Brains.IGmBrain? gm = null, int seed = 7)
+        {
+            var setting = scene.ToSetting();
+            var starts = scene.PartyStart.Where(sq => !setting.IsSolid(sq) && !setting.IsDeepWater(sq)).ToList();
+            var fallback = Enumerable.Range(0, scene.Width).SelectMany(x => Enumerable.Range(0, scene.Height).Select(y => new GridPosition(x, y)))
+                .Where(sq => !setting.IsSolid(sq) && !setting.IsDeepWater(sq) && !starts.Contains(sq))
+                .OrderBy(sq => sq.X * 3 + Math.Abs(sq.Y - scene.Height / 2) * 2);
+            var squares = starts.Concat(fallback).Take(5).ToList();
+            var party = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), squares[0]),
+                CombatantFactory.FromCharacter(JorenBlacke(data), squares[1]),
+                CombatantFactory.FromCharacter(DrovanThale(data), squares[2]),
+                CombatantFactory.FromCharacter(MirellaVask(data, lantern: setting.IsUnlit), squares[3]),
+                CombatantFactory.FromCharacter(ElthricDane(data, torch: setting.IsUnlit), squares[4]),
+            };
+            var band = ClearingBand(data, DefaultClearingBand);
+            var all = new List<Combatant>([.. party, .. band]);
+            // Only the parts of the painted zones within reach of the party: a creature placed beyond
+            // Long of everyone has already left the board (the user's ruling, 2026-11-01).
+            var reach = data.RangeBands.Bands.Max(b => b.MaxSquares) - 2;
+            var placing = setting with
+            {
+                Deployment = setting.Deployment
+                    .Select(z => z with { Squares = z.Squares.Where(sq => party.Any(p => p.DistanceTo(sq) <= reach)).ToHashSet() })
+                    .Where(z => z.Squares.Count > 0)
+                    .ToList(),
+            };
+            Brains.Placement.Deploy(all, placing, data.Environment, data.RangeBands, scene.Width, scene.Height, new GmSetup(Brains.SetupSkill.Smart, Prepared: true, seed));
+            return new Encounter(scene.Width, scene.Height, all, data.RangeBands, dice, gm, setting: setting, environment: data.Environment,
+                brief: new SceneBrief(Stakes.Incidental, new AdversaryGoal.Kill(), Commitment.Committed, $"A band met at {scene.Name}"));
+        }
+
         /// <summary>The clearing's band as it is fought: how many Skulkers, Wolves and Ratkin.</summary>
         public static (int Skulkers, int Wolves, int Ratkin) DefaultClearingBand { get; } = (3, 2, 2);
 

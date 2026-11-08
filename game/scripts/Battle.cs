@@ -432,6 +432,13 @@ namespace WoundBoundGame
             Build3D();
             BuildHud();
             ReadDemoArguments();
+
+            // A painted scene from the command line, fought at once: --scene <file.scene.json>
+            if (OS.GetCmdlineUserArgs() is var sc && System.Array.IndexOf(sc, "--scene") is var si and >= 0 && si + 1 < sc.Length)
+            {
+                SceneEditor.Trying = SceneMap.FromJson(FileAccess.GetFileAsString(sc[si + 1]));
+            }
+
             StartEncounter();
 
             // A battlemap from the command line: --battlemap <picture>
@@ -1265,7 +1272,8 @@ namespace WoundBoundGame
 
         private void StartEncounter()
         {
-            encounter = fightPicker.Selected switch
+            // A scene sent over from the editor to try out, until another fight is picked.
+            encounter = SceneEditor.Trying is { } painted ? SampleEncounters.OnScene(data, Dice(), painted, PickedGm(), System.Environment.TickCount) : fightPicker.Selected switch
             {
                 1 => SampleEncounters.SignpostWithCasters(data, Dice(), PickedGm(), ambush: true),
                 2 => SampleEncounters.CampfireAmbush(data, Dice(), PickedGm(), ambush: true),
@@ -2177,7 +2185,11 @@ namespace WoundBoundGame
             fightPicker.AddItem("A woodland clearing: a band placed by the GM's setup");
             fightPicker.AddItem("The strongbox: bandits come to carry it off");
             fightPicker.AddItem("The jetty: smugglers make for their boat");
-            fightPicker.ItemSelected += _ => StartEncounter();
+            fightPicker.ItemSelected += _ =>
+            {
+                SceneEditor.Trying = null;
+                StartEncounter();
+            };
             botRow.AddChild(fightPicker);
 
             var flat = new CheckButton { Text = "Flat board", ButtonPressed = flatBoard, TooltipText = "The old top-down drawing instead of the 3D board. In 3D: wheel zooms, middle-drag or WASD pans, Q/E turn, T looks straight down, Home resets." };
@@ -2215,6 +2227,10 @@ namespace WoundBoundGame
             var skills = new Button { Text = "Skill challenges…", TooltipText = "Play a Skill Challenge (Core Rules §8): the Quickstart wagon, or an obstacle that fights back." };
             skills.Pressed += () => GetTree().ChangeSceneToFile("res://scenes/SkillChallenge.tscn");
             botRow.AddChild(skills);
+
+            var editor = new Button { Text = "Scene editor…", TooltipText = "Paint a scene of your own — over a battlemap picture if you like — and try it out." };
+            editor.Pressed += () => GetTree().ChangeSceneToFile("res://scenes/SceneEditor.tscn");
+            botRow.AddChild(editor);
 
             botToggle = new CheckButton { Text = "Bot plays the party" };
             botToggle.Toggled += _ =>

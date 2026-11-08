@@ -13,6 +13,20 @@ namespace WoundBoundGame
     /// </summary>
     public partial class Battle
     {
+        /// <summary>A battlemap the player has loaded for this fight, over whatever the scene names.</summary>
+        private Backdrop? loadedBackdrop;
+
+        private FlatScenery? flatScenery;
+
+        /// <summary>Draws the ground and props on the flat board; made on first use.</summary>
+        private FlatScenery Scenery => flatScenery ??= new FlatScenery(this);
+
+        private Backdrop? CurrentBackdrop => loadedBackdrop ?? encounter?.Setting.Scenery.Backdrop;
+
+        /// <summary>The ground and everything standing on it, beneath the highlights, fog and grid the board draws after.</summary>
+        private void DrawFlatScenery() =>
+            Scenery.Draw(encounter.Setting, encounter.Width, encounter.Height, SquareRect, CellSize, CurrentBackdrop, encounter.Fires);
+
         private VBoxContainer backdropRow = null!;
         private Label backdropLabel = null!;
         private SpinBox backdropSize = null!;
@@ -80,36 +94,15 @@ namespace WoundBoundGame
         /// <summary>Loads <paramref name="path"/>, finds its grid, and lays the map's squares over the middle of it.</summary>
         private void LoadBackdrop(string path)
         {
-            var image = Image.LoadFromFile(path);
-            if (image is null || image.IsEmpty())
+            if (Battlemaps.Load(path) is not { } read)
             {
                 backdropLabel.Text = $"Couldn't read {System.IO.Path.GetFileName(path)}.";
                 return;
             }
 
-            backdropTextures[path] = ImageTexture.CreateFromImage(image);
-            int w = image.GetWidth(), h = image.GetHeight();
-            var grey = image.Duplicate() as Image;
-            grey!.Convert(Image.Format.L8);
-            var bytes = grey.GetData();
-            var brightness = new float[w * h];
-            for (var i = 0; i < brightness.Length; i++)
-            {
-                brightness[i] = bytes[i] / 255f;
-            }
-
-            var grid = GridFinder.Find(brightness, w, h);
-            // No grid found: guess the picture spans the board's width.
-            var pitch = grid?.PixelsPerSquare ?? w / (double)encounter.Width;
-            double offX = grid?.OffsetX ?? 0, offY = grid?.OffsetY ?? 0;
-            var (across, down) = grid?.Squares(w, h) ?? (encounter.Width, (int)(h / pitch));
-            // The board's squares over the middle of the picture's.
-            offX += pitch * Math.Max(0, (across - encounter.Width) / 2);
-            offY += pitch * Math.Max(0, (down - encounter.Height) / 2);
-            loadedBackdrop = new Backdrop(path, (float)offX, (float)offY, (float)pitch);
-            ShowBackdrop(grid is null
-                ? "no grid found — set the square size by hand"
-                : $"grid found: {pitch:0.##} px squares, {across}×{down} squares" + (grid.Strength < 4 ? " (faint — check it lines up)" : string.Empty));
+            Scenery.Prime(path, read.Texture);
+            loadedBackdrop = read.Fit(path, encounter.Width, encounter.Height);
+            ShowBackdrop(read.Note);
             QueueRedraw();
         }
 

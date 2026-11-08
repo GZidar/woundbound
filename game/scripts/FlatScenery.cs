@@ -18,52 +18,55 @@ namespace WoundBoundGame
     /// ground, and the water, elevation and props are drawn lightly over it — still there to be
     /// seen and used, since the picture alone doesn't say what hides you and what doesn't.</para>
     /// </summary>
-    public partial class Battle
+    public sealed class FlatScenery(CanvasItem canvas)
     {
-        private SceneryPlan? flatPlan;
-        private Setting? flatPlanFor;
+        private SceneryPlan? plan;
+        private Setting? planFor;
+        private Setting setting = Setting.Daylight;
+        private Func<GridPosition, Rect2> squareRect = _ => new Rect2();
+        private float cell = 1;
+        private readonly Dictionary<string, Texture2D?> textures = new();
 
-        /// <summary>A battlemap the player has loaded for this fight, over whatever the scene names.</summary>
-        private Backdrop? loadedBackdrop;
-
-        private readonly Dictionary<string, Texture2D?> backdropTextures = new();
-
-        private SceneryPlan FlatPlan
+        /// <summary>The plan the board was last drawn from: what stands on each square.</summary>
+        public SceneryPlan Plan(Setting of)
         {
-            get
+            if (!ReferenceEquals(planFor, of))
             {
-                if (!ReferenceEquals(flatPlanFor, encounter.Setting))
-                {
-                    flatPlan = new SceneryPlan(encounter.Setting, flatPlan);
-                    flatPlanFor = encounter.Setting;
-                }
-
-                return flatPlan!;
+                plan = new SceneryPlan(of, plan);
+                planFor = of;
             }
+
+            return plan!;
         }
 
-        private Backdrop? CurrentBackdrop => loadedBackdrop ?? encounter?.Setting.Scenery.Backdrop;
-
-        private Texture2D? BackdropTexture(Backdrop backdrop)
+        /// <summary>The picture for <paramref name="backdrop"/>, loaded once; null if it can't be read.</summary>
+        public Texture2D? Texture(Backdrop backdrop)
         {
-            if (!backdropTextures.TryGetValue(backdrop.Path, out var texture))
+            if (!textures.TryGetValue(backdrop.Path, out var texture))
             {
                 var image = Image.LoadFromFile(backdrop.Path);
                 texture = image is null || image.IsEmpty() ? null : ImageTexture.CreateFromImage(image);
-                backdropTextures[backdrop.Path] = texture;
+                textures[backdrop.Path] = texture;
             }
 
             return texture;
         }
 
-        /// <summary>The ground and everything standing on it, beneath the highlights, fog and grid the board draws after.</summary>
-        private void DrawFlatScenery()
+        /// <summary>Hands over a picture already loaded, so it isn't read from disk twice.</summary>
+        public void Prime(string path, Texture2D texture) => textures[path] = texture;
+
+        /// <summary>
+        /// Draws <paramref name="of"/>, <paramref name="width"/> by <paramref name="height"/> squares,
+        /// each laid where <paramref name="squareAt"/> says, <paramref name="size"/> pixels across:
+        /// the ground, water, high ground and props, over <paramref name="backdrop"/> if there is one.
+        /// </summary>
+        public void Draw(Setting of, int width, int height, Func<GridPosition, Rect2> squareAt, float size, Backdrop? backdrop, IEnumerable<GridPosition> fires)
         {
-            var plan = FlatPlan;
-            var setting = encounter.Setting;
-            var backdrop = CurrentBackdrop;
-            var picture = backdrop is null ? null : BackdropTexture(backdrop);
-            var cell = (float)CellSize;
+            setting = of;
+            squareRect = squareAt;
+            cell = size;
+            var plan = Plan(of);
+            var picture = backdrop is null ? null : Texture(backdrop);
             // Which squares the picture covers, in squares; the rest get the board's own ground.
             var pictureCovers = new Rect2();
 
@@ -72,29 +75,29 @@ namespace WoundBoundGame
                 // The part of the picture under the map, scaled to the map's squares — only as much as
                 // the picture holds; past its edges the board's own ground shows.
                 var pps = backdrop!.PixelsPerSquare;
-                var wanted = new Rect2(backdrop.OriginX, backdrop.OriginY, pps * encounter.Width, pps * encounter.Height);
+                var wanted = new Rect2(backdrop.OriginX, backdrop.OriginY, pps * width, pps * height);
                 var source = wanted.Intersection(new Rect2(Vector2.Zero, picture.GetSize()));
                 if (source.HasArea())
                 {
-                    var corner = SquareRect(new GridPosition(0, 0)).Position;
+                    var corner = squareRect(new GridPosition(0, 0)).Position;
                     var target = new Rect2(corner + (source.Position - wanted.Position) / pps * cell, source.Size / pps * cell);
-                    DrawTextureRectRegion(picture, target, source);
+                    canvas.DrawTextureRectRegion(picture, target, source);
                     pictureCovers = new Rect2((source.Position - wanted.Position) / pps, source.Size / pps);
                 }
             }
 
-            for (var y = 0; y < encounter.Height; y++)
+            for (var y = 0; y < height; y++)
             {
-                for (var x = 0; x < encounter.Width; x++)
+                for (var x = 0; x < width; x++)
                 {
                     var square = new GridPosition(x, y);
-                    var rect = SquareRect(square);
+                    var rect = squareRect(square);
                     var underPicture = picture is not null && pictureCovers.Encloses(new Rect2(x, y, 1, 1));
                     if (!underPicture)
                     {
                         var colour = Board3D.SurfaceColours[plan.SurfaceAt(square)];
                         var m = (SceneryPlan.Hash(square, 5) & 0xff) / 255f - 0.5f;
-                        DrawRect(rect, colour.Lightened(Math.Max(0, m) * 0.1f).Darkened(Math.Max(0, -m) * 0.12f));
+                        canvas.DrawRect(rect, colour.Lightened(Math.Max(0, m) * 0.1f).Darkened(Math.Max(0, -m) * 0.12f));
                         if (plan.IsRough(square))
                         {
                             Speckle(rect, square, colour.Darkened(0.35f));
@@ -104,7 +107,7 @@ namespace WoundBoundGame
                     if (setting.Water.TryGetValue(square, out var depth))
                     {
                         var water = depth == WaterDepth.Deep ? new Color(0.09f, 0.22f, 0.38f) : new Color(0.22f, 0.44f, 0.55f);
-                        DrawRect(rect, underPicture ? water with { A = 0.3f } : water);
+                        canvas.DrawRect(rect, underPicture ? water with { A = 0.3f } : water);
                         Ripple(rect, square, new Color(0.75f, 0.88f, 0.92f, underPicture ? 0.6f : 0.45f));
                     }
 
@@ -112,7 +115,7 @@ namespace WoundBoundGame
                     {
                         if (!underPicture)
                         {
-                            DrawRect(rect, new Color(1, 1, 1, 0.08f));
+                            canvas.DrawRect(rect, new Color(1, 1, 1, 0.08f));
                         }
 
                         Elevation(square, rect, setting);
@@ -132,12 +135,12 @@ namespace WoundBoundGame
             }
 
             FlatRoofs(plan, alpha);
-            foreach (var fire in encounter.Fires)
+            foreach (var fire in fires)
             {
-                var c = SquareRect(fire).GetCenter();
-                DrawCircle(c, cell * 0.3f, new Color(0.35f, 0.33f, 0.3f));
-                DrawCircle(c, cell * 0.22f, new Color(0.95f, 0.45f, 0.1f));
-                DrawCircle(c, cell * 0.12f, new Color(1f, 0.85f, 0.4f));
+                var c = squareRect(fire).GetCenter();
+                canvas.DrawCircle(c, cell * 0.3f, new Color(0.35f, 0.33f, 0.3f));
+                canvas.DrawCircle(c, cell * 0.22f, new Color(0.95f, 0.45f, 0.1f));
+                canvas.DrawCircle(c, cell * 0.12f, new Color(1f, 0.85f, 0.4f));
             }
         }
 
@@ -148,7 +151,7 @@ namespace WoundBoundGame
             for (var i = 0; i < 4; i++)
             {
                 var at = rect.Position + new Vector2((h >> (i * 4) & 0xf) / 16f * 0.8f + 0.1f, (h >> (i * 4 + 16) & 0xf) / 16f * 0.8f + 0.1f) * rect.Size;
-                DrawCircle(at, Math.Max(1, rect.Size.X * 0.045f), colour);
+                canvas.DrawCircle(at, Math.Max(1, rect.Size.X * 0.045f), colour);
             }
         }
 
@@ -163,7 +166,7 @@ namespace WoundBoundGame
                 points[i] = new Vector2(rect.Position.X + rect.Size.X * (0.15f + 0.7f * t), y + Mathf.Sin(t * Mathf.Tau) * rect.Size.Y * 0.06f);
             }
 
-            DrawPolyline(points, colour, Math.Max(1, rect.Size.X / 24));
+            canvas.DrawPolyline(points, colour, Math.Max(1, rect.Size.X / 24));
         }
 
         /// <summary>
@@ -187,11 +190,11 @@ namespace WoundBoundGame
                 var edgeMid = rect.GetCenter() + outward * s / 2;
                 if (cliff)
                 {
-                    DrawLine(edgeMid - along * s / 2, edgeMid + along * s / 2, ink, Math.Max(2, s / 10));
+                    canvas.DrawLine(edgeMid - along * s / 2, edgeMid + along * s / 2, ink, Math.Max(2, s / 10));
                     for (var i = 0; i < 3; i++)
                     {
                         var at = edgeMid + along * s * (i - 1) * 0.3f;
-                        DrawColoredPolygon([at - along * s * 0.08f, at + along * s * 0.08f, at + outward * s * 0.14f], ink);
+                        canvas.DrawColoredPolygon([at - along * s * 0.08f, at + along * s * 0.08f, at + outward * s * 0.14f], ink);
                     }
                 }
                 else
@@ -199,7 +202,7 @@ namespace WoundBoundGame
                     for (var i = 0; i < 4; i++)
                     {
                         var at = edgeMid + along * s * (i - 1.5f) * 0.22f;
-                        DrawLine(at - outward * s * 0.28f, at, ink with { A = 0.55f }, Math.Max(1, s / 20));
+                        canvas.DrawLine(at - outward * s * 0.28f, at, ink with { A = 0.55f }, Math.Max(1, s / 20));
                     }
                 }
             }
@@ -214,7 +217,7 @@ namespace WoundBoundGame
 
         private void FlatProp(GridPosition square, Prop prop, SceneryPlan plan, HashSet<GridPosition> done, float alpha)
         {
-            var rect = SquareRect(square);
+            var rect = squareRect(square);
             var c = rect.GetCenter();
             var s = rect.Size.X;
             var h = SceneryPlan.Hash(square, 7);
@@ -231,20 +234,20 @@ namespace WoundBoundGame
                     points[i] = at + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * r;
                 }
 
-                DrawColoredPolygon(points, A(colour));
-                DrawPolyline([.. points, points[0]], A(colour.Darkened(0.45f)), Math.Max(1, s / 28));
+                canvas.DrawColoredPolygon(points, A(colour));
+                canvas.DrawPolyline([.. points, points[0]], A(colour.Darkened(0.45f)), Math.Max(1, s / 28));
             }
 
             void Box(Vector2 at, float size, float turn, Color colour, bool cross)
             {
                 var corners = new[] { new Vector2(-1, -1), new Vector2(1, -1), new Vector2(1, 1), new Vector2(-1, 1) }
                     .Select(v => at + v.Rotated(turn) * size / 2).ToArray();
-                DrawColoredPolygon(corners, A(colour));
-                DrawPolyline([.. corners, corners[0]], A(colour.Darkened(0.5f)), Math.Max(1, s / 24));
+                canvas.DrawColoredPolygon(corners, A(colour));
+                canvas.DrawPolyline([.. corners, corners[0]], A(colour.Darkened(0.5f)), Math.Max(1, s / 24));
                 if (cross)
                 {
-                    DrawLine(corners[0], corners[2], A(colour.Darkened(0.35f)), Math.Max(1, s / 30));
-                    DrawLine(corners[1], corners[3], A(colour.Darkened(0.35f)), Math.Max(1, s / 30));
+                    canvas.DrawLine(corners[0], corners[2], A(colour.Darkened(0.35f)), Math.Max(1, s / 30));
+                    canvas.DrawLine(corners[1], corners[3], A(colour.Darkened(0.35f)), Math.Max(1, s / 30));
                 }
             }
 
@@ -270,9 +273,9 @@ namespace WoundBoundGame
                         points[i] = c + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * s * (i % 2 == 0 ? 0.48f : 0.3f);
                     }
 
-                    DrawColoredPolygon(points, A(new Color(0.12f, 0.26f, 0.15f)));
-                    DrawPolyline([.. points, points[0]], A(new Color(0.05f, 0.12f, 0.06f)), Math.Max(1, s / 28));
-                    DrawCircle(c, s * 0.06f, A(new Color(0.3f, 0.22f, 0.14f)));
+                    canvas.DrawColoredPolygon(points, A(new Color(0.12f, 0.26f, 0.15f)));
+                    canvas.DrawPolyline([.. points, points[0]], A(new Color(0.05f, 0.12f, 0.06f)), Math.Max(1, s / 28));
+                    canvas.DrawCircle(c, s * 0.06f, A(new Color(0.3f, 0.22f, 0.14f)));
                     break;
                 }
 
@@ -314,9 +317,9 @@ namespace WoundBoundGame
                     Box(c, s * 0.5f, R(0) * 0.6f - 0.3f, FlatWood, true);
                     break;
                 case Prop.Barrel:
-                    DrawCircle(c, s * 0.27f, A(FlatWood.Darkened(0.15f)));
-                    DrawArc(c, s * 0.27f, 0, Mathf.Tau, 20, A(new Color(0.2f, 0.2f, 0.22f)), Math.Max(1, s / 18));
-                    DrawArc(c, s * 0.16f, 0, Mathf.Tau, 16, A(new Color(0.2f, 0.2f, 0.22f)), Math.Max(1, s / 30));
+                    canvas.DrawCircle(c, s * 0.27f, A(FlatWood.Darkened(0.15f)));
+                    canvas.DrawArc(c, s * 0.27f, 0, Mathf.Tau, 20, A(new Color(0.2f, 0.2f, 0.22f)), Math.Max(1, s / 18));
+                    canvas.DrawArc(c, s * 0.16f, 0, Mathf.Tau, 16, A(new Color(0.2f, 0.2f, 0.22f)), Math.Max(1, s / 30));
                     break;
                 case Prop.Cart:
                 {
@@ -324,7 +327,7 @@ namespace WoundBoundGame
                     var south = new GridPosition(square.X, square.Y + 1);
                     GridPosition? other = plan.PropAt(east) == Prop.Cart && !done.Contains(east) ? east
                         : plan.PropAt(south) == Prop.Cart && !done.Contains(south) ? south : null;
-                    var end = other is { } o ? SquareRect(o).GetCenter() : c;
+                    var end = other is { } o ? squareRect(o).GetCenter() : c;
                     if (other is { } took)
                     {
                         done.Add(took);
@@ -338,12 +341,12 @@ namespace WoundBoundGame
                     foreach (var side in new[] { -1, 1 })
                     {
                         var wheel = alongX ? new Vector2(mid.X - length * 0.15f, mid.Y + side * s * 0.4f) : new Vector2(mid.X + side * s * 0.4f, mid.Y - length * 0.15f);
-                        DrawRect(new Rect2(wheel - (alongX ? new Vector2(s * 0.25f, s * 0.05f) : new Vector2(s * 0.05f, s * 0.25f)), alongX ? new Vector2(s * 0.5f, s * 0.1f) : new Vector2(s * 0.1f, s * 0.5f)), A(FlatInk));
+                        canvas.DrawRect(new Rect2(wheel - (alongX ? new Vector2(s * 0.25f, s * 0.05f) : new Vector2(s * 0.05f, s * 0.25f)), alongX ? new Vector2(s * 0.5f, s * 0.1f) : new Vector2(s * 0.1f, s * 0.5f)), A(FlatInk));
                     }
 
-                    DrawRect(bed, A(FlatWood));
-                    DrawRect(bed, A(FlatWood.Darkened(0.5f)), filled: false, width: Math.Max(1, s / 16));
-                    DrawCircle(mid, s * 0.16f, A(new Color(0.72f, 0.64f, 0.46f)));
+                    canvas.DrawRect(bed, A(FlatWood));
+                    canvas.DrawRect(bed, A(FlatWood.Darkened(0.5f)), filled: false, width: Math.Max(1, s / 16));
+                    canvas.DrawCircle(mid, s * 0.16f, A(new Color(0.72f, 0.64f, 0.46f)));
                     break;
                 }
 
@@ -355,16 +358,16 @@ namespace WoundBoundGame
                         if (plan.PropAt(new GridPosition(square.X + dx, square.Y + dy)) == Prop.Fence)
                         {
                             any = true;
-                            DrawLine(c, c + new Vector2(dx, dy) * s / 2, A(FlatWood.Darkened(0.2f)), Math.Max(2, s / 10));
+                            canvas.DrawLine(c, c + new Vector2(dx, dy) * s / 2, A(FlatWood.Darkened(0.2f)), Math.Max(2, s / 10));
                         }
                     }
 
                     if (!any)
                     {
-                        DrawLine(c - new Vector2(s * 0.45f, 0), c + new Vector2(s * 0.45f, 0), A(FlatWood.Darkened(0.2f)), Math.Max(2, s / 10));
+                        canvas.DrawLine(c - new Vector2(s * 0.45f, 0), c + new Vector2(s * 0.45f, 0), A(FlatWood.Darkened(0.2f)), Math.Max(2, s / 10));
                     }
 
-                    DrawCircle(c, s * 0.08f, A(FlatWood.Darkened(0.4f)));
+                    canvas.DrawCircle(c, s * 0.08f, A(FlatWood.Darkened(0.4f)));
                     break;
                 }
 
@@ -373,47 +376,47 @@ namespace WoundBoundGame
                 {
                     var tall = prop == Prop.StoneWall;
                     var inset = tall ? 0 : s * 0.2f;
-                    DrawRect(rect.Grow(-inset), A(tall ? new Color(0.46f, 0.44f, 0.41f) : FlatStone));
+                    canvas.DrawRect(rect.Grow(-inset), A(tall ? new Color(0.46f, 0.44f, 0.41f) : FlatStone));
                     // Courses of stone, seen from above.
                     for (var i = 1; i < 3; i++)
                     {
                         var yy = rect.Position.Y + inset + (s - 2 * inset) * i / 3f;
-                        DrawLine(new Vector2(rect.Position.X + inset, yy), new Vector2(rect.End.X - inset, yy), A(FlatInk with { A = 0.35f }), 1);
+                        canvas.DrawLine(new Vector2(rect.Position.X + inset, yy), new Vector2(rect.End.X - inset, yy), A(FlatInk with { A = 0.35f }), 1);
                     }
 
-                    DrawRect(rect.Grow(-inset), A(FlatInk with { A = 0.6f }), filled: false, width: Math.Max(1, s / 20));
+                    canvas.DrawRect(rect.Grow(-inset), A(FlatInk with { A = 0.6f }), filled: false, width: Math.Max(1, s / 20));
                     break;
                 }
 
                 case Prop.HutWall:
-                    DrawRect(rect, A(new Color(0.78f, 0.73f, 0.62f)));
-                    DrawRect(rect, A(new Color(0.27f, 0.19f, 0.13f)), filled: false, width: Math.Max(2, s / 10));
+                    canvas.DrawRect(rect, A(new Color(0.78f, 0.73f, 0.62f)));
+                    canvas.DrawRect(rect, A(new Color(0.27f, 0.19f, 0.13f)), filled: false, width: Math.Max(2, s / 10));
                     break;
                 case Prop.Pillar:
-                    DrawRect(rect.Grow(-s * 0.08f), A(new Color(0.6f, 0.58f, 0.54f)));
-                    DrawCircle(c, s * 0.3f, A(new Color(0.68f, 0.66f, 0.62f)));
-                    DrawArc(c, s * 0.3f, 0, Mathf.Tau, 20, A(FlatInk with { A = 0.6f }), Math.Max(1, s / 24));
+                    canvas.DrawRect(rect.Grow(-s * 0.08f), A(new Color(0.6f, 0.58f, 0.54f)));
+                    canvas.DrawCircle(c, s * 0.3f, A(new Color(0.68f, 0.66f, 0.62f)));
+                    canvas.DrawArc(c, s * 0.3f, 0, Mathf.Tau, 20, A(FlatInk with { A = 0.6f }), Math.Max(1, s / 24));
                     break;
                 case Prop.Log:
                 {
                     var ns = plan.PropAt(new GridPosition(square.X, square.Y - 1)) == Prop.Log || plan.PropAt(new GridPosition(square.X, square.Y + 1)) == Prop.Log;
                     var size = ns ? new Vector2(s * 0.5f, s) : new Vector2(s, s * 0.5f);
-                    DrawRect(new Rect2(c - size / 2, size), A(new Color(0.36f, 0.25f, 0.16f)));
-                    DrawRect(new Rect2(c - size / 2, size), A(FlatInk with { A = 0.6f }), filled: false, width: Math.Max(1, s / 24));
+                    canvas.DrawRect(new Rect2(c - size / 2, size), A(new Color(0.36f, 0.25f, 0.16f)));
+                    canvas.DrawRect(new Rect2(c - size / 2, size), A(FlatInk with { A = 0.6f }), filled: false, width: Math.Max(1, s / 24));
                     break;
                 }
 
                 case Prop.Stump:
-                    DrawCircle(c, s * 0.28f, A(new Color(0.36f, 0.25f, 0.16f)));
-                    DrawCircle(c, s * 0.22f, A(new Color(0.7f, 0.58f, 0.4f)));
-                    DrawArc(c, s * 0.12f, 0, Mathf.Tau, 14, A(new Color(0.5f, 0.38f, 0.25f)), 1);
+                    canvas.DrawCircle(c, s * 0.28f, A(new Color(0.36f, 0.25f, 0.16f)));
+                    canvas.DrawCircle(c, s * 0.22f, A(new Color(0.7f, 0.58f, 0.4f)));
+                    canvas.DrawArc(c, s * 0.12f, 0, Mathf.Tau, 14, A(new Color(0.5f, 0.38f, 0.25f)), 1);
                     break;
                 case Prop.Reeds:
                     for (var i = 0; i < 9; i++)
                     {
                         var at = c + new Vector2(R(i * 3 % 24) - 0.5f, R((i * 5 + 4) % 24) - 0.5f) * s * 0.7f;
-                        DrawLine(at, at + new Vector2(s * 0.06f, -s * 0.18f), A(new Color(0.45f, 0.52f, 0.25f)), Math.Max(1, s / 24));
-                        DrawCircle(at + new Vector2(s * 0.06f, -s * 0.18f), Math.Max(1, s * 0.03f), A(new Color(0.35f, 0.24f, 0.14f)));
+                        canvas.DrawLine(at, at + new Vector2(s * 0.06f, -s * 0.18f), A(new Color(0.45f, 0.52f, 0.25f)), Math.Max(1, s / 24));
+                        canvas.DrawCircle(at + new Vector2(s * 0.06f, -s * 0.18f), Math.Max(1, s * 0.03f), A(new Color(0.35f, 0.24f, 0.14f)));
                     }
 
                     break;
@@ -448,13 +451,13 @@ namespace WoundBoundGame
                     continue;
                 }
 
-                var area = new Rect2(SquareRect(new GridPosition(x0, y0)).Position, SquareRect(new GridPosition(x1, y1)).End - SquareRect(new GridPosition(x0, y0)).Position);
+                var area = new Rect2(squareRect(new GridPosition(x0, y0)).Position, squareRect(new GridPosition(x1, y1)).End - squareRect(new GridPosition(x0, y0)).Position);
                 var thatch = new Color(0.62f, 0.5f, 0.28f, alpha);
-                DrawRect(area.Grow(CellSize * 0.1f), thatch);
-                DrawRect(area.Grow(CellSize * 0.1f), thatch.Darkened(0.45f), filled: false, width: Math.Max(1, CellSize / 16f));
+                canvas.DrawRect(area.Grow(cell * 0.1f), thatch);
+                canvas.DrawRect(area.Grow(cell * 0.1f), thatch.Darkened(0.45f), filled: false, width: Math.Max(1, cell / 16f));
                 var alongX = area.Size.X >= area.Size.Y;
                 var mid = area.GetCenter();
-                DrawLine(alongX ? new Vector2(area.Position.X, mid.Y) : new Vector2(mid.X, area.Position.Y), alongX ? new Vector2(area.End.X, mid.Y) : new Vector2(mid.X, area.End.Y), thatch.Darkened(0.35f), Math.Max(2, CellSize / 10f));
+                canvas.DrawLine(alongX ? new Vector2(area.Position.X, mid.Y) : new Vector2(mid.X, area.Position.Y), alongX ? new Vector2(area.End.X, mid.Y) : new Vector2(mid.X, area.End.Y), thatch.Darkened(0.35f), Math.Max(2, cell / 10f));
             }
         }
     }
