@@ -96,6 +96,8 @@ GmIntent? intent = (Text("--challenge", null), Text("--ruthless", null)) switch
     (_, { } r) => GmIntent.Fixed(double.Parse(r, System.Globalization.CultureInfo.InvariantCulture)),
     _ => null,
 };
+// --naive on|off: whether the GM plays with a novice's habits (shooters close in, casters run in, blades ignore reach); left out, Poor does.
+bool? naive = Text("--naive", null) switch { "on" => true, "off" => false, null => null, var n => throw new ArgumentException($"--naive wants on or off, not {n}") };
 // Every utility GM built, so the look-ahead tally can be summed at the end.
 var utilityGms = new System.Collections.Concurrent.ConcurrentBag<UtilityGmBrain>();
 UtilityGmBrain Kept(UtilityGmBrain gm)
@@ -107,9 +109,9 @@ UtilityGmBrain Kept(UtilityGmBrain gm)
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),
-    "best" => Kept(new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent)),
-    "balanced" => Kept(new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent)),
-    "poor" => Kept(new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent)),
+    "best" => Kept(new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent, naive: naive)),
+    "balanced" => Kept(new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent, naive: naive)),
+    "poor" => Kept(new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent, naive: naive)),
     _ => new SimpleGmBrain(),
 };
 

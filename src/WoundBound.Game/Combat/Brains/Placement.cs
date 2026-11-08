@@ -17,7 +17,7 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>A band facing the party at a sensible distance, taking the ground as it comes.</summary>
         Neutral,
 
-        /// <summary>Every creature where it does least: shooters too close, blades too far back, all in the open and the light.</summary>
+        /// <summary>The careless GM's band: one tight knot, in the open and the light, at a middling distance.</summary>
         Poor,
     }
 
@@ -133,9 +133,19 @@ namespace WoundBound.Game.Combat.Brains
             switch (skill)
             {
                 case SetupSkill.Poor:
-                    // Each creature where it does least: shooters walked up into the party's reach, blades
-                    // left at the back to arrive late and one by one, everyone in the open and in the light.
-                    double poor = IsShooter(creature) ? -Math.Abs(nearest - 2) : -Math.Abs(nearest - 11);
+                    // The careless GM's band: all in one knot, out in the open and in the light, at a
+                    // middling distance, so its first moments are bad ones. An area spell takes several
+                    // at once, and an ambush laid in the light is easily spotted. Sims (2026-11-08):
+                    // walking shooters up to point-blank only pins the party, and a band strung out to
+                    // arrive in waves did no worse than a neutral one. A bad start costs a round or two
+                    // at most; the lasting mistakes are a Poor GM's habits in play (Assessor.Naive).
+                    double poor = -0.5 * Math.Abs(nearest - PoorDistance);
+                    if (placed.Count > 0)
+                    {
+                        var near = placed.Min(a => a.DistanceTo(square));
+                        poor += near switch { 1 => 2.0, 2 => 1.0, _ => -0.5 * near };
+                    }
+
                     poor -= 2 * party.Average(p => setting.CoverAgainst(p.Position, square, creature.Across) switch
                     {
                         Cover.Full => 1.0,
@@ -147,6 +157,7 @@ namespace WoundBound.Game.Combat.Brains
                         poor -= unseen switch { Visibility.None => 1.5, Visibility.Poor => 0.75, _ => 0 };
                     }
 
+                    poor -= setting.IsRaised(square, creature.Across) ? 0.5 : 0;
                     return poor;
 
                 case SetupSkill.Neutral:
@@ -223,6 +234,9 @@ namespace WoundBound.Game.Combat.Brains
             var wanted = stride + reach - (creature.IsMinion ? 1 : 0);
             return Math.Max(0, 1 - Math.Abs(nearest - wanted) / 6.0);
         }
+
+        /// <summary>Where a careless GM puts its band: in the Middle band of the nearest character, close enough to be seen coming and shot at on the way in.</summary>
+        private const int PoorDistance = 8;
 
         /// <summary>The distance a creature's ranged attack takes its shots from at no penalty, as far out as that goes.</summary>
         private static int BestShotDistance(Combatant creature, RangeBandTables bands)

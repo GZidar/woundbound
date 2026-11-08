@@ -44,8 +44,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private readonly Random random;
 
         public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null, double caution = GmCaution, bool? peers = null,
-            Foresight? foresight = null, ThreatMeasure? measure = null, GmIntent? intent = null)
+            Foresight? foresight = null, ThreatMeasure? measure = null, GmIntent? intent = null, bool? naive = null)
         {
+            Naive = naive ?? NaiveFor(skill ?? BrainSkill.Best);
             Skill = skill ?? BrainSkill.Best;
             chosenIntent = intent;
             Intent = intent ?? GmIntent.Ruthless;
@@ -95,6 +96,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         /// <summary>What it knows of the party: the sheets at Best, what it has seen below that.</summary>
         public Knowledge Knowledge { get; }
+
+        /// <summary>Whether it plays with a novice GM's habits (<see cref="Assessor.Naive"/>): at Poor, when nobody says.</summary>
+        public bool Naive { get; }
+
+        /// <summary>Whether a GM of <paramref name="skill"/> plays with a novice's habits when nobody says: Poor does.</summary>
+        public static bool NaiveFor(BrainSkill skill) => skill.Name == BrainSkill.Poor.Name;
 
         /// <summary>The knowledge that goes with a skill when none is named: the challenge scales both together.</summary>
         public static Knowledge KnowledgeFor(BrainSkill skill) => skill.Name == BrainSkill.Best.Name ? Knowledge.Sheets : Knowledge.Seen;
@@ -169,6 +176,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private Assessor Assess(BattleView view) => new(view, Knowledge, Side.Adversaries)
         {
             Ruthlessness = Ruthlessness,
+            Naive = Naive,
             FinishesTheDowned = Intent.FinishesTheDowned && view.Brief?.Goal is not AdversaryGoal.Capture,
             SparesTheDowned = view.Brief?.Goal is AdversaryGoal.Capture,
             Menaced = menaced,

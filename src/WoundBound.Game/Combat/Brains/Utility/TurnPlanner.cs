@@ -1371,6 +1371,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return square == actor.Position ? 0.5 : 0;
             }
 
+            // A naive GM plays every creature as though it were a Brute: it wants to be toe to toe with
+            // somebody, the archer and the caster too.
+            if (assess.IsNaiveAbout(actor))
+            {
+                return Guarding(actor, square) + (nearest <= 1 ? 0.3 : 0);
+            }
+
             // A caster fights like a Skirmisher: from Short, out of reach.
             var keepsDistance = actor.Role == AdversaryRole.Skirmisher && actor.HasRangedAttack
                                 || actor.Spells.Any(s => s.SpellType == SpellType.Harm);

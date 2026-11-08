@@ -138,4 +138,30 @@ public class RuthlessnessTests
         Assert.True(merciful.LetsBreak(encounter.View, bandit, alliesDown: 0));
         Assert.False(ruthless.LetsBreak(encounter.View, bandit, alliesDown: half));
     }
+
+    [Fact]
+    public void ANaiveGm_WalksOutOfReachFreely_AndItsCastersIgnoreWhatTheyInvite()
+    {
+        // The user, 2026-11-08: a Poor GM's habits, not random blunders.
+        var encounter = SampleEncounters.HedgeWitchesToll(Data, new ScriptedDice());
+        var caster = encounter.Combatants.First(c => c.Side == Side.Adversaries && c.Spells.Count > 0);
+        var fighter = encounter.Combatants.First(c => c.Side == Side.Party);
+        caster.Position = new GridPosition(fighter.Position.X + 1, fighter.Position.Y);
+        var away = new GridPosition(caster.Position.X + 3, caster.Position.Y);
+        var sharp = new Assessor(encounter.View, side: Side.Adversaries);
+        var naive = new Assessor(encounter.View, side: Side.Adversaries) { Naive = true };
+
+        Assert.True(sharp.Exposure(caster, caster.Position) > 0);
+        Assert.Equal(0, naive.Exposure(caster, caster.Position));
+        Assert.Equal(0, naive.LeavingCost(caster, away));
+        Assert.False(naive.IsNaiveAbout(fighter)); // the party's own choices are never touched
+    }
+
+    [Fact]
+    public void APoorGm_IsNaiveByDefault_AndTheBestIsNot()
+    {
+        Assert.True(new UtilityGmBrain(BrainSkill.Poor).Naive);
+        Assert.False(new UtilityGmBrain(BrainSkill.Best).Naive);
+        Assert.False(new UtilityGmBrain(BrainSkill.Poor, naive: false).Naive);
+    }
 }

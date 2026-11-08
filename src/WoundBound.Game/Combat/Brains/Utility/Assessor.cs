@@ -914,6 +914,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public double Exposure(Combatant creature, GridPosition square, int extraDodge = 0)
         {
+            // A naive GM's caster runs into the fight with no thought for what it invites.
+            if (IsNaiveAbout(creature) && creature.Spells.Count > 0)
+            {
+                return 0;
+            }
+
             var key = (creature, square, extraDodge, creature.IsShowingFromCover);
             if (!exposures.TryGetValue(key, out var exposure))
             {
@@ -977,7 +983,19 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>The reaction blows <paramref name="mover"/> draws going from where it stands to <paramref name="to"/>, in wounds' worth.</summary>
-        public double LeavingCost(Combatant mover, GridPosition to) => LeavingRisk(mover, to).Cost;
+        public double LeavingCost(Combatant mover, GridPosition to) => IsNaiveAbout(mover) ? 0 : LeavingRisk(mover, to).Cost;
+
+        /// <summary>
+        /// Whether this brain plays with a novice GM's habits (the user, 2026-11-08): its shooters close
+        /// to blade range and give up their best weapon, its casters run into the fight, and its blades
+        /// walk out of reach without a thought for the blows that follow. Not random blunders, which only
+        /// make a duller fight (the user, 2026-11-05), but the same mistakes made every time.
+        /// Everything else it chooses as well as it can.
+        /// </summary>
+        public bool Naive { get; init; }
+
+        /// <summary>Whether <paramref name="c"/> is one of this naive GM's own creatures, played with its habits.</summary>
+        public bool IsNaiveAbout(Combatant c) => Naive && side is { } own && c.Side == own;
 
         /// <summary>
         /// What leaving the reach of the enemies around <paramref name="mover"/> for <paramref name="to"/>
