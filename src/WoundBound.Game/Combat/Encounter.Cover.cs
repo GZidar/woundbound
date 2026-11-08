@@ -43,6 +43,26 @@ namespace WoundBound.Game.Combat
         /// </summary>
         internal bool LineOpen(GridPosition from, GridPosition to) => Setting.LineOpen(from, to);
 
+        /// <summary>
+        /// High ground (Core Rules §9): +1 to the attack roll for an attacker on raised ground against a
+        /// target that isn't, and +1 Dodge Threshold for a target on raised ground against an attacker
+        /// that isn't. Nothing between two on the same footing.
+        /// </summary>
+        internal (int AttackBonus, int DodgeBonus) HighGround(GridPosition from, int fromAcross, GridPosition at, int atAcross)
+        {
+            if (Setting.Raised.Count == 0)
+            {
+                return (0, 0);
+            }
+
+            var above = Setting.IsRaised(from, fromAcross);
+            var below = Setting.IsRaised(at, atAcross);
+            return above == below ? (0, 0) : above ? (HighGroundBonus, 0) : (0, HighGroundBonus);
+        }
+
+        /// <summary>The high-ground bonus, to the roll or to the Threshold.</summary>
+        public const int HighGroundBonus = 1;
+
         /// <summary>What partial cover adds to Dodge Threshold, by the table.</summary>
         private int CoverDodgeBonus(Cover grade) => grade == Cover.Partial ? CoverCalculator.DodgeThresholdModifier(environment, Cover.Partial) : 0;
 

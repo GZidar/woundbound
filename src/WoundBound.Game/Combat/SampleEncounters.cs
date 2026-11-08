@@ -641,6 +641,7 @@ namespace WoundBound.Game.Combat
             Cause = VisibilityCause.Unlit,
             Fires = new HashSet<GridPosition> { CampfireSquare },
             Ground = Setting.Patches(Terrain.Broken, (16, 0, 19, 4), (16, 13, 19, 17)),
+            Raised = Setting.Squares((16, 0, 19, 4)), // the rocks stand over the camp; the gully lies low
             Deployment =
             [
                 DeploymentZone.Of("the rocks", hidden: true, (15, 0, 21, 4)),

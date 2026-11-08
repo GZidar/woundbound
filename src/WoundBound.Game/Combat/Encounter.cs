@@ -212,7 +212,7 @@ namespace WoundBound.Game.Combat
         private readonly List<GridPosition> lightsOnTheGround = new();
 
         /// <summary>Where the fight happens (Core Rules §9, "Environment").</summary>
-        public Setting Setting { get; }
+        public Setting Setting { get; private set; }
 
         public IReadOnlyList<GridPosition> LightsOnTheGround => lightsOnTheGround;
 
@@ -1126,6 +1126,8 @@ namespace WoundBound.Game.Combat
             }
 
             var sheltered = CoverDodgeBonus(cover);
+            var (uphillBonus, uphillDodge) = HighGround(from, attacker.Across, targetAt ?? target.Position, target.Across);
+            var heightNote = uphillBonus > 0 ? $"; +{uphillBonus} to hit from high ground" : uphillDodge > 0 ? $"; +{uphillDodge} DT, striking uphill" : string.Empty;
 
             if (attack.Against == ThresholdType.Stability)
             {
@@ -1169,9 +1171,10 @@ namespace WoundBound.Game.Combat
                 }
 
                 var dark = VisibilityDodgeModifier(target, targetAt, attacker);
-                return new AttackPlan(null, target.DodgeThreshold + dark + sheltered, 0, attack.DamageDieSides,
+                return new AttackPlan(null, target.DodgeThreshold + dark + sheltered + uphillDodge, 0, attack.DamageDieSides,
                     $"Melee, within Reach {attack.Reach}" + (dark > 0 ? $"; +{dark} DT for the dark" : string.Empty)
-                    + (sheltered > 0 ? $"; +{sheltered} DT for partial cover." : "."), attack) { CoverDodgeModifier = sheltered };
+                    + (sheltered > 0 ? $"; +{sheltered} DT for partial cover" : string.Empty) + heightNote + ".", attack)
+                    { CoverDodgeModifier = sheltered, HeightAttackBonus = uphillBonus };
             }
 
             if (SaddleForbids(attacker, attack))
@@ -1205,14 +1208,14 @@ namespace WoundBound.Game.Combat
             return shot.CanAttack
                 ? new AttackPlan(
                     Refusal: null,
-                    DodgeThreshold: target.DodgeThreshold + shot.DodgeThresholdModifier + gloom + sheltered,
+                    DodgeThreshold: target.DodgeThreshold + shot.DodgeThresholdModifier + gloom + sheltered + uphillDodge,
                     RangeDodgeModifier: shot.DodgeThresholdModifier + gloom,
                     // A statblock's own die holds at Close and Short; past that the weapon's falls off.
                     DamageDieSides: shot.DamageDie is { } die
                         ? attacker.Build is null && shot.DodgeThresholdModifier == 0 ? attack.DamageDieSides : DiceNotation.ParseSides(die)
                         : null,
-                    Note: shot.Summary + (sheltered > 0 ? $"; +{sheltered} DT for partial cover" : string.Empty),
-                    Profile: attack) { CoverDodgeModifier = sheltered }
+                    Note: shot.Summary + (sheltered > 0 ? $"; +{sheltered} DT for partial cover" : string.Empty) + heightNote,
+                    Profile: attack) { CoverDodgeModifier = sheltered, HeightAttackBonus = uphillBonus }
                 : Refused(shot.Summary);
 
             AttackPlan Refused(string why) => new(why, 0, 0, null, why, attack);
@@ -2568,6 +2571,16 @@ namespace WoundBound.Game.Combat
                     TakeStep(turn, done);
                     return;
 
+                case GmStep.BreakCover breaking:
+                    if (BreakCoverRefusal(actor, breaking.Square) is { } noBreak)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} break the cover at {breaking.Square}: {noBreak}");
+                    }
+
+                    BreakCover(actor, breaking.Square);
+                    TakeStep(turn, done);
+                    return;
+
                 case GmStep.TakePrize:
                     if (TakePrizeRefusal(actor) is { } noPrize)
                     {
@@ -3310,7 +3323,12 @@ namespace WoundBound.Game.Combat
                 .Select(_ => dice.Roll(RollCalculator.HighestFace))
                 .ToList();
             var attack = plan.Profile ?? attacker.Attack;
-            var roll = RollCalculator.Resolve(rolled, attack.AttackModifier, plan.DodgeThreshold, advantage, disadvantage);
+            if (plan.HeightAttackBonus > 0)
+            {
+                Write($"{attacker.Name} strikes down from high ground: +{plan.HeightAttackBonus} to the roll.");
+            }
+
+            var roll = RollCalculator.Resolve(rolled, attack.AttackModifier + plan.HeightAttackBonus, plan.DodgeThreshold, advantage, disadvantage);
             Slip(attacker, roll);
 
             if (!asReaction && spendsAction)
@@ -4552,7 +4570,9 @@ namespace WoundBound.Game.Combat
                 isBroken: corner => tables is not null && AnyUnder(corner, broken),
                 isDeep: corner => AnyUnder(corner, deep),
                 price: steps => RangeBandCalculator.MoveCost(bands, steps, mover.Speed, nimble: mover.HasFootwork, freeStep: FreeStepFor(mover)),
-                brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken));
+                brokenTax: tables is null ? 0 : EnvironmentCalculator.ExtraMoveCost(tables, Terrain.Broken),
+                // Stepping up onto high ground costs as Broken ground does; stepping down is free (Core Rules §9, "High Ground").
+                climbs: Setting.Raised.Count == 0 ? null : (from, to) => !Setting.IsRaised(from, across) && Setting.IsRaised(to, across));
             return map;
         }
 
@@ -4562,6 +4582,7 @@ namespace WoundBound.Game.Combat
             var hash = new HashCode();
             hash.Add(mover.Speed);
             hash.Add(FreeStepFor(mover));
+            hash.Add(coverVersion);
             foreach (var c in combatants)
             {
                 hash.Add(c.Position);

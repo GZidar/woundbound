@@ -26,7 +26,7 @@ namespace WoundBound.Game.Combat
         /// <param name="price">The band cost of a route this many squares long, or null beyond reach.</param>
         public MovementMap(GridPosition from, int radius, Func<GridPosition, bool> isWall, Func<GridPosition, bool> isClosed,
             Func<GridPosition, bool> canStop, Func<GridPosition, bool> isBroken, Func<GridPosition, bool> isDeep,
-            Func<int, int?> price, int brokenTax)
+            Func<int, int?> price, int brokenTax, Func<GridPosition, GridPosition, bool>? climbs = null)
         {
             // Two layers: routes that have touched no Broken ground yet, and routes that have.
             var startsBroken = isBroken(from);
@@ -50,7 +50,7 @@ namespace WoundBound.Game.Combat
                         continue;
                     }
 
-                    var state = (next, at.Taxed || isBroken(next));
+                    var state = (next, at.Taxed || isBroken(next) || climbs?.Invoke(at.Square, next) == true);
                     if (length.ContainsKey(state))
                     {
                         continue;

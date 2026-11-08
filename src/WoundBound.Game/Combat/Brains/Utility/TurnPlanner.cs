@@ -19,6 +19,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         DrawWeapon,
         PickUpWeapon,
         TakePrize,
+        BreakCover,
         BuyExtraAction,
         RegainFooting,
         Cast,
@@ -712,6 +713,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
+            foreach (var breaking in CoverBreaks(actor, at, checkRules))
+            {
+                yield return breaking;
+            }
+
             // The prize its brief wants carried off, lying where this creature would stand.
             if (actor.Side == Side.Adversaries && View.Prize is { At: { } prizeAt } && Footprints.At(at, actor.Across).Contains(prizeAt)
                 && (at != actor.Position || !checkRules || View.TakePrizeRefusal(actor) is null))
@@ -1193,6 +1199,63 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// inside the ground it is holding, if its brief says so (<see cref="HoldPull"/>).
         /// </summary>
         private double Position(Combatant actor, GridPosition square) => Standing(actor, square) + HoldPull(actor, square) + GoalPull(actor, square);
+
+        /// <summary>
+        /// Taking a blade to a piece of cover in reach that shelters an enemy standing beside it (Core
+        /// Rules §9, "Breaking Cover"): worth what knocking it down a grade would take from them, for
+        /// each enemy it shelters, at the share of what is left of it the blow is expected to wear through.
+        /// </summary>
+        private IEnumerable<Option> CoverBreaks(Combatant actor, GridPosition at, bool checkRules)
+        {
+            if (View.Setting.CoverPieces.Count == 0)
+            {
+                yield break;
+            }
+
+            var blades = actor.Attacks.Where(a => !a.IsRanged && !a.DealsNoDamage && a.Track == WoundType.Body && a.Against == ThresholdType.Dodge).ToList();
+            if (blades.Count == 0)
+            {
+                yield break;
+            }
+
+            var enemies = View.EnemiesOf(actor).Where(e => e.OccupiesSquare && !e.IsOutOfFight).ToList();
+            foreach (var (square, grade) in View.Setting.CoverPieces)
+            {
+                var blade = blades.Where(a => Footprints.Distance(at, actor.Across, square, 1) <= Math.Max(1, a.Reach))
+                    .MaxBy(a => a.DamageDiceCount * (a.DamageDieSides + 1) / 2.0 + a.DamageModifier);
+                if (blade is null || View.CoverLeft(square) is not { } left || (checkRules && at == actor.Position && View.BreakCoverRefusal(actor, square) is not null))
+                {
+                    continue;
+                }
+
+                // Whom it shelters: an enemy beside it, with it in the way from here; and, against breaking
+                // it, an ally beside it that it shelters from the nearest enemy — a barricade is the
+                // breaker's own side's as often as not.
+                bool Beside(Combatant c) => c.Footprint.Any(f => f.DistanceTo(square) <= 1);
+                var sheltered = enemies.Count(e => Beside(e) && View.Setting.CoverAgainst(at, e.Position, e.Across) != Cover.None);
+                if (sheltered == 0)
+                {
+                    continue;
+                }
+
+                var ours = View.OnBoard.Where(a => a.Side == actor.Side && a != actor && !a.IsOutOfFight && Beside(a))
+                    .Count(a => enemies.MinBy(e => e.DistanceTo(a.Position)) is { } threat
+                                && View.Setting.CoverAgainst(threat.Position, a.Position, a.Across) != Cover.None);
+                var expected = Math.Max(1, blade.DamageDiceCount * (blade.DamageDieSides + 1) / 2.0 + blade.DamageModifier);
+                var worth = (sheltered - ours) * (grade == Cover.Full ? FullCoverBroken : PartialCoverBroken) * Math.Min(1, expected / left);
+                if (worth <= 0)
+                {
+                    continue;
+                }
+                yield return new Option(OptionKind.BreakCover, worth, $"break the cover at {square}", Square: square);
+            }
+        }
+
+        /// <summary>What knocking Full cover down to Partial is worth, for each enemy behind it: they can be hit at all.</summary>
+        public const double FullCoverBroken = 1.2;
+
+        /// <summary>What smashing Partial cover is worth, for each enemy behind it: 2 off their Dodge Threshold.</summary>
+        public const double PartialCoverBroken = 0.5;
 
         /// <summary>What snatching up the prize is worth: more than a good blow, since it is what they came for.</summary>
         public const double PrizeWorth = 3.0;

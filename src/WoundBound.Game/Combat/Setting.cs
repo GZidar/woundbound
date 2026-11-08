@@ -80,6 +80,15 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public IReadOnlyList<DeploymentZone> Deployment { get; init; } = [];
 
+        /// <summary>
+        /// How much a piece of Full cover takes to break, where the map says (stone more than wood);
+        /// Partial takes half. Pieces the map doesn't name take the defaults (Core Rules §9, "Breaking Cover").
+        /// </summary>
+        public IReadOnlyDictionary<GridPosition, int> CoverToughness { get; init; } = new Dictionary<GridPosition, int>();
+
+        /// <summary>Pieces of cover no blade will break: a boulder, a stone pillar.</summary>
+        public IReadOnlySet<GridPosition> Unbreakable { get; init; } = new HashSet<GridPosition>();
+
         /// <summary>The cover a piece on <paramref name="square"/> gives, or None where there is none.</summary>
         public Cover CoverAt(GridPosition square) => CoverPieces.TryGetValue(square, out var grade) ? grade : Cover.None;
 
@@ -110,6 +119,17 @@ namespace WoundBound.Game.Combat
             (Walls.Count == 0 || Sight.Clear(from, to, WallTest))
             && (CoverPieces.Count == 0
                 || !Sight.Between(from, to).Any(sq => CoverAt(sq) == Cover.Full && sq.DistanceTo(from) > 1 && sq.DistanceTo(to) > 1));
+
+        /// <summary>
+        /// High ground (Core Rules §9, "High Ground"): a ridge, a cart bed, a wall-walk. Whoever stands on
+        /// it strikes down at +1 and is struck up at +1 Dodge Threshold, and stepping up onto it costs as
+        /// Broken ground does (the user's rulings, 2026-11-08).
+        /// </summary>
+        public IReadOnlySet<GridPosition> Raised { get; init; } = new HashSet<GridPosition>();
+
+        /// <summary>Whether a creature standing on <paramref name="corner"/>, <paramref name="across"/> squares wide, is on high ground.</summary>
+        public bool IsRaised(GridPosition corner, int across = 1) =>
+            Raised.Count > 0 && Footprints.At(corner, across).Any(Raised.Contains);
 
         /// <summary>Whether anything solid stands on <paramref name="square"/> — a wall or a piece of cover: nobody stands in it or moves through it.</summary>
         public bool IsSolid(GridPosition square) => Walls.Contains(square) || CoverPieces.ContainsKey(square);

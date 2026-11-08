@@ -779,12 +779,14 @@ namespace WoundBound.Game.Combat
                     return;
                 }
 
-                var threshold = target.DodgeThreshold + VisibilityDodgeModifier(target)
-                                + CoverDodgeModifier(caster.Position, target, SpellArea.ShapeOf(cast) == SpellShape.Volume || spell.Range == SpellRange.Touch);
+                var filled = SpellArea.ShapeOf(cast) == SpellShape.Volume;
+                var (castDown, castUp) = filled ? (0, 0) : HighGround(caster.Position, caster.Across, target.Position, target.Across);
+                var threshold = target.DodgeThreshold + VisibilityDodgeModifier(target) + castUp
+                                + CoverDodgeModifier(caster.Position, target, filled || spell.Range == SpellRange.Touch);
                 target.HasBeenAttackedSinceTurnStart = true;
                 var advantage = cast.Sacrifice || helped || target.IsOpenToBlows;
                 var disadvantage = AttacksAtDisadvantage(caster) || harried;
-                var roll = RollAgainst(plan.CastBonus, threshold, advantage, disadvantage, caster);
+                var roll = RollAgainst(plan.CastBonus + castDown, threshold, advantage, disadvantage, caster);
                 var expected = SpellCalculator.HealHarmDiceCount(spell.SpellTier) * (DiceNotation.ParseSides(SpellCalculator.HealHarmDieSize(spell.Target)) + 1) / 2.0
                                + (caster.Build is { } b ? SpellCalculator.GraceBonus(b, spell) : 0);
                 var shieldGain = target.InHandShield is { } shield && target.CoveredBy.All(c => c.Bearer != target) && !target.IsOutOfFight

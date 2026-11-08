@@ -136,5 +136,8 @@ namespace WoundBound.Game.Combat
 
         /// <summary>What partial cover added to <see cref="DodgeThreshold"/> (Core Rules §9, "Cover").</summary>
         public int CoverDodgeModifier { get; init; }
+
+        /// <summary>What high ground adds to the attack roll: +1 striking down at somebody below (Core Rules §9, "High Ground").</summary>
+        public int HeightAttackBonus { get; init; }
     }
 }

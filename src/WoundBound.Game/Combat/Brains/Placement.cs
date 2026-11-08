@@ -190,6 +190,13 @@ namespace WoundBound.Game.Combat.Brains
                 score += 0.5 * apart / Math.PI;
             }
 
+            // High ground: +1 to strike down and +1 Dodge against anyone striking up (Core Rules §9) —
+            // worth most to a shooter, who means to stay up there.
+            if (setting.IsRaised(square, creature.Across))
+            {
+                score += IsShooter(creature) ? 1.0 : 0.3;
+            }
+
             // Ground that costs it: rubble underfoot, water, a hazard.
             score -= setting.GroundAt(square) == Terrain.Broken ? 0.5 : 0;
             score -= setting.HazardAt(square) is not null ? 3 : 0;

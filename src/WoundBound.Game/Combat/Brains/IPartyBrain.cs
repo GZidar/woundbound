@@ -111,6 +111,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Pick a weapon up off the ground, for an action.</summary>
         public sealed record PickUpWeapon(GroundWeapon Lying) : PartyStep;
 
+        /// <summary>Take a blade to the piece of cover on <paramref name="Square"/>, for an action (Core Rules §9, "Breaking Cover").</summary>
+        public sealed record BreakCover(GridPosition Square) : PartyStep;
+
         /// <summary>The off-hand strike of a Two Weapons loadout, straight after the Attack action (Core Rules §9).</summary>
         public sealed record OffHand(Combatant Target, Manoeuvre? Manoeuvre = null) : PartyStep;
 

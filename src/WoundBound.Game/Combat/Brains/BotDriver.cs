@@ -191,6 +191,7 @@ namespace WoundBound.Game.Combat.Brains
                 PartyStep.Throw toss => Count(encounter.TryThrow(toss.Target) is not null || Answered(), () => Tally.Attacks++),
                 PartyStep.DrawWeapon draw => encounter.TryDrawWeapon(draw.Weapon),
                 PartyStep.PickUpWeapon pick => encounter.TryPickUpWeapon(pick.Lying),
+                PartyStep.BreakCover breaking => encounter.TryBreakCover(breaking.Square),
                 PartyStep.OffHand offHand => Count(encounter.TryOffHandAttack(offHand.Target, offHand.Manoeuvre) is not null, () =>
                 {
                     Tally.OffHandStrikes++;
@@ -244,6 +245,7 @@ namespace WoundBound.Game.Combat.Brains
                     PartyStep.Throw toss => encounter.ThrowRefusal(character, toss.Target),
                     PartyStep.DrawWeapon draw => Encounter.DrawRefusal(character, draw.Weapon),
                     PartyStep.PickUpWeapon pick => encounter.PickUpRefusal(character, pick.Lying),
+                    PartyStep.BreakCover breaking => encounter.BreakCoverRefusal(character, breaking.Square),
                     PartyStep.OffHand offHand => encounter.OffHandRefusal(character, offHand.Target)
                         ?? (offHand.Manoeuvre is { } om ? Encounter.ManoeuvreRefusal(character, offHand.Target, om, offHand: true) : null),
                     PartyStep.Exploit exploit => Encounter.ExploitRefusal(character, exploit.Which),

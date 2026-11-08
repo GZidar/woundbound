@@ -158,7 +158,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         /// <summary>What an attack <paramref name="plan"/> on <paramref name="target"/> is believed to roll against.</summary>
         public int PlanThreshold(Combatant target, AttackPlan plan) =>
-            Believed(target, plan.Profile?.Against ?? ThresholdType.Dodge, plan.DodgeThreshold);
+            Believed(target, plan.Profile?.Against ?? ThresholdType.Dodge, plan.DodgeThreshold) - plan.HeightAttackBonus;
 
         /// <summary>
         /// Whether this brain counts <paramref name="c"/> a caster: once they've shown it by casting

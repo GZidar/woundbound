@@ -91,6 +91,12 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Why the fight is happening and what the GM's side wants (null: a fight to the finish).</summary>
         public SceneBrief? Brief => encounter.Brief;
 
+        /// <summary>What is left of the piece of cover on <paramref name="square"/> before it drops a grade; null where it can't be broken.</summary>
+        public int? CoverLeft(GridPosition square) => encounter.CoverLeft(square);
+
+        /// <summary>Why <paramref name="who"/> can't take a blade to the cover on <paramref name="square"/> now, or null if they can.</summary>
+        public string? BreakCoverRefusal(Combatant who, GridPosition square) => encounter.BreakCoverRefusal(who, square);
+
         /// <summary>The prize the GM's side means to carry off, if any.</summary>
         public Prize? Prize => encounter.Prize;
 
