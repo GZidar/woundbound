@@ -46,7 +46,7 @@ namespace WoundBound.Game.Combat.Brains
         public static void Place(
             IReadOnlyList<Combatant> adversaries, IReadOnlyList<Combatant> party, Setting setting, EnvironmentTables? environment,
             RangeBandTables bands, int width, int height, IReadOnlyCollection<GridPosition> zone, SetupSkill skill, bool prepared,
-            Random? random = null)
+            Random? random = null, Func<GridPosition, bool>? hidden = null)
         {
             random ??= new Random(7);
             var dark = DarkMap(party, setting, environment, bands, width, height);
@@ -77,10 +77,34 @@ namespace WoundBound.Game.Combat.Brains
                     steed.Position = square;
                 }
 
-                creature.LiesInWait = prepared;
+                creature.LiesInWait = prepared && (hidden?.Invoke(square) ?? true);
                 taken.UnionWith(creature.Footprint);
                 placed.Add(creature);
             }
+        }
+
+        /// <summary>
+        /// Places the GM's creatures among <paramref name="combatants"/> for a fight it sets up itself:
+        /// inside the scene's deployment zones (<see cref="Setting.Deployment"/>), or from Short to Long
+        /// of the party where the scene names none. A prepared band lies in wait only where its zone
+        /// hides it. Steeds go with their riders.
+        /// </summary>
+        public static void Deploy(IReadOnlyList<Combatant> combatants, Setting setting, EnvironmentTables? environment, RangeBandTables bands,
+            int width, int height, GmSetup setup)
+        {
+            var party = combatants.Where(c => c.Side == Side.Party && !c.IsSteed).ToList();
+            var band = combatants.Where(c => c.Side == Side.Adversaries && !c.IsSteed && !c.IsPhantom).ToList();
+            if (party.Count == 0 || band.Count == 0)
+            {
+                return;
+            }
+
+            var zones = setting.Deployment;
+            IReadOnlyCollection<GridPosition> squares = zones.Count == 0
+                ? ZoneAround(party, width, height)
+                : zones.SelectMany(z => z.Squares).ToHashSet();
+            Func<GridPosition, bool> hidden = zones.Count == 0 ? _ => true : sq => zones.Any(z => z.Hidden && z.Squares.Contains(sq));
+            Place(band, party, setting, environment, bands, width, height, squares, setup.Skill, setup.Prepared, new Random(setup.Seed), hidden);
         }
 
         /// <summary>

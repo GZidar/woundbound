@@ -19,6 +19,9 @@ namespace WoundBound.Game.Simulation
         /// <summary>What the fight cost the party (null where nobody measured it).</summary>
         public Attrition? Cost { get; init; }
 
+        /// <summary>Whether the GM's side got what its brief wanted (null where the fight has no brief).</summary>
+        public bool? GoalMet { get; init; }
+
         public bool Won => Outcome == EncounterPhase.Victory;
 
         public bool Lost => Outcome == EncounterPhase.Defeat;
@@ -75,6 +78,9 @@ namespace WoundBound.Game.Simulation
             : (double)Fights.Count(f => f.ObjectivesMet == f.ObjectivesSet) / Fights.Count;
 
         public double AverageFled => Fights.Average(f => f.FoesFled);
+
+        /// <summary>The share of fights in which the GM's side got what its brief wanted; null without a brief.</summary>
+        public double? GoalRate => Fights.Count == 0 || Fights[0].GoalMet is null ? null : (double)Fights.Count(f => f.GoalMet == true) / Fights.Count;
 
         /// <summary>Characters still fighting at the end of the fights the party won.</summary>
         public double AverageStandingOnWin => Wins == 0 ? 0 : Fights.Where(f => f.Won).Average(f => f.CharactersStanding);
@@ -134,7 +140,7 @@ namespace WoundBound.Game.Simulation
                 encounter.Combatants.Count(c => c.Side == Side.Adversaries && c.HasFled),
                 encounter.Objectives.Count(o => o.StatusIn(encounter) == ObjectiveStatus.Achieved),
                 encounter.Objectives.Count,
-                driver.Tally) { Cost = cost };
+                driver.Tally) { Cost = cost, GoalMet = encounter.GoalStatus is { } goal ? goal == ObjectiveStatus.Achieved : null };
 
             static double Share(double part, double whole) => whole <= 0 ? 0 : part / whole;
         }

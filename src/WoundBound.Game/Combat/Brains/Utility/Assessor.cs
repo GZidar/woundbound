@@ -485,6 +485,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public bool FinishesTheDowned { get; init; }
 
+        /// <summary>Whether this GM never strikes a downed character, whatever its ruthlessness: it wants them alive (<see cref="AdversaryGoal.Capture"/>).</summary>
+        public bool SparesTheDowned { get; init; }
+
         /// <summary>The downed characters this GM has already laid its one blow on, this fight.</summary>
         public IReadOnlySet<Combatant>? Menaced { get; init; }
 

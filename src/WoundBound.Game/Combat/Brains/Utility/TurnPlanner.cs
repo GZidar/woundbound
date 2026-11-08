@@ -507,9 +507,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
 
                 var downed = target.IsDefenceless && actor.Side == Side.Adversaries && target.Side != Side.Adversaries && !assess.FinishesTheDowned;
-                if (downed && assess.Ruthlessness < Assessor.SparesTheDownedBelow)
+                if (downed && (assess.Ruthlessness < Assessor.SparesTheDownedBelow || assess.SparesTheDowned))
                 {
-                    continue; // a merciful GM leaves anybody lying helpless alone
+                    continue; // a merciful GM, or one that wants them alive, leaves anybody lying helpless alone
                 }
 
                 if (downed && target.DiesLikeACharacter && target.BodyStatus is BodyStatus.Dying or BodyStatus.Stable)
@@ -1181,10 +1181,40 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>
+        /// Where a creature would rather stand: where its Role wants it (<see cref="Standing"/>), and
+        /// inside the ground it is holding, if its brief says so (<see cref="HoldPull"/>).
+        /// </summary>
+        private double Position(Combatant actor, GridPosition square) => Standing(actor, square) + HoldPull(actor, square);
+
+        /// <summary>
+        /// A creature holding ground (<see cref="AdversaryGoal.Hold"/>) wants to stand inside its zone
+        /// until its time is up, and won't be drawn out of it after anybody: worth less the further out it would stand.
+        /// </summary>
+        private double HoldPull(Combatant actor, GridPosition square)
+        {
+            if (actor.Side != Side.Adversaries || actor.IsBroken || View.Brief?.Goal is not AdversaryGoal.Hold hold || View.Round > hold.Rounds)
+            {
+                return 0;
+            }
+
+            var footprint = Footprints.At(square, actor.Across);
+            if (footprint.Any(hold.Zone.Squares.Contains))
+            {
+                return 0;
+            }
+
+            var away = hold.Zone.Squares.Min(z => footprint.Min(f => f.DistanceTo(z)));
+            return -(HoldOutside + 0.3 * away);
+        }
+
+        /// <summary>What standing just outside a held zone costs a holder: about a good blow's worth.</summary>
+        public const double HoldOutside = 1.5;
+
+        /// <summary>
         /// Where a creature's Role would rather stand: a Skirmisher with a shot at Short range and
         /// out of reach, a Brute toe to toe with somebody.
         /// </summary>
-        private double Position(Combatant actor, GridPosition square)
+        private double Standing(Combatant actor, GridPosition square)
         {
             var nearest = View.EnemiesOf(actor).Select(e => actor.DistanceFrom(square, e))
                 .Concat(Hunted(actor, square)).DefaultIfEmpty(int.MaxValue).Min();

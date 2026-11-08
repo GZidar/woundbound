@@ -19,6 +19,8 @@ public class ForkTests
 
         public bool PeersThroughFog => inner.PeersThroughFog;
 
+        public bool LetsBreak(BattleView view, Combatant creature, int alliesDown) => inner.LetsBreak(view, creature, alliesDown);
+
         public Combatant ChooseOwedTurn(BattleView view) => inner.ChooseOwedTurn(view);
 
         public Combatant? ChooseExtraTurn(BattleView view) => inner.ChooseExtraTurn(view);

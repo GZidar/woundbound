@@ -154,9 +154,10 @@ namespace WoundBound.Game.Combat
         /// <param name="setting">Where it happens — Visibility, Exposure and the ground; daylight on firm ground by default.</param>
         /// <param name="environment">The levers' grades, needed for any setting but daylight.</param>
         public Encounter(int width, int height, IEnumerable<Combatant> combatants, RangeBandTables bands, IDiceRoller dice, IGmBrain? gm = null,
-            IEnumerable<Objective>? objectives = null, Setting? setting = null, EnvironmentTables? environment = null)
+            IEnumerable<Objective>? objectives = null, Setting? setting = null, EnvironmentTables? environment = null, SceneBrief? brief = null)
         {
             Setting = setting ?? Setting.Daylight;
+            Brief = brief;
             this.environment = environment;
             if (this.environment is null && Setting != Setting.Daylight)
             {

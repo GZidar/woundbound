@@ -313,6 +313,20 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
+        /// Where a <paramref name="setup"/> is given, the GM places its creatures in the scene's
+        /// deployment zones instead of the hand-laid squares (<see cref="Brains.Placement.Deploy"/>).
+        /// </summary>
+        private static List<Combatant> Deployed(List<Combatant> combatants, Setting setting, GameData data, GmSetup? setup)
+        {
+            if (setup is not null)
+            {
+                Brains.Placement.Deploy(combatants, setting, data.Environment, data.RangeBands, FieldWidth, FieldHeight, setup);
+            }
+
+            return combatants;
+        }
+
+        /// <summary>
         /// Three characters — the Dumb Fighter, Salla and Drovan — ambushed on the road: a Tollroad
         /// Bandit, his Timber Wolf, and two Bramble Ratkin. 1.5 + 1 + 0.25 × 2 is a Threat Value
         /// of 3, a Standard fight's budget for a party of three (GM Reference §5), and the GM has
@@ -529,6 +543,10 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public static Setting LongreachCrossing { get; } = BuildLongreachCrossing();
 
+        /// <summary>Why the shrine's watchers spring their ambush at the ford.</summary>
+        private static SceneBrief FordBrief { get; } = new(Stakes.Relevant, new AdversaryGoal.Kill(), Commitment.Committed,
+            "The shrine's watchers kill anyone who crosses with questions about the Loom");
+
         private static Setting BuildLongreachCrossing()
         {
             var water = new Dictionary<GridPosition, WaterDepth>();
@@ -543,6 +561,7 @@ namespace WoundBound.Game.Combat
             return new Setting
             {
                 Name = "Longreach Crossing",
+                Deployment = [DeploymentZone.Of("the shrine bank", hidden: true, (17, 1, 25, 15))],
                 Water = water,
                 Walls = Setting.Squares((18, 6, 18, 6), (18, 10, 18, 10), (20, 2, 22, 4)),
                 Hazards =
@@ -562,7 +581,7 @@ namespace WoundBound.Game.Combat
         /// −2 Stability and the Undertow underneath. Two Reedmarsh Skulkers and a Bandit Ambusher,
         /// a Standard fight for three (GM Reference §5).
         /// </summary>
-        public static Encounter FerryShrineAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
+        public static Encounter FerryShrineAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false, GmSetup? setup = null)
         {
             var skulker = data.Adversary("Reedmarsh Skulker");
             var combatants = new List<Combatant>
@@ -575,8 +594,8 @@ namespace WoundBound.Game.Combat
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the hut", new GridPosition(23, 6)), ambush),
             };
 
-            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: LongreachCrossing, environment: data.Environment);
+            return new Encounter(FieldWidth, FieldHeight, Deployed(combatants, LongreachCrossing, data, setup), data.RangeBands, dice, gm,
+                setting: LongreachCrossing, environment: data.Environment, brief: FordBrief);
         }
 
         /// <summary>
@@ -587,7 +606,7 @@ namespace WoundBound.Game.Combat
         /// ten of them left the party nothing (the user, 2026-11-07: halve them). With the ford and the
         /// ambush on top, five is a hard Standard fight. The Skulkers have no Cowardice, so this one is fought out.
         /// </summary>
-        public static Encounter FerryShrineWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
+        public static Encounter FerryShrineWithCasters(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false, GmSetup? setup = null)
         {
             var skulker = data.Adversary("Reedmarsh Skulker");
             var combatants = new List<Combatant>
@@ -604,8 +623,8 @@ namespace WoundBound.Game.Combat
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher behind the arch", new GridPosition(21, 9)), ambush),
             };
 
-            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: LongreachCrossing, environment: data.Environment);
+            return new Encounter(FieldWidth, FieldHeight, Deployed(combatants, LongreachCrossing, data, setup), data.RangeBands, dice, gm,
+                setting: LongreachCrossing, environment: data.Environment, brief: FordBrief);
         }
 
         /// <summary>
@@ -622,6 +641,12 @@ namespace WoundBound.Game.Combat
             Cause = VisibilityCause.Unlit,
             Fires = new HashSet<GridPosition> { CampfireSquare },
             Ground = Setting.Patches(Terrain.Broken, (16, 0, 19, 4), (16, 13, 19, 17)),
+            Deployment =
+            [
+                DeploymentZone.Of("the rocks", hidden: true, (15, 0, 21, 4)),
+                DeploymentZone.Of("the gully", hidden: true, (15, 13, 21, 17)),
+                DeploymentZone.Of("the dark down the road", hidden: true, (17, 5, 24, 12)),
+            ],
         };
 
         /// <summary>Where the campfire burns.</summary>
@@ -632,7 +657,7 @@ namespace WoundBound.Game.Combat
         /// his brother, their three Timber Wolves, and three Bandit Ambushers on the rough ground to
         /// either side — a Standard fight's budget for five (GM Reference §5). Elthric sits by the fire.
         /// </summary>
-        public static Encounter CampfireAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
+        public static Encounter CampfireAmbush(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false, GmSetup? setup = null)
         {
             var wolf = data.Adversary("Timber Wolf");
             var combatants = new List<Combatant>
@@ -652,8 +677,10 @@ namespace WoundBound.Game.Combat
                 Lurking(CombatantFactory.FromAdversary(BanditAmbusher, "Ambusher by the trees", new GridPosition(18, 1)), ambush),
             };
 
-            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: CampAtNight, environment: data.Environment);
+            return new Encounter(FieldWidth, FieldHeight, Deployed(combatants, CampAtNight, data, setup), data.RangeBands, dice, gm,
+                setting: CampAtNight, environment: data.Environment,
+                brief: new SceneBrief(Stakes.Relevant, new AdversaryGoal.Kill(), Commitment.Committed,
+                    "The Tollroad brothers come for the party that crossed them, and mean to leave nobody to talk"));
         }
 
         /// <summary>
@@ -971,10 +998,10 @@ namespace WoundBound.Game.Combat
             };
             var band = ClearingBand(data, size ?? DefaultClearingBand);
 
-            Brains.Placement.Place(band, party, WoodlandAtDusk, data.Environment, data.RangeBands, FieldWidth, FieldHeight,
-                Brains.Placement.ZoneAround(party, FieldWidth, FieldHeight, minimum: 3, maximum: 12), setup, prepared, new Random(seed));
-            return new Encounter(FieldWidth, FieldHeight, [.. party, .. band], data.RangeBands, dice, gm,
-                setting: WoodlandAtDusk, environment: data.Environment);
+            return new Encounter(FieldWidth, FieldHeight, Deployed([.. party, .. band], WoodlandAtDusk, data, new GmSetup(setup, prepared, seed)),
+                data.RangeBands, dice, gm, setting: WoodlandAtDusk, environment: data.Environment,
+                brief: new SceneBrief(Stakes.Incidental, new AdversaryGoal.Kill(), Commitment.Committed,
+                    "Skulkers and their beasts, out at dusk for whatever walks into the clearing"));
         }
 
         /// <summary>The clearing's band as it is fought: how many Skulkers, Wolves and Ratkin.</summary>
@@ -1046,7 +1073,7 @@ namespace WoundBound.Game.Combat
         /// (partial), with a gap in it. Daylight. Four of each behind crates and carts (GM Reference §5)
         /// (GM Reference §5), a Standard Challenge for five.
         /// </summary>
-        public static Encounter Roadblock(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false)
+        public static Encounter Roadblock(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, bool ambush = false, GmSetup? setup = null)
         {
             var combatants = new List<Combatant>
             {
@@ -1072,8 +1099,17 @@ namespace WoundBound.Game.Combat
                 cover[square] = grade;
             }
 
-            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: Setting.Daylight with { Name = "The roadblock", CoverPieces = cover }, environment: data.Environment);
+            var barricade = DeploymentZone.Of("behind the barricade", hidden: true, (18, 2, 23, 16));
+            var setting = Setting.Daylight with
+            {
+                Name = "The roadblock",
+                CoverPieces = cover,
+                Deployment = [barricade],
+            };
+            return new Encounter(FieldWidth, FieldHeight, Deployed(combatants, setting, data, setup), data.RangeBands, dice, gm,
+                setting: setting, environment: data.Environment,
+                brief: new SceneBrief(Stakes.Relevant, new AdversaryGoal.Hold(barricade, Rounds: 6), Commitment.Hireling,
+                    "Paid to keep the road shut until the toll-master's wagons are through"));
         }
 
         /// <summary>

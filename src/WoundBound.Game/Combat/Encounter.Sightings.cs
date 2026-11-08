@@ -47,6 +47,7 @@ namespace WoundBound.Game.Combat
         /// </summary>
         internal void LookAround()
         {
+            NoteGoal();
             if (sightings.Count == 0)
             {
                 return;

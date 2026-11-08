@@ -92,4 +92,26 @@ public class PlacementTests
         Assert.All(encounter.Combatants.Where(c => c.Side == Side.Adversaries),
             a => Assert.InRange(encounter.Combatants.Where(c => c.Side == Side.Party).Min(p => p.DistanceTo(a)), 3, 12));
     }
+
+    [Theory]
+    [InlineData(SetupSkill.Smart)]
+    [InlineData(SetupSkill.Neutral)]
+    [InlineData(SetupSkill.Poor)]
+    public void AZonedFight_PlacedByTheGm_PutsEveryCreatureInsideItsZones(SetupSkill skill)
+    {
+        var encounter = SampleEncounters.CampfireAmbush(Data, new RandomDiceRoller(new Random(1)), setup: new GmSetup(skill, Prepared: false, Seed: 3));
+        var zones = SampleEncounters.CampAtNight.Deployment.SelectMany(z => z.Squares).ToHashSet();
+        var band = encounter.Combatants.Where(c => c.Side == Side.Adversaries).ToList();
+
+        Assert.All(band, c => Assert.Contains(c.Position, zones));
+        Assert.Equal(band.Count, band.Select(c => c.Position).Distinct().Count());
+    }
+
+    [Fact]
+    public void WithoutASetup_TheScenariosOwnSquaresStand()
+    {
+        var encounter = SampleEncounters.CampfireAmbush(Data, new RandomDiceRoller(new Random(1)));
+
+        Assert.Equal(new GridPosition(20, 9), encounter.Combatants.Single(c => c.Name == "Tollroad Bandit").Position);
+    }
 }

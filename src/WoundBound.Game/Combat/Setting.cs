@@ -74,6 +74,12 @@ namespace WoundBound.Game.Combat
         /// </summary>
         public IReadOnlyDictionary<GridPosition, Cover> CoverPieces { get; init; } = new Dictionary<GridPosition, Cover>();
 
+        /// <summary>
+        /// Where the GM's creatures may start, when the GM places them rather than the scenario
+        /// (<see cref="DeploymentZone"/>, <see cref="Brains.Placement.Deploy"/>). Empty: anywhere from Short to Long of the party.
+        /// </summary>
+        public IReadOnlyList<DeploymentZone> Deployment { get; init; } = [];
+
         /// <summary>The cover a piece on <paramref name="square"/> gives, or None where there is none.</summary>
         public Cover CoverAt(GridPosition square) => CoverPieces.TryGetValue(square, out var grade) ? grade : Cover.None;
 

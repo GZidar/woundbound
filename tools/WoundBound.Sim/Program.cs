@@ -42,6 +42,8 @@ var prepared = !args.Contains("--unprepared");
 // --band S,W,R: the clearing's band — Skulkers, Wolves, Ratkin — for sizing it.
 (int, int, int)? ClearingBand() => Text("--band", null) is { } b && b.Split(',') is [var bs, var bw, var br] ? (int.Parse(bs), int.Parse(bw), int.Parse(br)) : null;
 var placementSeed = 7;
+// An explicit --setup on a fight with deployment zones (camp, roadblock, ford, fordcasters): the GM places its band there, afresh each fight.
+GmSetup? ZonedSetup(IDiceRoller d) => Text("--setup", null) is null ? null : new GmSetup(setup, prepared, placementSeed + d.Roll(1000));
 // The GM knowledge dial: sheets or seen; left out, it goes with the skill (Best reads the sheets).
 Knowledge? knowledge = Text("--knowledge", null) switch
 {
@@ -176,9 +178,9 @@ Encounter Stage(IDiceRoller dice) => which switch
     "party" => SampleEncounters.PartyVersusAmbush(data, dice, Gm(), ambush: true),
     "signpost4" => SampleEncounters.SignpostAmbush(data, dice, Gm(), fourPlayers: true, ambush: true),
     "casters" => SampleEncounters.SignpostWithCasters(data, dice, Gm(), ambush: true, cowardly: args.Contains("--cowardly")),
-    "ford" => SampleEncounters.FerryShrineAmbush(data, dice, Gm(), ambush: true),
-    "fordcasters" => SampleEncounters.FerryShrineWithCasters(data, dice, Gm(), ambush: true),
-    "camp" => SampleEncounters.CampfireAmbush(data, dice, Gm(), ambush: true),
+    "ford" => SampleEncounters.FerryShrineAmbush(data, dice, Gm(), ambush: true, setup: ZonedSetup(dice)),
+    "fordcasters" => SampleEncounters.FerryShrineWithCasters(data, dice, Gm(), ambush: true, setup: ZonedSetup(dice)),
+    "camp" => SampleEncounters.CampfireAmbush(data, dice, Gm(), ambush: true, setup: ZonedSetup(dice)),
     "witches" => SampleEncounters.HedgeWitchesToll(data, dice, Gm()),
     "rivals" => SampleEncounters.RivalBand(data, dice, Gm()),
     "rivals2" or "rivals3" or "rivals4" => SampleEncounters.RivalBand(data, dice, Gm(), count: which[^1] - '0'),
@@ -187,7 +189,7 @@ Encounter Stage(IDiceRoller dice) => which switch
     "champion" => SampleEncounters.ChampionOnTheGreen(data, dice, Gm()),
     "outriders" => SampleEncounters.Outriders(data, dice, Gm()),
     "glamour" => SampleEncounters.GlamouredMill(data, dice, Gm()),
-    "roadblock" => SampleEncounters.Roadblock(data, dice, Gm(), ambush: true),
+    "roadblock" => SampleEncounters.Roadblock(data, dice, Gm(), ambush: true, setup: ZonedSetup(dice)),
     "gnoll" => SampleEncounters.GnollRaid(data, dice, Gm(), ambush: true),
     "clearing" => SampleEncounters.WoodlandClearing(data, dice, Gm(), setup, prepared, placementSeed + dice.Roll(1000), ClearingBand()),
     "guardians" => SampleEncounters.ShrineGuardians(data, dice, Gm()),
@@ -400,6 +402,19 @@ var (weighedAll, changedAll, failedAll) = utilityGms.Aggregate((0, 0, 0), (t, g)
 if (weighedAll > 0)
 {
     Console.WriteLine($"Look-ahead: {weighedAll} decisions weighed, {changedAll} ({(double)changedAll / weighedAll:P0}) taken other than the top-scored plan, {failedAll} games lost to a refusal.");
+}
+
+// The scene brief and how often the GM's side got what it wanted.
+{
+    var briefed = Stage(new RandomDiceRoller(new Random(1))).Brief;
+    if (briefed is not null)
+    {
+        Console.WriteLine($"Brief: {briefed.Stakes}, {briefed.Commitment}: {briefed.Goal.Text}" + (briefed.Motive.Length > 0 ? $" ({briefed.Motive})" : "") + ".");
+        foreach (var report in reports.Where(r => r.GoalRate is not null))
+        {
+            Console.WriteLine($"  {report.Tactic}: GM goal met in {report.GoalRate:P0} of fights.");
+        }
+    }
 }
 
 // The GM's ruthlessness round by round, averaged over every fight still going at that round.

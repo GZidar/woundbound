@@ -47,6 +47,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             Foresight? foresight = null, ThreatMeasure? measure = null, GmIntent? intent = null)
         {
             Skill = skill ?? BrainSkill.Best;
+            chosenIntent = intent;
             Intent = intent ?? GmIntent.Ruthless;
             Ruthlessness = Intent.Ruthlessness;
             Foresight = foresight ?? Foresight.For(Skill);
@@ -98,8 +99,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>The knowledge that goes with a skill when none is named: the challenge scales both together.</summary>
         public static Knowledge KnowledgeFor(BrainSkill skill) => skill.Name == BrainSkill.Best.Name ? Knowledge.Sheets : Knowledge.Seen;
 
-        /// <summary>How it sets its ruthlessness: fixed, or steered round by round towards a challenge.</summary>
-        public GmIntent Intent { get; }
+        /// <summary>
+        /// How it sets its ruthlessness: fixed, or steered round by round towards a challenge. Where
+        /// nobody chose, a fight with a brief steers towards the challenge its stakes suggest
+        /// (<see cref="SceneBrief.DefaultChallenge"/>), and one without plays ruthless.
+        /// </summary>
+        public GmIntent Intent { get; private set; }
+
+        /// <summary>The intent it was given, if any: a choice made overrides the brief's default.</summary>
+        private readonly GmIntent? chosenIntent;
 
         /// <summary>How hard it plays for the kill this round, 0 to 1 (<see cref="Assessor.Ruthlessness"/>).</summary>
         public double Ruthlessness { get; private set; }
@@ -121,6 +129,12 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 return;
             }
 
+            if (steeredRound == 0 && chosenIntent is null && view.Brief is { } brief)
+            {
+                Intent = GmIntent.Directed(brief.DefaultChallenge);
+                Ruthlessness = Intent.Ruthlessness;
+            }
+
             steeredRound = view.Round;
             if (Intent.Steer is { } challenge && view.Round > 1)
             {
@@ -137,7 +151,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// </summary>
         public bool LetsBreak(BattleView view, Combatant creature, int alliesDown)
         {
-            if (Ruthlessness >= LetsBreakBelow)
+            // Commitment overrides the intent: a hireling runs once it's hurt whoever is GMing, a fanatic never does.
+            var commitment = view.Brief?.Commitment ?? Commitment.Committed;
+            if (commitment == Commitment.Fanatic || (commitment == Commitment.Committed && Ruthlessness >= LetsBreakBelow))
             {
                 return false;
             }
@@ -153,7 +169,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private Assessor Assess(BattleView view) => new(view, Knowledge, Side.Adversaries)
         {
             Ruthlessness = Ruthlessness,
-            FinishesTheDowned = Intent.FinishesTheDowned,
+            FinishesTheDowned = Intent.FinishesTheDowned && view.Brief?.Goal is not AdversaryGoal.Capture,
+            SparesTheDowned = view.Brief?.Goal is AdversaryGoal.Capture,
             Menaced = menaced,
             Measured = Measure.Measures && measured.Count > 0 ? measured : null,
             MeasuredWeight = Measure.Weight,
