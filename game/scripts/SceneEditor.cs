@@ -141,6 +141,7 @@ namespace WoundBoundGame
                 warnings.Text = string.Join(System.Environment.NewLine, map.Warnings());
             }
 
+            ShowThreat();
             QueueRedraw();
         }
 
@@ -452,8 +453,17 @@ namespace WoundBoundGame
 
             biomePick = Pick(Enum.GetNames<Biome>(), "The kind of country: what unnamed cover and ground look like.");
             biomePick.ItemSelected += i => { if (!filling) { Remember(); map.Biome = (Biome)(int)i; Rebuild(); } };
-            lightPick = Pick(["Day", "Dusk", "Night"], "How well lit the scene is (Visibility Good, Poor or None).");
-            lightPick.ItemSelected += i => { if (!filling) { Remember(); map.Visibility = (Visibility)(int)i; Rebuild(); } };
+            lightPick = Pick(["Day", "Dusk", "Night", "Mist", "Thick fog"], "How well the scene can be seen: by light (Visibility Good, Poor or None in the dark) or through weather (mist is Poor, thick fog None, and no light helps).");
+            lightPick.ItemSelected += i =>
+            {
+                if (!filling)
+                {
+                    Remember();
+                    map.Visibility = i switch { 3 => Visibility.Poor, 4 => Visibility.None, _ => (Visibility)(int)i };
+                    map.Obscured = i >= 3;
+                    Rebuild();
+                }
+            };
             Row(panel, biomePick, lightPick);
 
             BuildWhoFights(panel);
@@ -604,12 +614,13 @@ namespace WoundBoundGame
         private WoundBound.Game.Data.GameData? data;
         private readonly Dictionary<string, CheckBox> partyBoxes = new();
         private VBoxContainer foeRows = null!;
+        private Label? threatLabel;
         private string[] statblocks = [];
 
         private void BuildWhoFights(VBoxContainer panel)
         {
             data = WoundBound.Game.Data.GameData.Load(file => FileAccess.GetFileAsString($"res://data/rules/{file}"));
-            statblocks = data.Adversaries.Select(a => a.Name).Order().ToArray();
+            statblocks = data.Adversaries.Where(a => a.Kind == AdversaryKind.Combat).Select(a => a.Name).Order().ToArray();
             panel.AddChild(new HSeparator());
             panel.AddChild(new Label { Text = "Party (none ticked: the Quickstart five)", Modulate = new Color(0.8f, 0.75f, 0.6f) });
             var flow = new HFlowContainer();
@@ -631,8 +642,26 @@ namespace WoundBoundGame
                 Remember();
                 map.Foes.Add(new SceneMap.FoeGroup(statblocks.FirstOrDefault(n => n == "Roadside Bandit") ?? statblocks[0], 1));
                 ShowFoes();
+                Rebuild();
             };
             panel.AddChild(add);
+            threatLabel = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(280, 0) };
+            panel.AddChild(threatLabel);
+        }
+
+        /// <summary>What the chosen foes cost against the chosen party (GM Reference §5), and what kind of fight that makes.</summary>
+        private void ShowThreat()
+        {
+            if (threatLabel is null || data is null)
+            {
+                return;
+            }
+
+            var threat = SceneThreat.Of(data, map);
+            threatLabel.Text = string.Join('\n', new[] { threat.Summary() }.Concat(threat.Notes.Select(n => "• " + n)));
+            threatLabel.Modulate = threat.HasSolo || threat.Difficulty is ChallengeDifficulty.Hard ? new Color(1f, 0.8f, 0.5f)
+                : threat.Difficulty is null or ChallengeDifficulty.Deadly ? new Color(1f, 0.55f, 0.5f)
+                : new Color(0.75f, 0.9f, 0.75f);
         }
 
         /// <summary>One row per group of foes: which statblock, how many, and a button to take them off.</summary>
@@ -681,7 +710,7 @@ namespace WoundBoundGame
             widthSpin.Value = map.Width;
             heightSpin.Value = map.Height;
             biomePick.Select((int)map.Biome);
-            lightPick.Select(Math.Min(2, (int)map.Visibility));
+            lightPick.Select(map.Obscured && map.Visibility != Visibility.Good ? (map.Visibility == Visibility.Poor ? 3 : 4) : Math.Min(2, (int)map.Visibility));
             pictureSize.Value = map.Backdrop?.PixelsPerSquare ?? 0;
             pictureX.Value = map.Backdrop?.OriginX ?? 0;
             pictureY.Value = map.Backdrop?.OriginY ?? 0;

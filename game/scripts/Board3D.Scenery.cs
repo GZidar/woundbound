@@ -140,6 +140,7 @@ namespace WoundBoundGame
             BuildProps(fight, previous: null);
             BuildScatter(fight);
             BuildFires(fight);
+            BuildMist(fight);
             ApplyFogTexture(fight, null);
         }
 

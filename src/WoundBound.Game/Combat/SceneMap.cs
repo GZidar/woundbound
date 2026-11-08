@@ -35,6 +35,9 @@ namespace WoundBound.Game.Combat
 
         public Visibility Visibility { get; set; } = Visibility.Good;
 
+        /// <summary>Whether poor sight is weather — mist, fog, smoke — rather than the dark: no light helps, and the board is misted over.</summary>
+        public bool Obscured { get; set; }
+
         public Backdrop? Backdrop { get; set; }
 
         public List<string> Solid { get; set; } = [];
@@ -269,7 +272,7 @@ namespace WoundBound.Game.Combat
             {
                 Name = Name,
                 Visibility = Visibility,
-                Cause = unlit ? VisibilityCause.Unlit : null,
+                Cause = unlit ? (Obscured ? VisibilityCause.Obscured : VisibilityCause.Unlit) : null,
                 Walls = Where(Solid, '#').ToHashSet(),
                 CoverPieces = cover,
                 Unbreakable = Where(Solid, 'U', 'u').ToHashSet(),

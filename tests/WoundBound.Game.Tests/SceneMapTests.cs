@@ -34,6 +34,22 @@ public class SceneMapTests
     }
 
     [Fact]
+    public void Mist_is_poor_sight_that_no_light_helps_and_survives_saving()
+    {
+        var map = SceneMap.Blank(12, 8, "The fen");
+        map.Visibility = Visibility.Poor;
+        map.Obscured = true;
+
+        var back = SceneMap.FromJson(map.ToJson());
+
+        Assert.True(back.Obscured);
+        Assert.Equal(VisibilityCause.Obscured, back.ToSetting().Cause);
+        Assert.False(back.ToSetting().IsUnlit);
+        map.Obscured = false;
+        Assert.Equal(VisibilityCause.Unlit, map.ToSetting().Cause);
+    }
+
+    [Fact]
     public void EachLayer_MeansWhatItSays()
     {
         var setting = Painted().ToSetting();
