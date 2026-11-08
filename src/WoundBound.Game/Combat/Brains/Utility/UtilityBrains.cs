@@ -119,6 +119,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>How hard it plays for the kill this round, 0 to 1 (<see cref="Assessor.Ruthlessness"/>).</summary>
         public double Ruthlessness { get; private set; }
 
+        /// <summary>How far ahead the party stood when the director last looked, −1 to 1 (<see cref="GmIntent.Lead"/>): for the GM's eyes only.</summary>
+        public double Lead { get; private set; }
+
         /// <summary>Each round's ruthlessness as the director set it, from round 1 — for the sim and the table to read.</summary>
         public IReadOnlyList<double> RuthlessnessByRound => steeredRounds;
 
@@ -143,9 +146,10 @@ namespace WoundBound.Game.Combat.Brains.Utility
             }
 
             steeredRound = view.Round;
+            Lead = GmIntent.Lead(view);
             if (Intent.Steer is { } challenge && view.Round > 1)
             {
-                Ruthlessness = GmIntent.Steered(Ruthlessness, challenge, GmIntent.Lead(view));
+                Ruthlessness = GmIntent.Steered(Ruthlessness, challenge, Lead);
             }
 
             steeredRounds.Add(Ruthlessness);
@@ -264,7 +268,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                     .Where(o => o.Kind != OptionKind.Move && o.Then is null).ToList();
                 var pick = surprise.Count == 0 ? null : Choose.Pick(surprise, o => o.Score, Plays, random);
                 BrainTrace.Decision(actor, surprise, pick ?? new Option(OptionKind.End, 0, "keep hidden"));
-                return pick is null ? GmStep.End : StepFor(pick, turn);
+                return pick is null ? GmStep.End : StepFor(pick, turn) with { Why = TableTalk.Why(view, actor, pick) };
             }
 
             // A rival's Attack action just opened its off-hand strike: taken where the blow is worth the Stamina.
@@ -334,7 +338,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
             var choice = Foresee(view, turn, options) ?? Choose.Pick(options, o => o.Score, Plays, random);
             BrainTrace.Decision(actor, options, choice);
-            return StepFor(choice, turn);
+            return StepFor(choice, turn) with { Why = TableTalk.Why(view, actor, choice) };
         }
 
         /// <summary>The step an option chosen on <paramref name="turn"/> asks the encounter for.</summary>

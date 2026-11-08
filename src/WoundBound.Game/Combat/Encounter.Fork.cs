@@ -46,6 +46,7 @@ namespace WoundBound.Game.Combat
             }
 
             var copy = fork.Copy(this);
+            copy.NarrationPauses = false; // a fight played forward in the brain's head stops for nobody
             counterpart = fork.Copy;
             return copy;
         }

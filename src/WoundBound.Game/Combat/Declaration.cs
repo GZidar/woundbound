@@ -24,5 +24,13 @@ namespace WoundBound.Game.Combat
     /// <param name="Manoeuvre">The manoeuvre declared with a blow, if any.</param>
     /// <param name="Spell">For a cast, what kind of spell it is.</param>
     public sealed record Declaration(
-        Combatant Actor, IntentKind Kind, string What, Combatant? Target, WeaponManoeuvre? Manoeuvre = null, SpellType? Spell = null);
+        Combatant Actor, IntentKind Kind, string What, Combatant? Target, WeaponManoeuvre? Manoeuvre = null, SpellType? Spell = null)
+    {
+        /// <summary>
+        /// Why the creature chose it, in a few words the table may hear ("the caster", "already
+        /// bloodied"): only what its creatures could have seen, never what the GM read off a sheet
+        /// (the user's ruling, 2026-11-08). Null where there's nothing worth saying.
+        /// </summary>
+        public string? Why { get; init; }
+    }
 }

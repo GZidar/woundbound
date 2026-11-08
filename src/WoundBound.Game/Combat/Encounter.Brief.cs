@@ -87,5 +87,35 @@ namespace WoundBound.Game.Combat
             prize.Carrier = who;
             Write($"{who.Name} snatches up the {prize.Name}.");
         }
+
+        /// <summary>
+        /// How the GM side's goal stands, in a line for the table: what a GM would say aloud ("Bandit
+        /// on the right has the strongbox, 6 squares from the road east"). Null where the fight has no brief.
+        /// </summary>
+        public string? GoalProgress => Brief?.Goal switch
+        {
+            null => null,
+            AdversaryGoal.Kill kill => kill.Text + ".",
+            AdversaryGoal.Capture capture => capture.Text + (combatants.Any(c => c.Side == Side.Party && c.BodyStatus == BodyStatus.Dead) ? " — but somebody is dead." : "."),
+            AdversaryGoal.Hold hold => HoldBrokenInRound is { } broken && broken <= hold.Rounds
+                ? $"{hold.Text}: broken in round {broken}."
+                : Round > hold.Rounds ? $"{hold.Text}: held." : $"{hold.Text}: round {Round} of {hold.Rounds}, not yet broken.",
+            AdversaryGoal.Take take => take.Prize switch
+            {
+                { IsGone: true } prize => $"The {prize.Name} has been carried off.",
+                { Carrier: { } carrier } prize => $"{carrier.Name} has the {prize.Name}" + (take.Exit is { } exit
+                    ? $", {exit.Squares.Min(sq => carrier.DistanceTo(sq))} squares from {exit.Name}." : "."),
+                var prize => $"The {prize.Name} lies at {prize.At}, still to be taken.",
+            },
+            AdversaryGoal.Escape escape => EscapeProgress(escape),
+            var goal => goal.Text + ".",
+        };
+
+        private string EscapeProgress(AdversaryGoal.Escape escape)
+        {
+            var runners = escape.Who is { Count: > 0 } who ? who.ToList()
+                : combatants.Where(c => c.Side == Side.Adversaries && !c.IsSteed && !c.IsPhantom).ToList();
+            return $"{escape.Text}: {runners.Count(c => c.HasFled)} of {runners.Count} away" + (escape.Exit is { } exit ? $", making for {exit.Name}." : ".");
+        }
     }
 }

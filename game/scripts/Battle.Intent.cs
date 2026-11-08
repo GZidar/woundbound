@@ -55,6 +55,13 @@ namespace WoundBoundGame
             }
 
             path.Add(new RadialItem(declared.Target is { } target ? target.Name : "the ground"));
+
+            // Why, in the few words the table may hear: only what the creatures could have seen.
+            if (declared.Why is { } why)
+            {
+                path.Add(new RadialItem(why));
+            }
+
             return path;
         }
     }

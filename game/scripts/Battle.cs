@@ -561,7 +561,7 @@ namespace WoundBoundGame
 
             demo = args.Contains("--demo");
             seed = int.TryParse(Value("--seed"), out var s) ? s : null;
-            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders", "glamour", "roadblock", "gnoll", "clearing" };
+            var fights = new[] { "signpost", "casters", "camp", "signpost4", "ford", "fordcasters", "party", "solo", "witches", "rivals", "swarm", "swarmopen", "champion", "guardians", "stag", "outriders", "glamour", "roadblock", "gnoll", "clearing", "strongbox", "jetty" };
             if (Value("--fight") is { } fight && System.Array.IndexOf(fights, fight) is var index and >= 0)
             {
                 fightPicker.Select(index);
@@ -1307,6 +1307,8 @@ namespace WoundBoundGame
                 17 => SampleEncounters.Roadblock(data, Dice(), PickedGm(), ambush: true),
                 18 => SampleEncounters.GnollRaid(data, Dice(), PickedGm(), ambush: true),
                 19 => SampleEncounters.WoodlandClearing(data, Dice(), PickedGm(), seed: System.Environment.TickCount),
+                20 => SampleEncounters.StrongboxRaid(data, Dice(), PickedGm()),
+                21 => SampleEncounters.JettyEscape(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), ambush: true),
             };
             board3D?.Build(encounter, ColourOf);
@@ -1341,6 +1343,7 @@ namespace WoundBoundGame
             shown = null;
             Disarm();
             stepPending = false;
+            ApplyTableSettings();
             bot = null;
             UpdateBot();
             linesShown = 0;
@@ -1368,13 +1371,15 @@ namespace WoundBoundGame
             linesShown = ShownLog.Count;
 
             UpdateHud();
+            UpdateTable();
             QueueRedraw();
             UpdatePrompts();
             UpdateIntent();
 
             // The GM's turns always play themselves; with Bot v Bot on, so does the party.
             var gmToAct = encounter.Phase == EncounterPhase.AdversaryTurn;
-            if ((gmToAct || (bot is not null && !encounter.IsOver)) && !stepPending)
+            // A human GM narrating holds everything, the bot at the party's seat too, until they go on.
+            if ((gmToAct || (bot is not null && !encounter.IsOver)) && !stepPending && !encounter.AwaitingNarration)
             {
                 stepPending = true;
                 var waitingOn = encounter;
@@ -1429,8 +1434,8 @@ namespace WoundBoundGame
         /// <summary>Shows the 1-Stamina choice — panic dodge, stand firm, or arrest — while the encounter is waiting on it.</summary>
         private void UpdateReactionPrompt()
         {
-            reactionBox.Visible = encounter.Pending is not null;
-            if (encounter.Pending is not { } pending)
+            reactionBox.Visible = encounter.Pending is not null && !encounter.AwaitingNarration;
+            if (encounter.Pending is not { } pending || encounter.AwaitingNarration)
             {
                 return;
             }
@@ -1893,6 +1898,7 @@ namespace WoundBoundGame
 
             statusLabel = WrappingLabel(column);
             statusLabel.AddThemeFontSizeOverride("font_size", 16);
+            BuildBrief(column);
             partyLabel = WrappingLabel(column);
             chooseRow = new HFlowContainer();
             chooseRow.AddThemeConstantOverride("h_separation", 8);
@@ -2187,6 +2193,8 @@ namespace WoundBoundGame
             fightPicker.AddItem("The roadblock: crossbows behind cover");
             fightPicker.AddItem("A Duskfang Gnoll with bandits (Rampage)");
             fightPicker.AddItem("A woodland clearing: a band placed by the GM's setup");
+            fightPicker.AddItem("The strongbox: bandits come to carry it off");
+            fightPicker.AddItem("The jetty: smugglers make for their boat");
             fightPicker.ItemSelected += _ => StartEncounter();
             botRow.AddChild(fightPicker);
 
@@ -2265,7 +2273,7 @@ namespace WoundBoundGame
             gmPicker.ClipText = true;
             gmPicker.AddItem("Best — weighs every option, takes the most effective");
             gmPicker.AddItem("Balanced — usually the best");
-            gmPicker.AddItem("Poor — loose and careless");
+            gmPicker.AddItem("Poor — novice habits, knows only what it sees");
             gmPicker.AddItem("Simple — goes for the nearest");
             gmPicker.AddItem("Tripping — trips first, then strikes");
             gmPicker.ItemSelected += _ => StartEncounter();
@@ -2298,6 +2306,7 @@ namespace WoundBoundGame
             sightPicker.AddItem("The fog — what its creatures see, and where they last saw you");
             sightPicker.ItemSelected += _ => StartEncounter();
             sightRow.AddChild(sightPicker);
+            BuildTableControls(column);
 
             reactionBox = new PanelContainer { Visible = false };
             reactionBox.AddThemeStyleboxOverride("panel", new StyleBoxFlat

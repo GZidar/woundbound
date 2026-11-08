@@ -83,6 +83,16 @@ namespace WoundBound.Game.Combat
         /// <see cref="PendingReaction.Defender"/> is the bearer, who pays; <see cref="PendingReaction.Ally"/> is who it covers.
         /// </summary>
         CoverAlly,
+
+        /// <summary>
+        /// A pause for the human GM, when the computer runs the fight for them: a GM creature has
+        /// declared its action, and the GM reads it to the table before it takes effect (the user,
+        /// 2026-11-08). Nobody spends anything; <see cref="Encounter.ContinueNarration"/> goes on.
+        /// </summary>
+        NarrateIntent,
+
+        /// <summary>A pause for the human GM after a GM creature's action has landed, to narrate it before the turn goes on.</summary>
+        NarrateOutcome,
     }
 
     /// <summary>What a character does about an enemy leaving their reach.</summary>

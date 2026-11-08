@@ -31,10 +31,27 @@ namespace WoundBound.Game.Combat
         /// </summary>
         private void Declare(Combatant actor, string what, Combatant? against, Func<bool> stillPossible, Action resolve, Action spent, Declaration? intent = null)
         {
-            Declared = intent ?? new Declaration(actor, IntentKind.Other, what, against);
+            var why = actor.Side == Side.Adversaries ? stepWhy : null;
+            stepWhy = null;
+            Declared = (intent ?? new Declaration(actor, IntentKind.Other, what, against)) with { Why = why };
             LastDeclarationSpent = false;
-            Write($"{actor.Name} declares: {what}.");
+            Write($"{actor.Name} declares: {what}" + (why is null ? "." : $" — {why}."));
             lastDeclaredTarget = against;
+
+            // A human GM reads the declaration to the table before anything is rolled.
+            if (actor.Side == Side.Adversaries && NarrationPauses)
+            {
+                PauseForNarration(ReactionKind.NarrateIntent, actor, $"{actor.Name} declares: {what}" + (why is null ? "." : $" — {why}.") + " Narrate it, then continue.",
+                    () => GoOnFromDeclaration(actor, what, stillPossible, resolve, spent));
+                return;
+            }
+
+            GoOnFromDeclaration(actor, what, stillPossible, resolve, spent);
+        }
+
+        /// <summary>From a declaration on: the Interrupt it may draw, and then the action itself, or its spending where nothing is left for it.</summary>
+        private void GoOnFromDeclaration(Combatant actor, string what, Func<bool> stillPossible, Action resolve, Action spent)
+        {
             // Nobody Interrupts what they never saw coming (Core Rules §9, "Ambush").
             OfferInterrupt(actor, new Queue<Combatant>(IsSurprise ? [] : InterruptersFor(actor)), () =>
             {
@@ -55,6 +72,8 @@ namespace WoundBound.Game.Combat
                     return;
                 }
 
+                // Once it has landed, a human GM narrates it before the creature does anything more.
+                outcomeToNarrate = actor.Side == Side.Adversaries && NarrationPauses ? actor : null;
                 resolve();
             });
         }
@@ -386,6 +405,64 @@ namespace WoundBound.Game.Combat
 
             shelterTaking = amount;
             return RespondToReaction(amount > 0);
+        }
+
+        /// <summary>
+        /// Whether the fight stops for a human GM to narrate each GM creature's declared action, before
+        /// it takes effect and again once it has landed (the user, 2026-11-08). Off for bots, the sim,
+        /// and any fight the brain plays forward.
+        /// </summary>
+        public bool NarrationPauses { get; set; }
+
+        /// <summary>Why the GM's step now being taken was chosen, in words for the table: handed on to its declaration.</summary>
+        private string? stepWhy;
+
+        /// <summary>A GM creature whose declared action has landed and is still to be narrated, before its turn goes on.</summary>
+        private Combatant? outcomeToNarrate;
+
+        /// <summary>Stops the fight for the GM to narrate; <see cref="ContinueNarration"/> goes on with <paramref name="then"/>.</summary>
+        private void PauseForNarration(ReactionKind kind, Combatant actor, string prompt, Action then)
+        {
+            Pending = new PendingReaction(kind, actor, actor, null, 0, prompt);
+            phaseBeforeReaction = Phase;
+            Phase = EncounterPhase.AwaitingReaction;
+            resumeAfterReaction = _ => then();
+            Write(prompt);
+        }
+
+        /// <summary>Whether the fight is waiting on the GM to narrate.</summary>
+        public bool AwaitingNarration => Phase == EncounterPhase.AwaitingReaction && Pending?.Kind is ReactionKind.NarrateIntent or ReactionKind.NarrateOutcome;
+
+        /// <summary>The GM has narrated: the fight goes on.</summary>
+        public bool ContinueNarration()
+        {
+            if (!AwaitingNarration || resumeAfterReaction is not { } resume)
+            {
+                return false;
+            }
+
+            Pending = null;
+            Phase = phaseBeforeReaction;
+            resumeAfterReaction = null;
+            resume(true);
+            return true;
+        }
+
+        /// <summary>
+        /// Before a GM creature takes its next step, or ends its turn: the pause to narrate what its
+        /// last declared action did, where one is owed. True where the fight now waits on the GM.
+        /// </summary>
+        private bool PausedForOutcome(Action then)
+        {
+            if (outcomeToNarrate is not { } actor || !NarrationPauses)
+            {
+                outcomeToNarrate = null;
+                return false;
+            }
+
+            outcomeToNarrate = null;
+            PauseForNarration(ReactionKind.NarrateOutcome, actor, $"{actor.Name}'s action has landed. Narrate it, then continue.", then);
+            return true;
         }
     }
 }

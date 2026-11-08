@@ -189,6 +189,9 @@ namespace WoundBound.Game.Combat
             }
         }
 
+        /// <summary>The GM brain playing the adversaries — for the table's director readout.</summary>
+        public IGmBrain Gm => gm;
+
         /// <summary>The fight as a brain sees it — for bots at either seat.</summary>
         internal BattleView View => view;
 
@@ -1582,7 +1585,7 @@ namespace WoundBound.Game.Combat
         public bool RespondToReaction(bool spend)
         {
             if (Phase != EncounterPhase.AwaitingReaction || Pending is not { } pending || resumeAfterReaction is not { } resume
-                || pending.Kind == ReactionKind.LeaverReaction)
+                || pending.Kind is ReactionKind.LeaverReaction or ReactionKind.NarrateIntent or ReactionKind.NarrateOutcome)
             {
                 return false;
             }
@@ -2110,6 +2113,12 @@ namespace WoundBound.Game.Combat
 
         private void TakeStep(GmTurn turn, Action done)
         {
+            // The last declared action has landed: a human GM narrates it before anything more is chosen.
+            if (PausedForOutcome(() => TakeStep(turn, done)))
+            {
+                return;
+            }
+
             var actor = turn.Actor;
             caughtMidMotion = null;
             Declared = null;
@@ -2143,6 +2152,7 @@ namespace WoundBound.Game.Combat
 
             queuedStep = null;
             turn.Steps++;
+            stepWhy = step.Why;
 
             // A surprise action is one action from where it lies: a step, a dash or a bought action
             // would give it away before it has struck, so asking for one ends it unspent.

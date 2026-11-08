@@ -102,6 +102,10 @@ namespace WoundBound.Game.Combat.Brains
                     TakePartyStep(character);
                     return true;
 
+                case EncounterPhase.AwaitingReaction when encounter.AwaitingNarration:
+                    encounter.ContinueNarration(); // a bot table has nobody to narrate to
+                    return true;
+
                 case EncounterPhase.AwaitingReaction when encounter.Pending is { Kind: ReactionKind.LeaverReaction } leaving:
                     var response = party.ReactsToLeaver(encounter.View, leaving);
                     Tally.LeaverReactions += response == LeaverResponse.LetThemGo ? 0 : 1;

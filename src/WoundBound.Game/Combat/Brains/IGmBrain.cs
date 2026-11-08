@@ -120,6 +120,9 @@ namespace WoundBound.Game.Combat.Brains
         {
         }
 
+        /// <summary>Why the brain chose it, in words the table may hear (<see cref="Declaration.Why"/>); null where it says nothing.</summary>
+        public string? Why { get; init; }
+
         /// <summary>Move to <paramref name="Square"/>, paid for with the move and then actions.</summary>
         public sealed record Move(GridPosition Square) : GmStep;
 
