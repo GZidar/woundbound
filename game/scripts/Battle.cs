@@ -1300,6 +1300,7 @@ namespace WoundBoundGame
             };
             ApplyAppearances(encounter);
             board3D?.Build(encounter, ColourOf);
+            PushBackdrop();
             fog = fogOn ? new FogOfWar(encounter) : null;
             board3D?.ApplyFog(fog);
 

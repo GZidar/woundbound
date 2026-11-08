@@ -17,7 +17,11 @@ namespace WoundBound.Game.Combat
     /// ground: . firm   b broken   r sure footing
     /// elevation: . level  r raised (slopes)   c raised, cliff-sided
     /// zones:  . none   p party start   g GM's creatures   h GM's creatures, hidden
+    /// hazards: . none   n e s w   a current sweeping that way (Athletics or Endurance 18, or swept a Short way and off your feet)
     /// </code>
+    /// <para>And who fights there: the party by name (the Quickstart characters), the foes by
+    /// statblock and number — left empty, the Quickstart five against the clearing's band — and
+    /// where fires burn.</para>
     /// </summary>
     public sealed class SceneMap
     {
@@ -44,6 +48,21 @@ namespace WoundBound.Game.Combat
 
         public List<string> Zones { get; set; } = [];
 
+        public List<string> Hazards { get; set; } = [];
+
+        /// <summary>Built fires: light out to Long, and Fuel for a Fire caster.</summary>
+        public List<PlacedFire> Fires { get; set; } = [];
+
+        /// <summary>The party, by character name; empty means the Quickstart five.</summary>
+        public List<string> Party { get; set; } = [];
+
+        /// <summary>The GM's creatures, by statblock name and how many; empty means the clearing's band.</summary>
+        public List<FoeGroup> Foes { get; set; } = [];
+
+        public sealed record PlacedFire(int X, int Y);
+
+        public sealed record FoeGroup(string Adversary, int Count);
+
         /// <summary>Props named for particular squares, over what the biome would put there.</summary>
         public List<PlacedProp> Props { get; set; } = [];
 
@@ -65,12 +84,13 @@ namespace WoundBound.Game.Combat
         /// <summary>Pads or trims every layer to the scene's size, filling with '.', so every square has a character in every layer.</summary>
         public void Normalise()
         {
-            foreach (var layer in new[] { Solid, Water, Ground, Heights, Zones })
+            foreach (var layer in new[] { Solid, Water, Ground, Heights, Zones, Hazards })
             {
                 Fit(layer);
             }
 
             Props.RemoveAll(p => !Inside(p.X, p.Y));
+            Fires.RemoveAll(f => !Inside(f.X, f.Y));
             Surfaces.RemoveAll(s => !Inside(s.X, s.Y));
         }
 
@@ -117,6 +137,16 @@ namespace WoundBound.Game.Combat
             if (prop is { } named && Inside(x, y))
             {
                 Props.Add(new PlacedProp(x, y, named));
+            }
+        }
+
+        /// <summary>Lights (or with false, puts out) a fire on a square.</summary>
+        public void SetFire(int x, int y, bool burning)
+        {
+            Fires.RemoveAll(f => f.X == x && f.Y == y);
+            if (burning && Inside(x, y))
+            {
+                Fires.Add(new PlacedFire(x, y));
             }
         }
 
@@ -222,6 +252,18 @@ namespace WoundBound.Game.Combat
                 zones.Add(new DeploymentZone("in the open", gm, Hidden: false));
             }
 
+            var hazards = new List<Hazard>();
+            foreach (var (dir, dx, dy, way) in new[] { ('n', 0, -1, "north"), ('e', 1, 0, "east"), ('s', 0, 1, "south"), ('w', -1, 0, "west") })
+            {
+                var squares = Where(Hazards, dir).ToHashSet();
+                if (squares.Count > 0)
+                {
+                    hazards.Add(new Hazard($"the current ({way})", $"A strong pull {way}ward that drags the unwary off their feet.", squares,
+                        [new HazardCheck("Athletics", 18), new HazardCheck("Endurance", 18)],
+                        new HazardEffect.Swept(Squares: 4, Dx: dx, Dy: dy, LosesFooting: true)));
+                }
+            }
+
             var unlit = Visibility != Visibility.Good;
             return new Setting
             {
@@ -235,6 +277,8 @@ namespace WoundBound.Game.Combat
                 Ground = ground,
                 Raised = Where(Heights, 'r', 'c').ToHashSet(),
                 Deployment = zones,
+                Hazards = hazards,
+                Fires = Fires.Select(f => new GridPosition(f.X, f.Y)).ToHashSet(),
                 Scenery = new Scenery
                 {
                     Biome = Biome,

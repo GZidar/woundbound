@@ -35,6 +35,8 @@ namespace WoundBoundGame
             Zones,
             Prop,
             Surface,
+            Fire,
+            Hazard,
         }
 
         /// <summary>A brush: the layer it paints, the character it puts there, and for props, the prop it names.</summary>
@@ -147,7 +149,7 @@ namespace WoundBoundGame
         public override void _Draw()
         {
             DrawRect(new Rect2(Vector2.Zero, GetViewportRect().Size), new Color(0.09f, 0.09f, 0.11f));
-            scenery.Draw(setting, map.Width, map.Height, SquareRect, cell, map.Backdrop, []);
+            scenery.Draw(setting, map.Width, map.Height, SquareRect, cell, map.Backdrop, setting.Fires);
 
             for (var y = 0; y < map.Height; y++)
             {
@@ -158,6 +160,16 @@ namespace WoundBoundGame
                     if (rulesView)
                     {
                         RulesMark(square, rect);
+                    }
+
+                    var current = SceneMap.At(map.Hazards, x, y);
+                    if (current != '.')
+                    {
+                        var way = current switch { 'n' => Vector2.Up, 'e' => Vector2.Right, 's' => Vector2.Down, _ => Vector2.Left };
+                        var c = rect.GetCenter();
+                        var ink = new Color(0.95f, 0.75f, 0.2f, 0.9f);
+                        DrawLine(c - way * cell * 0.35f, c + way * cell * 0.3f, ink, Mathf.Max(1, cell / 12));
+                        DrawColoredPolygon([c + way * cell * 0.42f, c + way * cell * 0.18f + way.Orthogonal() * cell * 0.15f, c + way * cell * 0.18f - way.Orthogonal() * cell * 0.15f], ink);
                     }
 
                     var zone = SceneMap.At(map.Zones, x, y);
@@ -296,6 +308,12 @@ namespace WoundBoundGame
                         break;
                     case Layer.Surface:
                         map.SetSurface(x, y, clear ? null : brush.Surface);
+                        break;
+                    case Layer.Fire:
+                        map.SetFire(x, y, !clear);
+                        break;
+                    case Layer.Hazard:
+                        map.Set(map.Hazards, x, y, clear ? '.' : brush.Value);
                         break;
                 }
             }
@@ -438,6 +456,8 @@ namespace WoundBoundGame
             lightPick.ItemSelected += i => { if (!filling) { Remember(); map.Visibility = (Visibility)(int)i; Rebuild(); } };
             Row(panel, biomePick, lightPick);
 
+            BuildWhoFights(panel);
+
             // The battlemap.
             panel.AddChild(new HSeparator());
             Row(panel, Btn("Battlemap…", () => PictureDialog().PopupCentered(new Vector2I(900, 600)), "Paint over a battlemap picture; its grid is found for you."),
@@ -450,6 +470,18 @@ namespace WoundBoundGame
             pictureY = Spin(-4000, 8000, 0.5, "Where square (0, 0)'s top edge is in the picture.");
             Row(panel, new Label { Text = "px" }, pictureSize, Btn("×2", () => pictureSize.Value *= 2), Btn("÷2", () => pictureSize.Value /= 2));
             Row(panel, new Label { Text = "left" }, pictureX, new Label { Text = "top" }, pictureY);
+            suggestButton = Btn("Suggest from picture (Claude)", Suggest,
+                "Ask Claude to read the battlemap and fill in walls, cover, water, ground and high ground for you to check. Replaces those layers (Ctrl+Z undoes). One paid API call.");
+            panel.AddChild(suggestButton);
+            keyEdit = new LineEdit { PlaceholderText = "Anthropic API key (or set ANTHROPIC_API_KEY)", Secret = true };
+            var remember = new CheckBox { Text = "Remember key on this computer", TooltipText = "Keep the key in the game's user folder." };
+            var saved = LoadKey();
+            keyEdit.Text = saved ?? string.Empty;
+            remember.ButtonPressed = saved is not null;
+            remember.Toggled += on => SaveKey(on ? keyEdit.Text : null);
+            keyEdit.TextChanged += text => { if (remember.ButtonPressed) { SaveKey(text); } };
+            panel.AddChild(keyEdit);
+            panel.AddChild(remember);
 
             // The tools.
             panel.AddChild(new HSeparator());
@@ -508,6 +540,12 @@ namespace WoundBoundGame
             Section("Who starts where",
                 new Brush("Party", Layer.Zones, 'p', "Where the party starts."), new Brush("GM in view", Layer.Zones, 'g', "Where the GM may place creatures, in the open."),
                 new Brush("GM hidden", Layer.Zones, 'h', "Where the GM may place creatures lying in wait."));
+            Section("Fire and hazards",
+                new Brush("Fire", Layer.Fire, '.', "A built fire: light out to Long, Fuel for a Fire caster."),
+                new Brush("Current ↑", Layer.Hazard, 'n', "A current sweeping north: Athletics or Endurance 18, or swept 4 squares and off your feet."),
+                new Brush("Current →", Layer.Hazard, 'e', "A current sweeping east."),
+                new Brush("Current ↓", Layer.Hazard, 's', "A current sweeping south."),
+                new Brush("Current ←", Layer.Hazard, 'w', "A current sweeping west."));
             Section("Looks (no effect on the rules)",
                 Enum.GetValues<Surface>().Select(sf => new Brush(sf.ToString(), Layer.Surface, '.', $"Paint the ground as {sf.ToString().ToLowerInvariant()}.", Surface: sf)).ToArray());
             brush = first!;
@@ -561,10 +599,84 @@ namespace WoundBoundGame
             }
         }
 
+        // ---- Who fights ----
+
+        private WoundBound.Game.Data.GameData? data;
+        private readonly Dictionary<string, CheckBox> partyBoxes = new();
+        private VBoxContainer foeRows = null!;
+        private string[] statblocks = [];
+
+        private void BuildWhoFights(VBoxContainer panel)
+        {
+            data = WoundBound.Game.Data.GameData.Load(file => FileAccess.GetFileAsString($"res://data/rules/{file}"));
+            statblocks = data.Adversaries.Select(a => a.Name).Order().ToArray();
+            panel.AddChild(new HSeparator());
+            panel.AddChild(new Label { Text = "Party (none ticked: the Quickstart five)", Modulate = new Color(0.8f, 0.75f, 0.6f) });
+            var flow = new HFlowContainer();
+            panel.AddChild(flow);
+            foreach (var name in SampleEncounters.QuickstartParty.Keys)
+            {
+                var box = new CheckBox { Text = name.Split(' ')[0] == "The" ? "Dumb Fighter" : name.Split(' ')[0], TooltipText = name };
+                box.Toggled += _ => { if (!filling) { Remember(); map.Party = partyBoxes.Where(kv => kv.Value.ButtonPressed).Select(kv => kv.Key).ToList(); Rebuild(); } };
+                partyBoxes[name] = box;
+                flow.AddChild(box);
+            }
+
+            panel.AddChild(new Label { Text = "Foes (none: the clearing's band)", Modulate = new Color(0.8f, 0.75f, 0.6f) });
+            foeRows = new VBoxContainer();
+            panel.AddChild(foeRows);
+            var add = new Button { Text = "Add foe", TooltipText = "Another statblock for the GM's side." };
+            add.Pressed += () =>
+            {
+                Remember();
+                map.Foes.Add(new SceneMap.FoeGroup(statblocks.FirstOrDefault(n => n == "Roadside Bandit") ?? statblocks[0], 1));
+                ShowFoes();
+            };
+            panel.AddChild(add);
+        }
+
+        /// <summary>One row per group of foes: which statblock, how many, and a button to take them off.</summary>
+        private void ShowFoes()
+        {
+            foreach (var child in foeRows.GetChildren())
+            {
+                child.QueueFree();
+            }
+
+            for (var i = 0; i < map.Foes.Count; i++)
+            {
+                var index = i;
+                var group = map.Foes[i];
+                var row = new HBoxContainer();
+                var pick = new OptionButton { CustomMinimumSize = new Vector2(200, 0), ClipText = true, FitToLongestItem = false };
+                foreach (var name in statblocks)
+                {
+                    pick.AddItem(name);
+                }
+
+                pick.Select(Math.Max(0, Array.IndexOf(statblocks, group.Adversary)));
+                pick.ItemSelected += sel => { Remember(); map.Foes[index] = map.Foes[index] with { Adversary = statblocks[sel] }; Rebuild(); };
+                var count = new SpinBox { MinValue = 1, MaxValue = 20, Value = group.Count };
+                count.ValueChanged += v => { map.Foes[index] = map.Foes[index] with { Count = (int)v }; Rebuild(); };
+                var remove = new Button { Text = "✕", TooltipText = "Take these off." };
+                remove.Pressed += () => { Remember(); map.Foes.RemoveAt(index); ShowFoes(); Rebuild(); };
+                row.AddChild(pick);
+                row.AddChild(count);
+                row.AddChild(remove);
+                foeRows.AddChild(row);
+            }
+        }
+
         /// <summary>Puts the scene's own values into the panel.</summary>
         private void ShowMap()
         {
             filling = true;
+            foreach (var (name, box) in partyBoxes)
+            {
+                box.ButtonPressed = map.Party.Contains(name);
+            }
+
+            ShowFoes();
             nameEdit.Text = map.Name;
             widthSpin.Value = map.Width;
             heightSpin.Value = map.Height;
@@ -661,6 +773,101 @@ namespace WoundBoundGame
             ShowMap();
             Rebuild();
             Fit();
+        }
+
+        // ---- Claude's suggestion ----
+
+        private Button suggestButton = null!;
+        private LineEdit keyEdit = null!;
+        private const string KeyFile = "user://claude-key.cfg";
+
+        private static string? LoadKey()
+        {
+            var config = new ConfigFile();
+            return config.Load(KeyFile) == Error.Ok && config.GetValue("anthropic", "key", "").AsString() is { Length: > 0 } key ? key : null;
+        }
+
+        private static void SaveKey(string? key)
+        {
+            if (key is null)
+            {
+                DirAccess.RemoveAbsolute(ProjectSettings.GlobalizePath(KeyFile));
+                return;
+            }
+
+            var config = new ConfigFile();
+            config.SetValue("anthropic", "key", key);
+            config.Save(KeyFile);
+        }
+
+        /// <summary>
+        /// Sends the part of the battlemap under the scene — scaled to the model's image limit — to
+        /// Claude, and fills the layers from its answer when it comes back.
+        /// </summary>
+        private void Suggest()
+        {
+            if (map.Backdrop is not { } backdrop || scenery.Texture(backdrop)?.GetImage() is not { } image)
+            {
+                status.Text = "Load a battlemap first: the suggestion is read from the picture.";
+                return;
+            }
+
+            // The picture under the map, and no more.
+            var pps = backdrop.PixelsPerSquare;
+            var want = new Rect2I((int)Math.Floor(backdrop.OriginX), (int)Math.Floor(backdrop.OriginY), (int)Math.Ceiling(pps * map.Width), (int)Math.Ceiling(pps * map.Height));
+            var crop = want.Intersection(new Rect2I(0, 0, image.GetWidth(), image.GetHeight()));
+            if (crop.Size.X < 8 || crop.Size.Y < 8)
+            {
+                status.Text = "The map doesn't lie over the picture: check the square size and offset.";
+                return;
+            }
+
+            var part = image.GetRegion(crop);
+            var scale = Math.Min(1f, (float)SceneSuggester.MaxImageEdge / Math.Max(crop.Size.X, crop.Size.Y));
+            if (scale < 1)
+            {
+                part.Resize(Mathf.RoundToInt(crop.Size.X * scale), Mathf.RoundToInt(crop.Size.Y * scale), Image.Interpolation.Lanczos);
+            }
+
+            var jpeg = part.SaveJpgToBuffer(0.9f);
+            double originX = (backdrop.OriginX - crop.Position.X) * scale, originY = (backdrop.OriginY - crop.Position.Y) * scale;
+            double pitch = pps * scale;
+            int width = map.Width, height = map.Height;
+            var key = keyEdit.Text.Trim();
+            suggestButton.Disabled = true;
+            status.Text = "Asking Claude to read the picture… (this can take a minute)";
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                try
+                {
+                    var suggestion = await SceneSuggester.Ask(jpeg, width, height, originX, originY, pitch, key);
+                    Callable.From(() => Suggested(suggestion, width, height)).CallDeferred();
+                }
+                catch (Exception e)
+                {
+                    var message = e.Message;
+                    Callable.From(() =>
+                    {
+                        suggestButton.Disabled = false;
+                        status.Text = $"Claude couldn't make a suggestion: {message}";
+                    }).CallDeferred();
+                }
+            });
+        }
+
+        private void Suggested(SceneSuggester.Suggestion suggestion, int width, int height)
+        {
+            suggestButton.Disabled = false;
+            if (map.Width != width || map.Height != height)
+            {
+                status.Text = "The scene changed size while Claude was reading it; ask again.";
+                return;
+            }
+
+            Remember();
+            SceneSuggester.Apply(map, suggestion);
+            Rebuild();
+            status.Text = "Claude's suggestion is in — check it over (Rules view helps; Ctrl+Z takes it back). " + suggestion.Notes;
         }
 
         // ---- Files ----

@@ -66,6 +66,34 @@ public class SceneMapTests
     }
 
     [Fact]
+    public void FiresAndCurrents_AreThere_ForTheRules()
+    {
+        var map = SceneMap.Blank(10, 10);
+        map.SetFire(4, 4, true);
+        map.Set(map.Hazards, 6, 2, 's');
+        map.Set(map.Hazards, 6, 3, 's');
+        var setting = map.ToSetting();
+
+        Assert.Contains(new GridPosition(4, 4), setting.Fires);
+        var current = Assert.Single(setting.Hazards);
+        Assert.Equal(2, current.Squares.Count);
+        Assert.Equal(new HazardEffect.Swept(4, 0, 1, true), current.Effect);
+    }
+
+    [Fact]
+    public void TheSceneSays_WhoFights()
+    {
+        var map = SceneMap.Blank(SampleEncounters.FieldWidth, SampleEncounters.FieldHeight);
+        map.Party = ["Joren Blacke", "The Dumb Fighter"];
+        map.Foes = [new SceneMap.FoeGroup("Timber Wolf", 3), new SceneMap.FoeGroup("No Such Beast", 2)];
+
+        var fight = SampleEncounters.OnScene(Data, new RandomDiceRoller(new Random(4)), map);
+
+        Assert.Equal(["Joren Blacke", "The Dumb Fighter"], fight.Combatants.Where(c => c.Side == Side.Party).Select(c => c.Name).Order().ToArray());
+        Assert.Equal(["Timber Wolf 1", "Timber Wolf 2", "Timber Wolf 3"], fight.Combatants.Where(c => c.Side == Side.Adversaries).Select(c => c.Name).Order().ToArray());
+    }
+
+    [Fact]
     public void GmZonesBeyondLong_AreWarnedOf()
     {
         var map = SceneMap.Blank(40, 10);

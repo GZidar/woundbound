@@ -299,7 +299,7 @@ void vertex() {
 }
 void fragment() {
 	float seen = fog_at(world_pos.xz);
-	if (seen < 0.2) { discard; }
+	if (seen < 0.2 || backdrop_at(world_pos.xz).a > 0.5) { discard; }
 	float lit = mix(0.42, 1.0, smoothstep(0.5, 1.0, seen));
 	ALBEDO = tint.rgb * lit * light_at(world_pos.xz);
 	ROUGHNESS = 0.9;

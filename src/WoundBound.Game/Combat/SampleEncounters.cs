@@ -1047,8 +1047,9 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
-        /// A fight on a scene painted in the editor: the Quickstart five on the squares painted for the
-        /// party (or the west side's middle, if none are), against the clearing's band, placed by a
+        /// A fight on a scene painted in the editor: its party (the Quickstart five unless it names
+        /// others) on the squares painted for the party (or the west side's middle, if none are),
+        /// against its foes (the clearing's band unless it names others), placed by a
         /// Smart GM in the zones painted for it (or anywhere Short to Long of the party). Daylight
         /// unless the scene says otherwise. For trying a painted map out.
         /// </summary>
@@ -1059,16 +1060,15 @@ namespace WoundBound.Game.Combat
             var fallback = Enumerable.Range(0, scene.Width).SelectMany(x => Enumerable.Range(0, scene.Height).Select(y => new GridPosition(x, y)))
                 .Where(sq => !setting.IsSolid(sq) && !setting.IsDeepWater(sq) && !starts.Contains(sq))
                 .OrderBy(sq => sq.X * 3 + Math.Abs(sq.Y - scene.Height / 2) * 2);
-            var squares = starts.Concat(fallback).Take(5).ToList();
-            var party = new List<Combatant>
+            var chosen = scene.Party.Where(QuickstartParty.ContainsKey).Distinct().ToList();
+            if (chosen.Count == 0)
             {
-                CombatantFactory.FromCharacter(SallaRinehart(data), squares[0]),
-                CombatantFactory.FromCharacter(JorenBlacke(data), squares[1]),
-                CombatantFactory.FromCharacter(DrovanThale(data), squares[2]),
-                CombatantFactory.FromCharacter(MirellaVask(data, lantern: setting.IsUnlit), squares[3]),
-                CombatantFactory.FromCharacter(ElthricDane(data, torch: setting.IsUnlit), squares[4]),
-            };
-            var band = ClearingBand(data, DefaultClearingBand);
+                chosen = ["Salla Rinehart", "Joren Blacke", "Drovan Thale", "Mirella Vask", "Elthric Dane"];
+            }
+
+            var squares = starts.Concat(fallback).Take(chosen.Count).ToList();
+            var party = chosen.Select((name, i) => CombatantFactory.FromCharacter(QuickstartParty[name](data, setting.IsUnlit), squares[i])).ToList();
+            var band = scene.Foes.Count == 0 ? ClearingBand(data, DefaultClearingBand) : SceneBand(data, scene.Foes);
             var all = new List<Combatant>([.. party, .. band]);
             // Only the parts of the painted zones within reach of the party: a creature placed beyond
             // Long of everyone has already left the board (the user's ruling, 2026-11-01).
@@ -1083,6 +1083,38 @@ namespace WoundBound.Game.Combat
             Brains.Placement.Deploy(all, placing, data.Environment, data.RangeBands, scene.Width, scene.Height, new GmSetup(Brains.SetupSkill.Smart, Prepared: true, seed));
             return new Encounter(scene.Width, scene.Height, all, data.RangeBands, dice, gm, setting: setting, environment: data.Environment,
                 brief: new SceneBrief(Stakes.Incidental, new AdversaryGoal.Kill(), Commitment.Committed, $"A band met at {scene.Name}"));
+        }
+
+        /// <summary>The characters a scene can field, by name, each built for a lit or an unlit scene (who carries the light).</summary>
+        public static IReadOnlyDictionary<string, Func<GameData, bool, CharacterBuild>> QuickstartParty { get; } = new Dictionary<string, Func<GameData, bool, CharacterBuild>>
+        {
+            ["Salla Rinehart"] = (d, _) => SallaRinehart(d),
+            ["Joren Blacke"] = (d, _) => JorenBlacke(d),
+            ["Drovan Thale"] = (d, _) => DrovanThale(d),
+            ["Mirella Vask"] = (d, dark) => MirellaVask(d, lantern: dark),
+            ["Elthric Dane"] = (d, dark) => ElthricDane(d, torch: dark),
+            ["The Dumb Fighter"] = (d, dark) => DumbFighter(d, torch: dark),
+        };
+
+        /// <summary>A scene's foes, by statblock and number, named "Timber Wolf 1", "Timber Wolf 2"…; statblocks the catalogue lacks are skipped.</summary>
+        private static List<Combatant> SceneBand(GameData data, IEnumerable<SceneMap.FoeGroup> foes)
+        {
+            var band = new List<Combatant>();
+            foreach (var group in foes)
+            {
+                var info = data.Adversaries.FirstOrDefault(a => a.Name == group.Adversary);
+                if (info is null)
+                {
+                    continue;
+                }
+
+                for (var i = 1; i <= Math.Clamp(group.Count, 0, 20); i++)
+                {
+                    band.Add(CombatantFactory.FromAdversary(info, group.Count == 1 ? info.Name : $"{info.Name} {i}", new GridPosition(0, 0), data.Spells));
+                }
+            }
+
+            return band;
         }
 
         /// <summary>The clearing's band as it is fought: how many Skulkers, Wolves and Ratkin.</summary>

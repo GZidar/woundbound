@@ -534,6 +534,30 @@ namespace WoundBoundGame
             }
         }
 
+        /// <summary>
+        /// Lays a battlemap picture on the ground where it covers the board (null takes it away): the
+        /// ground shows the art, water becomes a sheen over it, and grass and pebbles aren't strewn on it.
+        /// Props still stand on their squares, so what hides you is still there to see.
+        /// </summary>
+        public void SetBackdrop(Backdrop? backdrop, Texture2D? picture)
+        {
+            var on = backdrop is not null && picture is not null && encounter is not null;
+            foreach (var material in fogged)
+            {
+                material.SetShaderParameter("backdrop_on", on ? 1f : 0f);
+                if (!on)
+                {
+                    continue;
+                }
+
+                material.SetShaderParameter("backdrop_tex", picture!);
+                material.SetShaderParameter("backdrop_origin", new Vector2(backdrop!.OriginX, backdrop.OriginY));
+                material.SetShaderParameter("backdrop_pps", backdrop.PixelsPerSquare);
+                material.SetShaderParameter("backdrop_size", picture!.GetSize());
+                material.SetShaderParameter("board_size", new Vector2(encounter!.Width, encounter.Height));
+            }
+        }
+
         // ---- The fog ----
 
         /// <summary>How brightly a square is drawn at each Visibility: Good in full, Poor dimmed, None dark.</summary>
@@ -624,6 +648,19 @@ uniform float fog_on = 0.0;
 uniform vec3 void_colour = vec3(0.09, 0.09, 0.11);
 float fog_at(vec2 xz) { return fog_on > 0.5 ? texture(fog_map, xz / fog_size).r : 1.0; }
 float light_at(vec2 xz) { return texture(fog_map, xz / fog_size).g; }
+uniform sampler2D backdrop_tex : source_color, filter_linear, repeat_disable;
+uniform float backdrop_on = 0.0;
+uniform vec2 backdrop_origin = vec2(0.0);
+uniform float backdrop_pps = 1.0;
+uniform vec2 backdrop_size = vec2(1.0);
+uniform vec2 board_size = vec2(1.0);
+// The battlemap picture's colour at a point on the board, alpha 1 where it covers the board and 0 elsewhere.
+vec4 backdrop_at(vec2 xz) {
+	if (backdrop_on < 0.5 || any(lessThan(xz, vec2(0.0))) || any(greaterThan(xz, board_size))) { return vec4(0.0); }
+	vec2 uv = (backdrop_origin + xz * backdrop_pps) / backdrop_size;
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) { return vec4(0.0); }
+	return vec4(texture(backdrop_tex, uv).rgb, 1.0);
+}
 ";
 
         private static readonly Shader GroundShader = new()
@@ -647,6 +684,9 @@ void fragment() {
 	// Grain: broad patches and fine speckle, so no stretch of ground is one flat colour.
 	float grain = noise(p * 1.3) * 0.5 + noise(p * 4.1) * 0.3 + noise(p * 13.0) * 0.2;
 	col *= 0.86 + grain * 0.28;
+	// A battlemap, where there is one, is the ground.
+	vec4 picture = backdrop_at(p);
+	col = mix(col, picture.rgb, picture.a);
 	// Off the map, the ground fades into the dark, and has no grid.
 	vec2 outside = max(max(-p, p - map_size), vec2(0.0));
 	float away = length(outside);
@@ -705,7 +745,9 @@ void fragment() {
 	float lit = mix(0.42, 1.0, smoothstep(0.5, 1.0, seen));
 	ALBEDO = col * lit * known * light_at(p);
 	EMISSION = void_colour * (1.0 - known);
-	ALPHA = mix(mix(0.62, 0.9, deep), 1.0, 1.0 - known);
+	// Over a battlemap the picture shows its own water: this is only a sheen on it.
+	float painted = backdrop_at(p).a;
+	ALPHA = mix(mix(mix(0.62, 0.9, deep), 0.3, painted), 1.0, 1.0 - known);
 	ROUGHNESS = 0.12;
 	SPECULAR = 0.7;
 }

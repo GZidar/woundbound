@@ -16,4 +16,8 @@
     <ProjectReference Include="..\..\external\WoundBound\src\WoundBound.Rules\WoundBound.Rules.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Anthropic" Version="13.6.0" />
+  </ItemGroup>
+
 </Project>

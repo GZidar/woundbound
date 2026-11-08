@@ -27,6 +27,13 @@ namespace WoundBoundGame
         private void DrawFlatScenery() =>
             Scenery.Draw(encounter.Setting, encounter.Width, encounter.Height, SquareRect, CellSize, CurrentBackdrop, encounter.Fires);
 
+        /// <summary>Hands the battlemap, if any, to the 3D board to lay on its ground.</summary>
+        private void PushBackdrop()
+        {
+            var backdrop = CurrentBackdrop;
+            board3D?.SetBackdrop(backdrop, backdrop is null ? null : Scenery.Texture(backdrop));
+        }
+
         private VBoxContainer backdropRow = null!;
         private Label backdropLabel = null!;
         private SpinBox backdropSize = null!;
@@ -77,6 +84,7 @@ namespace WoundBoundGame
             {
                 loadedBackdrop = null;
                 ShowBackdrop();
+                PushBackdrop();
                 QueueRedraw();
             };
             ShowBackdrop();
@@ -103,6 +111,7 @@ namespace WoundBoundGame
             Scenery.Prime(path, read.Texture);
             loadedBackdrop = read.Fit(path, encounter.Width, encounter.Height);
             ShowBackdrop(read.Note);
+            PushBackdrop();
             QueueRedraw();
         }
 
@@ -111,7 +120,7 @@ namespace WoundBoundGame
             var backdrop = CurrentBackdrop;
             backdropLabel.Text = backdrop is null
                 ? "No battlemap"
-                : System.IO.Path.GetFileName(backdrop.Path) + (note is null ? string.Empty : $" — {note}") + (In3D ? "\nShown on the flat board (Options: Flat board)." : string.Empty);
+                : System.IO.Path.GetFileName(backdrop.Path) + (note is null ? string.Empty : $" — {note}");
             fillingBackdrop = true;
             backdropSize.Value = backdrop?.PixelsPerSquare ?? 0;
             backdropX.Value = backdrop?.OriginX ?? 0;
@@ -128,6 +137,7 @@ namespace WoundBoundGame
             }
 
             loadedBackdrop = backdrop with { PixelsPerSquare = (float)backdropSize.Value, OriginX = (float)backdropX.Value, OriginY = (float)backdropY.Value };
+            PushBackdrop();
             QueueRedraw();
         }
     }
