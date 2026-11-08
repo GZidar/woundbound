@@ -31,8 +31,6 @@ namespace WoundBoundGame
         private Node3D pitch = null!;
         private Node3D terrain = null!;
         private readonly Dictionary<Combatant, Figure> figures = new();
-        private readonly Dictionary<GridPosition, (MeshInstance3D Box, Color Colour)> blocks = new();
-        private Node3D? fogLayer;
         private FogOfWar? fog;
 
         private float yawTarget = 45;
@@ -45,7 +43,7 @@ namespace WoundBoundGame
 
         public override void _Ready()
         {
-            var environment = new WorldEnvironment
+            world = new WorldEnvironment
             {
                 Environment = new Godot.Environment
                 {
@@ -56,8 +54,8 @@ namespace WoundBoundGame
                     AmbientLightEnergy = 0.9f,
                 },
             };
-            AddChild(environment);
-            var sun = new DirectionalLight3D { LightEnergy = 1.1f, ShadowEnabled = true, RotationDegrees = new Vector3(-55, 30, 0) };
+            AddChild(world);
+            sun = new DirectionalLight3D { LightEnergy = 1.1f, ShadowEnabled = true, RotationDegrees = new Vector3(-55, 30, 0), DirectionalShadowMaxDistance = 60 };
             AddChild(sun);
 
             yaw = new Node3D();
@@ -83,10 +81,9 @@ namespace WoundBoundGame
             }
 
             figures.Clear();
-            blocks.Clear();
             fog = null;
-            fogLayer = null;
-            BuildGround(fight);
+            propLayer = null;
+            BuildScenery(fight);
 
             // Open over the party, close enough to see who is who; the rest is a pan or a zoom away.
             var party = fight.Combatants.Where(c => c.Side == Side.Party).ToList();
@@ -177,7 +174,9 @@ namespace WoundBoundGame
         // ---- Between the board and the screen ----
 
         /// <summary>Where a point on the board (in squares) is on the view, in its pixels.</summary>
-        public Vector2 ScreenOf(Vector2 boardPoint, float height = 0) => camera.UnprojectPosition(new Vector3(boardPoint.X, height, boardPoint.Y));
+        /// <param name="on">The square whose ground the point lies on, for a point on its edge; by default the square it falls in.</param>
+        public Vector2 ScreenOf(Vector2 boardPoint, float height = 0, GridPosition? on = null) =>
+            camera.UnprojectPosition(new Vector3(boardPoint.X, height + SurfaceHeight(on ?? new GridPosition(Mathf.FloorToInt(boardPoint.X), Mathf.FloorToInt(boardPoint.Y))), boardPoint.Y));
 
         /// <summary>Where a creature's figure stands on the view — eased, as it walks — or null where it has none.</summary>
         public Vector2? FigureScreenOf(Combatant c, float height = 0) =>
@@ -193,9 +192,24 @@ namespace WoundBoundGame
                 return new GridPosition(-1000, -1000);
             }
 
-            var t = -from.Y / along.Y;
-            var hit = from + along * t;
-            return new GridPosition(Mathf.FloorToInt(hit.X), Mathf.FloorToInt(hit.Z));
+            // Where it meets flat ground first, then again at the height of the ground found there:
+            // high ground stands up into the ray, water sinks below it.
+            GridPosition At(float level)
+            {
+                var hit = from + along * ((level - from.Y) / along.Y);
+                return new GridPosition(Mathf.FloorToInt(hit.X), Mathf.FloorToInt(hit.Z));
+            }
+
+            var square = At(0);
+            var level = SurfaceHeight(square);
+            if (level != 0)
+            {
+                square = At(level);
+            }
+
+            // Looking over the edge of high ground: the ray may meet its top before it reaches the ground behind.
+            var near = At(RaisedHeight);
+            return SurfaceHeight(near) == RaisedHeight ? near : square;
         }
 
         /// <summary>Eases the camera and every figure towards where they belong.</summary>
@@ -211,6 +225,7 @@ namespace WoundBoundGame
             pitch.RotationDegrees = new Vector3(Mathf.Lerp(pitch.RotationDegrees.X, pitchTarget, ease), 0, 0);
             yaw.Position = yaw.Position.Lerp(focusTarget, ease);
             camera.Size = Mathf.Lerp(camera.Size, zoomTarget, ease);
+            AnimateScenery(fight, delta);
             Animate(delta);
 
             var present = fight.Combatants.Concat(fight.Steeds).Where(c => !c.HasFled && c.OccupiesSquare || c.IsOutOfFight && !c.HasFled).Distinct().ToList();
@@ -244,8 +259,7 @@ namespace WoundBoundGame
         }
 
         /// <summary>Where a creature stands: the middle of its footprint, a rider up on its horse.</summary>
-        private static Vector3 Where(Combatant c) =>
-            new(c.Position.X + c.Across / 2f, c.IsRiding ? 0.55f : 0, c.Position.Y + c.Across / 2f);
+        private Vector3 Where(Combatant c) => Centre(c, c.Position);
 
         /// <summary>Which way it faces: towards the nearest creature of the other side still in the fight.</summary>
         private static float? FacingOf(Combatant c, Encounter fight)
@@ -271,194 +285,19 @@ namespace WoundBoundGame
             return d.LengthSquared() < 1e-4f ? null : Mathf.Atan2(d.X, d.Y);
         }
 
-        // ---- The ground ----
-
-        private static readonly Color LightSquare = new(0.33f, 0.36f, 0.30f);
-        private static readonly Color DarkSquare = new(0.30f, 0.33f, 0.27f);
-        private static readonly Color Rubble = new(0.42f, 0.34f, 0.24f);
-        private static readonly Color Flagstone = new(0.45f, 0.45f, 0.48f);
-        private static readonly Color Shallow = new(0.24f, 0.42f, 0.58f);
-        private static readonly Color Deep = new(0.10f, 0.22f, 0.42f);
-        private static readonly Color Stone = new(0.48f, 0.46f, 0.44f);
-        private static readonly Color Wood = new(0.50f, 0.36f, 0.22f);
-
-        private void BuildGround(Encounter fight)
-        {
-            var surface = new SurfaceTool();
-            surface.Begin(Mesh.PrimitiveType.Triangles);
-            for (var y = 0; y < fight.Height; y++)
-            {
-                for (var x = 0; x < fight.Width; x++)
-                {
-                    var square = new GridPosition(x, y);
-                    var colour = (x + y) % 2 == 0 ? LightSquare : DarkSquare;
-                    var top = 0f;
-                    if (fight.Setting.Water.TryGetValue(square, out var depth))
-                    {
-                        colour = depth == WaterDepth.Deep ? Deep : Shallow;
-                        top = depth == WaterDepth.Deep ? -0.12f : -0.05f;
-                    }
-                    else
-                    {
-                        colour = fight.GroundAt(square) switch
-                        {
-                            Terrain.Broken => colour.Lerp(Rubble, 0.65f),
-                            Terrain.Sure => colour.Lerp(Flagstone, 0.6f),
-                            _ => colour,
-                        };
-                    }
-
-                    if (fight.Setting.HazardAt(square) is not null)
-                    {
-                        colour = colour.Lerp(new Color(0.9f, 0.7f, 0.2f), 0.25f);
-                    }
-
-                    Quad(surface, x, y, top, colour);
-                }
-            }
-
-            surface.GenerateNormals();
-            var ground = new MeshInstance3D
-            {
-                Mesh = surface.Commit(),
-                MaterialOverride = new StandardMaterial3D { VertexColorUseAsAlbedo = true, Roughness = 0.95f },
-            };
-            terrain.AddChild(ground);
-
-            // The grid, faintly, so squares can be counted from any angle.
-            var lines = new ImmediateMesh();
-            var ink = new StandardMaterial3D { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, AlbedoColor = new Color(0, 0, 0, 0.25f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha };
-            lines.SurfaceBegin(Mesh.PrimitiveType.Lines, ink);
-            for (var x = 0; x <= fight.Width; x++)
-            {
-                lines.SurfaceAddVertex(new Vector3(x, 0.01f, 0));
-                lines.SurfaceAddVertex(new Vector3(x, 0.01f, fight.Height));
-            }
-
-            for (var y = 0; y <= fight.Height; y++)
-            {
-                lines.SurfaceAddVertex(new Vector3(0, 0.01f, y));
-                lines.SurfaceAddVertex(new Vector3(fight.Width, 0.01f, y));
-            }
-
-            lines.SurfaceEnd();
-            terrain.AddChild(new MeshInstance3D { Mesh = lines });
-
-            // Walls, a man and a half high; cover as tall as it is — a crate stack, a waist-high cart.
-            foreach (var wall in fight.Setting.Walls)
-            {
-                Block(wall, 1.6f, Stone, 0.98f);
-            }
-
-            foreach (var (square, grade) in fight.Setting.CoverPieces)
-            {
-                Block(square, grade == Cover.Full ? 1.25f : 0.55f, Wood, grade == Cover.Full ? 0.8f : 0.9f);
-            }
-        }
-
-        private static void Quad(SurfaceTool surface, int x, int y, float top, Color colour)
-        {
-            surface.SetColor(colour);
-            Vector3 a = new(x, top, y), b = new(x + 1, top, y), c = new(x + 1, top, y + 1), d = new(x, top, y + 1);
-            surface.AddVertex(a);
-            surface.AddVertex(b);
-            surface.AddVertex(c);
-            surface.AddVertex(a);
-            surface.AddVertex(c);
-            surface.AddVertex(d);
-        }
-
-        private void Block(GridPosition square, float height, Color colour, float width)
-        {
-            var box = new MeshInstance3D
-            {
-                Mesh = new BoxMesh { Size = new Vector3(width, height, width) },
-                MaterialOverride = new StandardMaterial3D { AlbedoColor = colour, Roughness = 0.9f },
-                Position = new Vector3(square.X + 0.5f, height / 2, square.Y + 0.5f),
-            };
-            terrain.AddChild(box);
-            blocks[square] = (box, colour);
-        }
-
-        // ---- The fog of war ----
-
         private static readonly Color Void = new(0.09f, 0.09f, 0.11f);
 
         /// <summary>
-        /// Draws <paramref name="sight"/> over the board: never-seen ground blacked out, walls and
-        /// cover on it gone; remembered ground dimmed, its walls and cover darkened. Null lifts it.
+        /// Draws <paramref name="sight"/> over the board: never-seen ground blacked out, and the props
+        /// and scatter on it gone; remembered ground dimmed, its props darkened. Null lifts it.
         /// Called whenever what the party sees may have changed.
         /// </summary>
         public void ApplyFog(FogOfWar? sight)
         {
             fog = sight;
-            fogLayer?.QueueFree();
-            fogLayer = null;
-            if (encounter is not { } fight)
+            if (encounter is { } fight)
             {
-                return;
-            }
-
-            foreach (var (square, (box, colour)) in blocks)
-            {
-                var state = sight?.StateOf(square) ?? FogState.Seen;
-                box.Visible = state != FogState.Unseen;
-                ((StandardMaterial3D)box.MaterialOverride).AlbedoColor = state == FogState.Remembered ? colour.Darkened(0.55f) : colour;
-            }
-
-            if (sight is null)
-            {
-                return;
-            }
-
-            fogLayer = new Node3D();
-            AddChild(fogLayer);
-            var unseen = new SurfaceTool();
-            var remembered = new SurfaceTool();
-            unseen.Begin(Mesh.PrimitiveType.Triangles);
-            remembered.Begin(Mesh.PrimitiveType.Triangles);
-            int unseenCount = 0, rememberedCount = 0;
-            for (var y = 0; y < fight.Height; y++)
-            {
-                for (var x = 0; x < fight.Width; x++)
-                {
-                    switch (sight.StateOf(new GridPosition(x, y)))
-                    {
-                        case FogState.Unseen:
-                            Quad(unseen, x, y, 0.03f, Void);
-                            unseenCount++;
-                            break;
-                        case FogState.Remembered:
-                            Quad(remembered, x, y, 0.03f, new Color(0.02f, 0.02f, 0.04f, 0.55f));
-                            rememberedCount++;
-                            break;
-                    }
-                }
-            }
-
-            if (unseenCount > 0)
-            {
-                fogLayer.AddChild(new MeshInstance3D
-                {
-                    Mesh = unseen.Commit(),
-                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                    MaterialOverride = new StandardMaterial3D { ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, VertexColorUseAsAlbedo = true },
-                });
-            }
-
-            if (rememberedCount > 0)
-            {
-                fogLayer.AddChild(new MeshInstance3D
-                {
-                    Mesh = remembered.Commit(),
-                    CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-                    MaterialOverride = new StandardMaterial3D
-                    {
-                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                        VertexColorUseAsAlbedo = true,
-                        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                    },
-                });
+                ApplyFogTexture(fight, sight);
             }
         }
 

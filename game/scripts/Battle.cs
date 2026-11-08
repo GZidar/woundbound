@@ -94,7 +94,7 @@ namespace WoundBoundGame
         private static readonly Color Remembered = new(0.02f, 0.02f, 0.04f, 0.55f);
 
         /// <summary>Where a point on the board (in squares) shows on the screen, through the 3D camera.</summary>
-        private Vector2 Project(Vector2 boardPoint, float height = 0) => BoardOrigin + board3D!.ScreenOf(boardPoint, height);
+        private Vector2 Project(Vector2 boardPoint, float height = 0, GridPosition? on = null) => BoardOrigin + board3D!.ScreenOf(boardPoint, height, on);
 
         /// <summary>
         /// Paints one square: a rectangle on the flat board, the square's own outline as the camera
@@ -111,8 +111,8 @@ namespace WoundBoundGame
             var i = inset / Mathf.Max(1, CellSize);
             Vector2[] corners =
             [
-                Project(new Vector2(square.X + i, square.Y + i)), Project(new Vector2(square.X + 1 - i, square.Y + i)),
-                Project(new Vector2(square.X + 1 - i, square.Y + 1 - i)), Project(new Vector2(square.X + i, square.Y + 1 - i)),
+                Project(new Vector2(square.X + i, square.Y + i), on: square), Project(new Vector2(square.X + 1 - i, square.Y + i), on: square),
+                Project(new Vector2(square.X + 1 - i, square.Y + 1 - i), on: square), Project(new Vector2(square.X + i, square.Y + 1 - i), on: square),
             ];
             if (filled)
             {
@@ -135,7 +135,7 @@ namespace WoundBoundGame
 
             var middle = new Vector2(Mathf.Clamp(c.Position.X, 0, encounter.Width - 1) + c.Across / 2f, Mathf.Clamp(c.Position.Y, 0, encounter.Height - 1) + c.Across / 2f);
             var r = 0.42f * c.Across;
-            var points = Enumerable.Range(0, 33).Select(k => Project(middle + Vector2.FromAngle(Mathf.Tau * k / 32) * r)).ToArray();
+            var points = Enumerable.Range(0, 33).Select(k => Project(middle + Vector2.FromAngle(Mathf.Tau * k / 32) * r, on: c.Position)).ToArray();
             DrawPolyline(points, colour, width);
         }
 
@@ -894,12 +894,7 @@ namespace WoundBoundGame
                             DrawCell(square, HazardEdge, filled: false, width: 2, inset: 3);
                         }
 
-                        var dim = encounter.VisibilityAtSquare(square);
-                        if (dim != Visibility.Good && FogAt(square) == FogState.Seen)
-                        {
-                            DrawCell(square, dim == Visibility.None ? Darkness : Gloom);
-                        }
-
+                        // Dusk and dark are drawn on the 3D board itself (Board3D's light channel).
                         continue;
                     }
 
@@ -1356,10 +1351,9 @@ namespace WoundBoundGame
 
         private void Refresh()
         {
-            if (fog?.Update() == true)
-            {
-                board3D?.ApplyFog(fog);
-            }
+            // Lights move with whoever carries them, so the board's light is redrawn along with its fog.
+            fog?.Update();
+            board3D?.ApplyFog(fog);
 
             UpdateLastSeen();
 

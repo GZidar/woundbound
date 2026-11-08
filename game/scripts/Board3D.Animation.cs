@@ -202,8 +202,8 @@ namespace WoundBoundGame
         }
 
         /// <summary>Where a creature stands on <paramref name="square"/>: the middle of its footprint, up on its horse if riding.</summary>
-        private static Vector3 Centre(Combatant c, GridPosition square) =>
-            new(square.X + c.Across / 2f, c.IsRiding ? 0.55f : 0, square.Y + c.Across / 2f);
+        private Vector3 Centre(Combatant c, GridPosition square) =>
+            new(square.X + c.Across / 2f, (c.IsRiding ? 0.55f : 0) + Footprints.At(square, c.Across).Max(FootHeight), square.Y + c.Across / 2f);
 
         /// <summary>The point <paramref name="distance"/> along a route, the way it's heading there, and the last corner passed.</summary>
         private static (Vector3 At, Vector3 Heading, int Passed) Along(List<Vector3> points, float distance)

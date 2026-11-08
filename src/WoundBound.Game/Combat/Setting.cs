@@ -149,6 +149,9 @@ namespace WoundBound.Game.Combat
         /// <summary>Hard to see for want of light, which light can answer.</summary>
         public bool IsUnlit => Visibility != Visibility.Good && (Cause ?? VisibilityCause.Unlit) == VisibilityCause.Unlit;
 
+        /// <summary>What the place looks like — trees or crates, grass or road. Only the board reads it; the rules never do.</summary>
+        public Scenery Scenery { get; init; } = Scenery.Meadow;
+
         public static Setting Daylight { get; } = new();
 
         /// <summary>Ground of one grade over the given rectangles, inclusive, for writing a map.</summary>

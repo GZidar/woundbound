@@ -517,6 +517,18 @@ namespace WoundBound.Game.Combat
             Visibility = Visibility.None,
             Cause = VisibilityCause.Unlit,
             Ground = Setting.Patches(Terrain.Broken, (6, 0, 9, 1), (6, 7, 9, 8)),
+            Scenery = SignpostScenery(road: 2),
+        };
+
+        /// <summary>The road east to west through the signpost, rows <paramref name="road"/> to four below; the ridge stony, the trees' floor leafy.</summary>
+        private static Scenery SignpostScenery(int road) => new()
+        {
+            Biome = Biome.Meadow,
+            Surfaces = Scenery.Merge(
+                Scenery.SurfaceOf(Surface.Dirt, (-6, road, FieldWidth + 5, road + 4)),
+                Scenery.SurfaceOf(Surface.Road, (-6, road + 1, FieldWidth + 5, road + 3)),
+                Scenery.SurfaceOf(Surface.Gravel, (5, road - 2, 10, road - 1)),
+                Scenery.SurfaceOf(Surface.Leaves, (5, road + 5, 10, road + 6))),
         };
 
         /// <summary>
@@ -530,6 +542,10 @@ namespace WoundBound.Game.Combat
             Name = "The signpost at night, the ambush laid",
             Ground = Setting.Patches(Terrain.Broken, (6, 6, 9, 7), (6, 13, 9, 14)),
             CoverPieces = Setting.CoverOf(Cover.Partial, (2, 4, 4, 4), (2, 15, 4, 15), (8, 11, 8, 11)),
+            Scenery = SignpostScenery(road: 8) with
+            {
+                Props = Scenery.Merge(Scenery.PropOf(Prop.Bush, (2, 4, 4, 4), (2, 15, 4, 15)), Scenery.PropOf(Prop.Rock, (8, 11, 8, 11))),
+            },
         };
 
         /// <summary>
@@ -561,6 +577,15 @@ namespace WoundBound.Game.Combat
             return new Setting
             {
                 Name = "Longreach Crossing",
+                Scenery = new Scenery
+                {
+                    Biome = Biome.Meadow,
+                    Props = Scenery.Merge(Scenery.PropOf(Prop.Pillar, (18, 6, 18, 6), (18, 10, 18, 10)), Scenery.PropOf(Prop.HutWall, (20, 2, 22, 4))),
+                    Surfaces = Scenery.Merge(
+                        Scenery.SurfaceOf(Surface.Road, (-6, 7, 10, 9), (16, 7, FieldWidth + 5, 9)),
+                        Scenery.SurfaceOf(Surface.Gravel, (11, 7, 15, 9)),
+                        Scenery.SurfaceOf(Surface.Flagstone, (17, 7, 19, 9))),
+                },
                 Deployment = [DeploymentZone.Of("the shrine bank", hidden: true, (17, 1, 25, 15))],
                 Water = water,
                 Walls = Setting.Squares((18, 6, 18, 6), (18, 10, 18, 10), (20, 2, 22, 4)),
@@ -642,6 +667,15 @@ namespace WoundBound.Game.Combat
             Fires = new HashSet<GridPosition> { CampfireSquare },
             Ground = Setting.Patches(Terrain.Broken, (16, 0, 19, 4), (16, 13, 19, 17)),
             Raised = Setting.Squares((16, 0, 19, 4)), // the rocks stand over the camp; the gully lies low
+            Scenery = new Scenery
+            {
+                Biome = Biome.Meadow,
+                Surfaces = Scenery.Merge(
+                    Scenery.SurfaceOf(Surface.Road, (-6, 8, FieldWidth + 5, 10)),
+                    Scenery.SurfaceOf(Surface.Dirt, (8, 7, 12, 11)),
+                    Scenery.SurfaceOf(Surface.Gravel, (16, 13, 19, 17)),
+                    Scenery.SurfaceOf(Surface.Stone, (16, 0, 19, 4))),
+            },
             Deployment =
             [
                 DeploymentZone.Of("the rocks", hidden: true, (15, 0, 21, 4)),
@@ -836,6 +870,7 @@ namespace WoundBound.Game.Combat
         {
             Name = "The hedge road",
             Ground = Setting.Patches(Terrain.Broken, (0, 3, 27, 4), (0, 14, 27, 15)),
+            Scenery = new Scenery { Surfaces = Scenery.Merge(Scenery.SurfaceOf(Surface.Dirt, (-6, 7, FieldWidth + 5, 11)), Scenery.SurfaceOf(Surface.Road, (-6, 8, FieldWidth + 5, 10))) },
         };
 
         /// <summary>
@@ -862,7 +897,12 @@ namespace WoundBound.Game.Combat
                 }
             }
 
-            return Setting.Daylight with { Name = "The fen causeway", Water = water };
+            return Setting.Daylight with
+            {
+                Name = "The fen causeway",
+                Water = water,
+                Scenery = new Scenery { Biome = Biome.Fen, Surfaces = Scenery.SurfaceOf(Surface.Dirt, (-6, 8, FieldWidth + 5, 9)) },
+            };
         }
 
         /// <summary>
@@ -921,7 +961,7 @@ namespace WoundBound.Game.Combat
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: Setting.Daylight with { Name = "The village green" }, environment: data.Environment);
+                setting: Setting.Daylight with { Name = "The village green", Scenery = new Scenery { Biome = Biome.Village } }, environment: data.Environment);
         }
 
         /// <summary>
@@ -1034,6 +1074,7 @@ namespace WoundBound.Game.Combat
             Visibility = Visibility.Poor,
             Cause = VisibilityCause.Unlit,
             Ground = Setting.Patches(Terrain.Broken, (18, 13, 21, 15)),
+            Scenery = new Scenery { Biome = Biome.Woodland, Surfaces = Scenery.SurfaceOf(Surface.Gravel, (18, 13, 21, 15)) },
             CoverPieces = Merge(
                 Setting.CoverOf(Cover.Full, (4, 3, 4, 3), (7, 14, 7, 14), (16, 4, 16, 4), (19, 9, 19, 9), (22, 3, 22, 3), (15, 15, 15, 15), (6, 8, 6, 8), (24, 12, 24, 12)),
                 Setting.CoverOf(Cover.Partial, (15, 6, 17, 6), (15, 12, 17, 12), (6, 4, 8, 4), (6, 13, 8, 13), (21, 8, 21, 10))),
@@ -1105,6 +1146,12 @@ namespace WoundBound.Game.Combat
             {
                 Name = "The roadblock",
                 CoverPieces = cover,
+                Scenery = new Scenery
+                {
+                    Biome = Biome.Road,
+                    Props = Scenery.PropOf(Prop.Cart, (17, 4, 17, 5), (17, 14, 17, 15)),
+                    Surfaces = Scenery.Merge(Scenery.SurfaceOf(Surface.Dirt, (-6, 6, FieldWidth + 5, 12)), Scenery.SurfaceOf(Surface.Road, (-6, 7, FieldWidth + 5, 11))),
+                },
                 Deployment = [barricade],
             };
             return new Encounter(FieldWidth, FieldHeight, Deployed(combatants, setting, data, setup), data.RangeBands, dice, gm,
@@ -1141,6 +1188,11 @@ namespace WoundBound.Game.Combat
             {
                 Name = "The strongbox",
                 CoverPieces = Setting.CoverOf(Cover.Partial, (9, 7, 10, 7)),
+                Scenery = new Scenery
+                {
+                    Biome = Biome.Road,
+                    Surfaces = Scenery.Merge(Scenery.SurfaceOf(Surface.Dirt, (-6, 6, FieldWidth + 5, 12)), Scenery.SurfaceOf(Surface.Road, (-6, 7, FieldWidth + 5, 11))),
+                },
                 Deployment = [DeploymentZone.Of("down the road", hidden: false, (15, 2, 21, 16))],
             };
             var strongbox = new Prize("strongbox", new GridPosition(9, 9));
@@ -1173,7 +1225,7 @@ namespace WoundBound.Game.Combat
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: Setting.Daylight with { Name = "The jetty" }, environment: data.Environment,
+                setting: Setting.Daylight with { Name = "The jetty", Scenery = new Scenery { Surfaces = Scenery.SurfaceOf(Surface.Sand, (19, -6, FieldWidth + 5, FieldHeight + 5)) } }, environment: data.Environment,
                 brief: new SceneBrief(Stakes.Relevant, new AdversaryGoal.Escape(DeploymentZone.Of("the boat", hidden: false, (25, 7, 27, 11))),
                     Commitment.Committed, "Smugglers who'd rather lose the cargo than their necks"));
         }
@@ -1203,7 +1255,7 @@ namespace WoundBound.Game.Combat
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: Setting.Daylight with { Name = "The open road" }, environment: data.Environment);
+                setting: Setting.Daylight with { Name = "The open road", Scenery = new Scenery { Surfaces = Scenery.Merge(Scenery.SurfaceOf(Surface.Dirt, (-6, 7, FieldWidth + 5, 11)), Scenery.SurfaceOf(Surface.Road, (-6, 8, FieldWidth + 5, 10))) } }, environment: data.Environment);
         }
 
         /// <summary>
@@ -1362,7 +1414,7 @@ namespace WoundBound.Game.Combat
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: Setting.Daylight with { Name = "The cloister yard" }, environment: data.Environment);
+                setting: Setting.Daylight with { Name = "The cloister yard", Scenery = new Scenery { Biome = Biome.Village, Surfaces = Scenery.SurfaceOf(Surface.Flagstone, (-6, -6, FieldWidth + 5, FieldHeight + 5)) } }, environment: data.Environment);
         }
 
         /// <summary>
@@ -1418,7 +1470,7 @@ namespace WoundBound.Game.Combat
             };
 
             return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
-                setting: Setting.Daylight with { Name = "The birchwood", Ground = Setting.Patches(Terrain.Broken, (10, 2, 13, 4), (10, 13, 13, 15)) },
+                setting: Setting.Daylight with { Name = "The birchwood", Scenery = new Scenery { Biome = Biome.Woodland }, Ground = Setting.Patches(Terrain.Broken, (10, 2, 13, 4), (10, 13, 13, 15)) },
                 environment: data.Environment);
         }
 
