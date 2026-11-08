@@ -99,6 +99,15 @@ namespace WoundBoundGame
             Sync(1);
         }
 
+        /// <summary>Throws away <paramref name="creature"/>'s figure so the next frame builds it afresh — after its look has changed.</summary>
+        public void Rebuild(Combatant creature)
+        {
+            if (figures.Remove(creature, out var figure))
+            {
+                figure.QueueFree();
+            }
+        }
+
         // ---- The camera ----
 
         /// <summary>Zooms in (a positive <paramref name="steps"/>) or out.</summary>
@@ -329,7 +338,10 @@ namespace WoundBoundGame
                 var small = creature.Statblock?.Size == AdversarySize.Small ? 0.8f : 1f;
                 // A bat's wingspan is most of it: drawn at a person's scale, it still fits its square.
                 var tiny = WoundBound.Game.Figures.BodyShape.Of(creature).Plan == WoundBound.Game.Figures.BodyPlan.Winged ? 1.1f : 0.7f;
-                body.Scale = Vector3.One * (creature.IsTiny ? tiny : creature.Across * 1.35f * small);
+                var size = creature.IsTiny ? tiny : creature.Across * 1.35f * small;
+                // A tall character stands taller and a short one shorter, broadening a little with it.
+                var stature = creature.Appearance?.HeightScale ?? 1;
+                body.Scale = new Vector3(size * (1 + (stature - 1) * 0.35f), size * stature, size * (1 + (stature - 1) * 0.35f));
                 Build(creature, colour);
             }
 

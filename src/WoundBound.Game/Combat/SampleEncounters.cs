@@ -675,6 +675,7 @@ namespace WoundBound.Game.Combat
                     Scenery.SurfaceOf(Surface.Dirt, (8, 7, 12, 11)),
                     Scenery.SurfaceOf(Surface.Gravel, (16, 13, 19, 17)),
                     Scenery.SurfaceOf(Surface.Stone, (16, 0, 19, 4))),
+                Cliffs = Setting.Squares((16, 0, 16, 4)), // the rocks drop sheer on the camp's side, and slope away behind
             },
             Deployment =
             [

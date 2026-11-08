@@ -42,7 +42,21 @@ namespace WoundBoundGame
         private WorldEnvironment world = null!;
 
         /// <summary>A prop as drawn: its node, the squares it stands on, and its materials' own colours, for darkening in the fog.</summary>
-        private sealed record PropView(Node3D Root, GridPosition[] Squares, List<(StandardMaterial3D Material, Color Colour)> Materials);
+        private sealed record PropView(Node3D Root, GridPosition[] Squares, List<(StandardMaterial3D Material, Color Colour)> Materials)
+        {
+            /// <summary>The materials that fade when a figure is behind the prop; empty for props that never fade.</summary>
+            public List<StandardMaterial3D> Canopy { get; init; } = new();
+
+            public Vector3 CanopyCentre { get; init; }
+
+            public float CanopyRadius { get; init; }
+
+            /// <summary>How opaque the canopy is drawn now.</summary>
+            public float Opacity { get; set; } = 1;
+        }
+
+        /// <summary>How opaque a canopy is drawn with somebody behind it.</summary>
+        private const float FadedOpacity = 0.28f;
 
         /// <summary>The height a creature stands at on <paramref name="square"/>: up on high ground, wading in water.</summary>
         private float FootHeight(GridPosition square)
@@ -70,6 +84,40 @@ namespace WoundBoundGame
             }
 
             return fight.Setting.Raised.Contains(square) ? RaisedHeight : fight.Setting.Water.ContainsKey(square) ? WaterLine : 0;
+        }
+
+        /// <summary>
+        /// The height of the ground at a point on <paramref name="square"/>'s mesh. Flat across most
+        /// squares; but high ground that isn't a cliff (Scenery.Cliffs) banks down at its edges to
+        /// meet the lower ground beside it, so it slopes. The slope stays inside the raised square,
+        /// whose middle stands at full height: what looks like high ground is high ground.
+        /// </summary>
+        private float VertexHeight(Setting setting, GridPosition square, float vx, float vy)
+        {
+            var top = GroundTop(setting, square);
+            if (!setting.Raised.Contains(square) || setting.Scenery.Cliffs.Contains(square))
+            {
+                return top;
+            }
+
+            var onEdge = vx <= square.X + 0.001f || vx >= square.X + 0.999f || vy <= square.Y + 0.001f || vy >= square.Y + 0.999f;
+            if (!onEdge)
+            {
+                return top;
+            }
+
+            // As low as the lowest ground meeting at this point, cliffs aside: a cliff beside it stands up whole.
+            var low = top;
+            foreach (var (dx, dy) in new[] { (-0.25f, -0.25f), (0.25f, -0.25f), (-0.25f, 0.25f), (0.25f, 0.25f) })
+            {
+                var other = new GridPosition(Mathf.FloorToInt(vx + dx), Mathf.FloorToInt(vy + dy));
+                if (other != square && !(setting.Raised.Contains(other) && setting.Scenery.Cliffs.Contains(other)))
+                {
+                    low = Math.Min(low, GroundTop(setting, other));
+                }
+            }
+
+            return Math.Max(low, 0);
         }
 
         private float GroundTop(Setting setting, GridPosition square) =>
@@ -125,7 +173,7 @@ namespace WoundBoundGame
             }
         }
 
-        private static readonly Dictionary<Surface, Color> SurfaceColours = new()
+        internal static readonly Dictionary<Surface, Color> SurfaceColours = new()
         {
             [Surface.Grass] = new(0.34f, 0.47f, 0.22f),
             [Surface.LongGrass] = new(0.42f, 0.48f, 0.24f),
@@ -202,43 +250,62 @@ namespace WoundBoundGame
                 {
                     var square = new GridPosition(x, y);
                     var top = GroundTop(setting, square);
+                    Vector3 At(float vx, float vy) => new(vx, VertexHeight(setting, square, vx, vy), vy);
                     for (var i = 0; i < 2; i++)
                     {
                         for (var j = 0; j < 2; j++)
                         {
                             float ax = x + i * 0.5f, ay = y + j * 0.5f, bx = ax + 0.5f, by = ay + 0.5f;
-                            Vector3 a = new(ax, top, ay), b = new(bx, top, ay), c = new(bx, top, by), d = new(ax, top, by);
+                            Vector3 a = At(ax, ay), b = At(bx, ay), c = At(bx, by), d = At(ax, by);
                             Color ca = CornerColour(ax, ay, top), cb = CornerColour(bx, ay, top), cc = CornerColour(bx, by, top), cd = CornerColour(ax, by, top);
-                            Tri(surface, a, ca, b, cb, c, cc);
-                            Tri(surface, a, ca, c, cc, d, cd);
+                            // Split along the diagonal that keeps a bank's slope smooth.
+                            if (Math.Abs(a.Y - c.Y) <= Math.Abs(b.Y - d.Y))
+                            {
+                                Tri(surface, a, ca, b, cb, c, cc);
+                                Tri(surface, a, ca, c, cc, d, cd);
+                            }
+                            else
+                            {
+                                Tri(surface, a, ca, b, cb, d, cd);
+                                Tri(surface, b, cb, c, cc, d, cd);
+                            }
                         }
                     }
 
-                    // A side down to each lower neighbour: rock under high ground, earth under a bank.
+                    // A sheer side wherever this square's edge stands above its neighbour's: a cliff
+                    // under high ground, a bank down into water. A sloped edge meets its neighbour and needs none.
+                    var rock = setting.Raised.Contains(square);
+                    var side = rock ? new Color(0.4f, 0.38f, 0.36f) : new Color(0.33f, 0.27f, 0.2f);
+                    var shade = side.Darkened(0.25f);
                     foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
                     {
                         var next = new GridPosition(x + dx, y + dy);
-                        var below = GroundTop(setting, next);
-                        if (below >= top - 0.001f)
-                        {
-                            continue;
-                        }
-
-                        var side = setting.Raised.Contains(square) ? new Color(0.4f, 0.38f, 0.36f) : new Color(0.33f, 0.27f, 0.2f);
-                        var shade = side.Darkened(0.25f);
-                        // The edge shared with the lower square, wound to face it.
-                        Vector3 p, q;
+                        // The edge shared with the neighbour, from left to right as seen from it.
+                        Vector2 p, q;
                         switch (dx, dy)
                         {
-                            case (1, 0): p = new Vector3(x + 1, 0, y + 1); q = new Vector3(x + 1, 0, y); break;
-                            case (-1, 0): p = new Vector3(x, 0, y); q = new Vector3(x, 0, y + 1); break;
-                            case (0, 1): p = new Vector3(x, 0, y + 1); q = new Vector3(x + 1, 0, y + 1); break;
-                            default: p = new Vector3(x + 1, 0, y); q = new Vector3(x, 0, y); break;
+                            case (1, 0): p = new Vector2(x + 1, y + 1); q = new Vector2(x + 1, y); break;
+                            case (-1, 0): p = new Vector2(x, y); q = new Vector2(x, y + 1); break;
+                            case (0, 1): p = new Vector2(x, y + 1); q = new Vector2(x + 1, y + 1); break;
+                            default: p = new Vector2(x + 1, y); q = new Vector2(x, y); break;
                         }
 
-                        Vector3 pt = p with { Y = top }, qt = q with { Y = top }, pb = p with { Y = below }, qb = q with { Y = below };
-                        Tri(surface, pt, side, qt, side, qb, shade);
-                        Tri(surface, pt, side, qb, shade, pb, shade);
+                        var m = (p + q) / 2;
+                        foreach (var (u, v) in new[] { (p, m), (m, q) })
+                        {
+                            float ut = VertexHeight(setting, square, u.X, u.Y), vt = VertexHeight(setting, square, v.X, v.Y);
+                            float ub = VertexHeight(setting, next, u.X, u.Y), vb = VertexHeight(setting, next, v.X, v.Y);
+                            if (ut <= ub + 0.001f && vt <= vb + 0.001f)
+                            {
+                                continue;
+                            }
+
+                            ub = Math.Min(ub, ut);
+                            vb = Math.Min(vb, vt);
+                            Vector3 pt = new(u.X, ut, u.Y), qt = new(v.X, vt, v.Y), pb = new(u.X, ub, u.Y), qb = new(v.X, vb, v.Y);
+                            Tri(surface, pt, side, qt, side, qb, shade);
+                            Tri(surface, pt, side, qb, shade, pb, shade);
+                        }
                     }
                 }
             }
@@ -402,6 +469,7 @@ namespace WoundBoundGame
                 ApplyFog(fog);
             }
 
+            FadeCanopies(delta);
             if (fires.Count == 0)
             {
                 return;
@@ -424,6 +492,45 @@ namespace WoundBoundGame
                 flames.Scale = new Vector3(1, flicker, 1);
                 flames.RotationDegrees = new Vector3(0, t * 40, 0);
                 light.LightEnergy = 2.2f * flicker;
+            }
+        }
+
+        /// <summary>
+        /// Fades a tree's leaves, or a roof, while a figure stands behind it as the camera sees it —
+        /// further from the camera and within the canopy's outline on the screen — so nobody is lost
+        /// behind the scenery. Whichever way the camera turns, the test follows it.
+        /// </summary>
+        private void FadeCanopies(double delta)
+        {
+            var eye = camera.GlobalPosition;
+            var forward = -camera.GlobalTransform.Basis.Z;
+            var right = camera.GlobalTransform.Basis.X;
+            var shown = figures.Values.Where(f => f.Visible).Select(f => f.GlobalPosition + Vector3.Up * 0.6f).ToList();
+            var ease = 1 - Mathf.Exp(-10 * (float)delta);
+            foreach (var view in props)
+            {
+                if (view.Canopy.Count == 0 || !view.Root.Visible)
+                {
+                    continue;
+                }
+
+                var centre = view.Root.GlobalPosition + view.CanopyCentre;
+                var onScreen = camera.UnprojectPosition(centre);
+                var reach = onScreen.DistanceTo(camera.UnprojectPosition(centre + right * view.CanopyRadius));
+                var depth = (centre - eye).Dot(forward);
+                var behind = shown.Any(at => (at - eye).Dot(forward) > depth - 0.3f && camera.UnprojectPosition(at).DistanceTo(onScreen) < reach * 1.15f);
+                var target = behind ? FadedOpacity : 1f;
+                if (view.Opacity == target)
+                {
+                    continue;
+                }
+
+                view.Opacity = Mathf.Abs(view.Opacity - target) < 0.01f ? target : Mathf.Lerp(view.Opacity, target, ease);
+                foreach (var material in view.Canopy)
+                {
+                    material.Transparency = view.Opacity < 0.999f ? BaseMaterial3D.TransparencyEnum.Alpha : BaseMaterial3D.TransparencyEnum.Disabled;
+                    material.AlbedoColor = material.AlbedoColor with { A = view.Opacity };
+                }
             }
         }
 
@@ -457,7 +564,8 @@ namespace WoundBoundGame
                 var lit = state == FogState.Remembered ? 0.45f : view.Squares.Max(LightAt);
                 foreach (var (material, colour) in view.Materials)
                 {
-                    material.AlbedoColor = lit >= 0.999f ? colour : colour.Darkened(1 - lit);
+                    var shade = lit >= 0.999f ? colour : colour.Darkened(1 - lit);
+                    material.AlbedoColor = shade with { A = material.AlbedoColor.A };
                 }
             }
 

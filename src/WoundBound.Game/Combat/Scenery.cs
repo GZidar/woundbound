@@ -22,6 +22,19 @@ namespace WoundBound.Game.Combat
         /// <summary>What the ground is, where the scene names it — a road, a yard of flagstones, mud.</summary>
         public IReadOnlyDictionary<GridPosition, Surface> Surfaces { get; init; } = new Dictionary<GridPosition, Surface>();
 
+        /// <summary>
+        /// High ground whose sides drop sheer — a rock face, a wall-walk — rather than banking down
+        /// (the default). Either way the rules are the same: a square is raised or it isn't.
+        /// </summary>
+        public IReadOnlySet<GridPosition> Cliffs { get; init; } = new HashSet<GridPosition>();
+
+        /// <summary>
+        /// A battlemap picture to draw the board on, where the scene has one (the user, 2026-11-08): the
+        /// art is the ground, and the props are still drawn over it so what can be hidden behind,
+        /// broken or climbed is plain to see.
+        /// </summary>
+        public Backdrop? Backdrop { get; init; }
+
         /// <summary>The default: open meadow, everything worked out.</summary>
         public static Scenery Meadow { get; } = new();
 
@@ -48,6 +61,13 @@ namespace WoundBound.Game.Combat
             return merged;
         }
     }
+
+    /// <summary>
+    /// A battlemap image and how its grid lies on the board: square (0, 0)'s top-left corner is at
+    /// (<paramref name="OriginX"/>, <paramref name="OriginY"/>) in the image's pixels, and a square
+    /// is <paramref name="PixelsPerSquare"/> across.
+    /// </summary>
+    public sealed record Backdrop(string Path, float OriginX, float OriginY, float PixelsPerSquare);
 
     /// <summary>The kind of country a fight is in.</summary>
     public enum Biome

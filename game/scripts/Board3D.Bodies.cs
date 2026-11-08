@@ -117,22 +117,26 @@ namespace WoundBoundGame
                 var head = Material(headColour);
                 var metal = Material(Steel, metallic: 0.6f);
                 var wood = Material(new Color(0.48f, 0.33f, 0.2f));
+                // A character's own build (gender, height, girth) where the player has given one.
+                var look = creature.Appearance;
+                var girth = look?.GirthScale ?? 1;
+                var shoulders = (look?.Gender == FigureGender.Female ? 0.9f : 1) * (0.88f + 0.12f * girth);
                 var bulk = (creature.Armour switch { ArmourWeight.Heavy => 0.34f, ArmourWeight.Medium => 0.3f, ArmourWeight.Light => 0.27f, _ => 0.24f })
-                           * (shape.Hulking ? 1.3f : 1);
+                           * (shape.Hulking ? 1.3f : 1) * girth;
                 stoop = shape.Hunched ? 16 : 0;
 
                 // Two legs and two arms, each hung from its joint so a walk can swing them.
-                arm.Position = Shoulder with { X = Shoulder.X * (shape.Hulking ? 1.25f : 1) };
+                arm.Position = Shoulder with { X = Shoulder.X * (shape.Hulking ? 1.25f : 1) * shoulders };
                 body.AddChild(arm);
-                var legRadius = shape.Hulking ? 0.07f : 0.05f;
+                var legRadius = (shape.Hulking ? 0.07f : 0.05f) * (0.75f + 0.25f * girth);
                 foreach (var (hip, x) in new[] { (leftHip, -0.065f), (rightHip, 0.065f) })
                 {
-                    hip.Position = new Vector3(x * (shape.Hulking ? 1.4f : 1), 0.45f, 0);
+                    hip.Position = new Vector3(x * (shape.Hulking ? 1.4f : 1) * (0.8f + 0.2f * girth), 0.45f, 0);
                     body.AddChild(hip);
                     Part(new CylinderMesh { TopRadius = legRadius, BottomRadius = legRadius * 0.8f, Height = 0.45f }, new Vector3(0, -0.225f, 0), limbs, parent: hip);
                 }
 
-                var armRadius = shape.Hulking ? 0.055f : 0.035f;
+                var armRadius = (shape.Hulking ? 0.055f : 0.035f) * (0.75f + 0.25f * girth);
                 offArm.Position = arm.Position with { X = -arm.Position.X };
                 body.AddChild(offArm);
                 Part(new CylinderMesh { TopRadius = armRadius, BottomRadius = armRadius * 0.85f, Height = 0.3f }, new Vector3(0, -0.15f, 0), limbs, parent: offArm);
@@ -148,8 +152,18 @@ namespace WoundBoundGame
                     Part(new CapsuleMesh { Radius = bulk / 2 + 0.02f, Height = 0.36f }, new Vector3(0, 0.7f, 0), metal);                          // mail or plate over it
                 }
 
+                if (look?.Gender == FigureGender.Female)
+                {
+                    // The tunic flares over the hips.
+                    Part(new CylinderMesh { TopRadius = bulk / 2, BottomRadius = bulk / 2 * 1.3f, Height = 0.2f, RadialSegments = 12 }, new Vector3(0, 0.47f, 0), cloth);
+                }
+
                 var headAt = new Vector3(0, shape.Hulking ? 1.0f : 1.03f, 0);
                 Head(headAt, head, metal, creature.Armour == ArmourWeight.Heavy);
+                if (look is not null && shape.Head == HeadShape.Human && shape.Stuff == BodyStuff.Flesh)
+                {
+                    Hair(headAt, look, creature.Armour == ArmourWeight.Heavy);
+                }
                 if (shape.Tail)
                 {
                     tail.Position = new Vector3(0, 0.45f, -0.08f);
@@ -158,6 +172,48 @@ namespace WoundBoundGame
                 }
 
                 Kit(creature, metal, wood);
+            }
+
+            /// <summary>Each hair colour as drawn.</summary>
+            private static Color HairShade(HairColour hair) => hair switch
+            {
+                HairColour.Black => new Color(0.1f, 0.09f, 0.08f),
+                HairColour.Brown => new Color(0.32f, 0.21f, 0.12f),
+                HairColour.Auburn => new Color(0.5f, 0.24f, 0.13f),
+                HairColour.Red => new Color(0.72f, 0.3f, 0.12f),
+                HairColour.Blond => new Color(0.85f, 0.72f, 0.42f),
+                HairColour.Grey => new Color(0.6f, 0.59f, 0.57f),
+                _ => new Color(0.9f, 0.9f, 0.88f),
+            };
+
+            /// <summary>
+            /// Hair, as the figure's gender has it: cropped short; long down the back; or gathered
+            /// in a knot — in the colour the player chose, or none at all for a bald head. Under a
+            /// helm only what hangs below it shows.
+            /// </summary>
+            private void Hair(Vector3 headAt, WoundBound.Game.Figures.Appearance look, bool helmed)
+            {
+                if (look.Hair == HairColour.Bald)
+                {
+                    return;
+                }
+
+                var hair = Material(HairShade(look.Hair));
+                if (!helmed)
+                {
+                    // A cap over the crown and the back of the head, leaving the face clear.
+                    Part(new SphereMesh { Radius = 0.128f, Height = 0.17f, IsHemisphere = true }, headAt + new Vector3(0, 0.015f, -0.012f), hair, new Vector3(-12, 0, 0));
+                }
+
+                switch (look.Gender)
+                {
+                    case FigureGender.Female:
+                        Part(new BoxMesh { Size = new Vector3(0.2f, 0.3f, 0.06f) }, headAt + new Vector3(0, -0.1f, -0.1f), hair, new Vector3(8, 0, 0));
+                        break;
+                    case FigureGender.Other:
+                        Part(new SphereMesh { Radius = 0.065f, Height = 0.13f }, headAt + new Vector3(0, 0.1f, -0.1f), hair);
+                        break;
+                }
             }
 
             /// <summary>The head on a person's shoulders: a face, a beast's snout and ears, or a helm with nothing inside.</summary>

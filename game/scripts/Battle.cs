@@ -434,6 +434,12 @@ namespace WoundBoundGame
             ReadDemoArguments();
             StartEncounter();
 
+            // A battlemap from the command line: --battlemap <picture>
+            if (OS.GetCmdlineUserArgs() is var bm && System.Array.IndexOf(bm, "--battlemap") is var bi and >= 0 && bi + 1 < bm.Length)
+            {
+                LoadBackdrop(bm[bi + 1]);
+            }
+
             // For checking the camera from the command line: --camera top,turn,zoom
             if (OS.GetCmdlineUserArgs() is var cam && System.Array.IndexOf(cam, "--camera") is var ci and >= 0 && ci + 1 < cam.Length && board3D is not null)
             {
@@ -443,6 +449,9 @@ namespace WoundBoundGame
                     {
                         "top" => Do(board3D.ToggleTopDown),
                         "turn" => Do(() => board3D.Turn(1)),
+                        // at17x2: over square (17, 2), for a screenshot of one spot.
+                        _ when move.StartsWith("at") && move[2..].Split('x') is [var ax, var ay] && float.TryParse(ax, out var fx) && float.TryParse(ay, out var fy)
+                            => Do(() => board3D.FocusOn(new Vector2(fx + 0.5f, fy + 0.5f))),
                         "focus" => Do(() =>
                         {
                             if (RosterFoes().FirstOrDefault() is { } foe)
@@ -876,6 +885,11 @@ namespace WoundBoundGame
                 ? new Dictionary<GridPosition, int>()
                 : encounter.ReachableSquares(active);
 
+            if (!In3D)
+            {
+                DrawFlatScenery();
+            }
+
             for (var y = 0; y < encounter.Height; y++)
             {
                 for (var x = 0; x < encounter.Width; x++)
@@ -898,38 +912,8 @@ namespace WoundBoundGame
                         continue;
                     }
 
+                    // The ground and what stands on it are drawn before this loop (DrawFlatScenery).
                     var rect = SquareRect(square);
-                    DrawRect(rect, (x + y) % 2 == 0 ? LightSquare : DarkSquare);
-
-                    // Water and walls first, then rough ground and sure footing, then the dark over everything.
-                    if (encounter.Setting.Water.TryGetValue(square, out var depth))
-                    {
-                        DrawRect(rect, depth == WaterDepth.Deep ? DeepWater : ShallowWater);
-                    }
-
-                    if (encounter.Setting.IsWall(square))
-                    {
-                        DrawRect(rect, Wall);
-                    }
-                    else if (encounter.Setting.CoverAt(square) is var cover && cover != Cover.None)
-                    {
-                        // Full cover stands the height of the square; partial is a half-height barrier.
-                        var piece = cover == Cover.Full ? rect.Grow(-2) : new Rect2(rect.Position + new Vector2(2, rect.Size.Y * 0.45f), new Vector2(rect.Size.X - 4, rect.Size.Y * 0.4f));
-                        DrawRect(piece, CoverWood);
-                        DrawRect(piece, CoverWood.Darkened(0.4f), filled: false, width: 1.5f);
-                    }
-                    else if (!encounter.Setting.Water.ContainsKey(square))
-                    switch (encounter.GroundAt(square))
-                    {
-                        case Terrain.Broken:
-                            DrawRect(rect, BrokenGround);
-                            DrawString(ThemeDB.FallbackFont, rect.Position + new Vector2(2, CellSize * 0.35f), "∴", HorizontalAlignment.Left, CellSize, Mathf.Max(8, CellSize / 3),
-                                new Color(0.75f, 0.6f, 0.4f, 0.6f));
-                            break;
-                        case Terrain.Sure:
-                            DrawRect(rect, SureGround);
-                            break;
-                    }
 
                     if (reachable.TryGetValue(square, out var cost))
                     {
@@ -1306,6 +1290,7 @@ namespace WoundBoundGame
                 21 => SampleEncounters.JettyEscape(data, Dice(), PickedGm()),
                 _ => SampleEncounters.SignpostAmbush(data, Dice(), PickedGm(), ambush: true),
             };
+            ApplyAppearances(encounter);
             board3D?.Build(encounter, ColourOf);
             fog = fogOn ? new FogOfWar(encounter) : null;
             board3D?.ApplyFog(fog);
@@ -1509,6 +1494,7 @@ namespace WoundBoundGame
             UpdateParty();
 
             var character = shown ?? encounter.Combatants.First(c => c.Side == Side.Party);
+            ShowFigure(character);
             var attack = character.Attack;
             var armourAbsorbs = InventoryCalculator.ArmourDamageAbsorbed(character.Armour);
             characterLabel.Text =
@@ -1898,6 +1884,8 @@ namespace WoundBoundGame
             chooseRow.AddThemeConstantOverride("h_separation", 8);
             column.AddChild(chooseRow);
             characterLabel = WrappingLabel(column);
+            BuildFigureRow(column);
+            BuildBackdropRow(column);
             hoverLabel = WrappingLabel(column);
             hoverLabel.AddThemeColorOverride("font_color", new Color(0.75f, 0.75f, 0.8f));
 
@@ -2364,9 +2352,9 @@ namespace WoundBoundGame
             var tabs = new TabContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
             column.AddChild(tabs);
             Tab("Log", scrolls: false, logLabel);
-            Tab("Character", scrolls: true, characterLabel);
+            Tab("Character", scrolls: true, characterLabel, figureRow);
             Tab("Party", scrolls: true, partyLabel, chooseRow);
-            Tab("Options", scrolls: true, showButtons, actionRows, botRow, gmRow);
+            Tab("Options", scrolls: true, showButtons, actionRows, botRow, gmRow, backdropRow);
             tabs.CurrentTab = 0;
 
             void Tab(string title, bool scrolls, params Control[] parts)

@@ -31,6 +31,7 @@ namespace WoundBound.Game.Combat
             return new Combatant
             {
                 Name = build.CharacterName,
+                Appearance = Figures.Appearance.ForQuickstart(build.CharacterName),
                 Side = side,
                 Build = build,
                 // A rival with two weapons pays its off-hand strike in Stamina, as a character does

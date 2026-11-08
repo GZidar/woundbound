@@ -21,6 +21,9 @@ namespace WoundBound.Game.Combat
     {
         public required string Name { get; init; }
 
+        /// <summary>How the figure is built — gender, height, girth — for telling characters apart on the board; null draws the plain figure. The rules never read it.</summary>
+        public Figures.Appearance? Appearance { get; set; }
+
         /// <summary>
         /// A phantom figure's body — an Illusion's, never in the fight's roster: it can't act, be
         /// hurt or hold ground, and only those taken in by it ever see it (Core Rules §11).

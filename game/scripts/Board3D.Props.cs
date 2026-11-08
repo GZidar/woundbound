@@ -78,7 +78,7 @@ namespace WoundBoundGame
                 }
 
                 done.UnionWith(squares);
-                props.Add(new PropView(root, [.. squares], materials));
+                props.Add(new PropView(root, [.. squares], materials) { Canopy = kit.Canopy, CanopyCentre = kit.CanopyCentre, CanopyRadius = kit.CanopyRadius });
             }
 
             BuildRoofs(fight);
@@ -119,6 +119,28 @@ namespace WoundBoundGame
                 var material = new StandardMaterial3D { AlbedoColor = c, Roughness = roughness };
                 materials.Add((material, c));
                 return material;
+            }
+
+            /// <summary>The materials that fade when a figure stands behind this prop: a tree's leaves, a roof.</summary>
+            public List<StandardMaterial3D> Canopy { get; } = new();
+
+            /// <summary>The middle of the canopy, relative to the prop's root, and how far it spreads.</summary>
+            public Vector3 CanopyCentre { get; private set; }
+
+            public float CanopyRadius { get; private set; }
+
+            /// <summary>Paints a part of the canopy: it fades when someone stands behind it.</summary>
+            public StandardMaterial3D Leaves(Color colour, float vary = 0.06f)
+            {
+                var material = Paint(colour, vary);
+                Canopy.Add(material);
+                return material;
+            }
+
+            public void CanopyAt(Vector3 centre, float radius)
+            {
+                CanopyCentre = centre;
+                CanopyRadius = radius;
             }
 
             public MeshInstance3D Add(Mesh mesh, Vector3 at, StandardMaterial3D material, Vector3? turn = null, Vector3? scale = null, Node3D? parent = null)
@@ -260,8 +282,9 @@ namespace WoundBoundGame
             var trunk = new Node3D { RotationDegrees = lean };
             k.Root.AddChild(trunk);
             k.Add(Cylinder(0.08f, 0.14f, height), new Vector3(0, height / 2, 0), k.Paint(Bark), parent: trunk);
-            var leaf = k.Paint(Leaf, 0.1f);
-            var deep = k.Paint(Leaf.Darkened(0.2f), 0.08f);
+            var leaf = k.Leaves(Leaf, 0.1f);
+            var deep = k.Leaves(Leaf.Darkened(0.2f), 0.08f);
+            k.CanopyAt(new Vector3(0, height + 0.3f, 0), 0.85f);
             k.Add(Lumpy(0.62f, new Vector3(1, 0.9f, 1), k.Seed()), new Vector3(0, height + 0.35f, 0), leaf, new Vector3(0, k.R(0, 360), 0), parent: trunk);
             for (var i = 0; i < 3; i++)
             {
@@ -274,7 +297,8 @@ namespace WoundBoundGame
         private static void BuildPine(Kit k)
         {
             k.Add(Cylinder(0.06f, 0.1f, 0.7f), new Vector3(0, 0.35f, 0), k.Paint(Bark));
-            var needles = k.Paint(PineLeaf, 0.08f);
+            var needles = k.Leaves(PineLeaf, 0.08f);
+            k.CanopyAt(new Vector3(0, 1.35f, 0), 0.9f);
             var y = 0.5f;
             var width = k.R(0.56f, 0.64f);
             for (var tier = 0; tier < 3; tier++)
@@ -297,7 +321,8 @@ namespace WoundBoundGame
                 k.Add(new BoxMesh { Size = new Vector3(0.17f, 0.035f, 0.04f) }, new Vector3(0, 0.35f + i * 0.45f + k.R(0, 0.1f), 0), dark, new Vector3(0, k.R(0, 360), 0));
             }
 
-            var leaf = k.Paint(BirchLeaf, 0.1f);
+            var leaf = k.Leaves(BirchLeaf, 0.1f);
+            k.CanopyAt(new Vector3(0, height, 0), 0.7f);
             for (var i = 0; i < 4; i++)
             {
                 var angle = Mathf.Tau * i / 4 + k.R(0, 1);
@@ -439,9 +464,10 @@ namespace WoundBoundGame
                 var materials = new List<(StandardMaterial3D, Color)>();
                 var kit = new Kit(root, materials, new Rng(SceneryPlan.Hash(new GridPosition(x0, y0), 3)));
                 var rise = span * 0.55f;
-                kit.Add(new PrismMesh { Size = new Vector3(span + 0.4f, rise, length + 0.3f) }, new Vector3(0, rise / 2, 0), kit.Paint(Thatch, 0.04f), new Vector3(0, 90, 0));
-                kit.Add(new BoxMesh { Size = new Vector3(length + 0.34f, 0.1f, 0.14f) }, new Vector3(0, rise, 0), kit.Paint(Thatch.Darkened(0.25f), 0.03f));
-                props.Add(new PropView(root, [.. block], materials));
+                kit.Add(new PrismMesh { Size = new Vector3(span + 0.4f, rise, length + 0.3f) }, new Vector3(0, rise / 2, 0), kit.Leaves(Thatch, 0.04f), new Vector3(0, 90, 0));
+                kit.Add(new BoxMesh { Size = new Vector3(length + 0.34f, 0.1f, 0.14f) }, new Vector3(0, rise, 0), kit.Leaves(Thatch.Darkened(0.25f), 0.03f));
+                kit.CanopyAt(new Vector3(0, rise * 0.4f, 0), Math.Max(span, length) * 0.6f);
+                props.Add(new PropView(root, [.. block], materials) { Canopy = kit.Canopy, CanopyCentre = kit.CanopyCentre, CanopyRadius = kit.CanopyRadius });
             }
         }
 
