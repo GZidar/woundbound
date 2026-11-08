@@ -39,6 +39,8 @@ RuleTrials.NoOpportunityTurns = args.Contains("--no-opp-turns");
 // --setup smart|neutral|poor and --unprepared: how a band met at random is placed (the clearing).
 var setup = Enum.TryParse<SetupSkill>(Text("--setup", "smart"), ignoreCase: true, out var s) ? s : SetupSkill.Smart;
 var prepared = !args.Contains("--unprepared");
+// --band S,W,R: the clearing's band — Skulkers, Wolves, Ratkin — for sizing it.
+(int, int, int)? ClearingBand() => Text("--band", null) is { } b && b.Split(',') is [var bs, var bw, var br] ? (int.Parse(bs), int.Parse(bw), int.Parse(br)) : null;
 var placementSeed = 7;
 // The GM knowledge dial: sheets or seen; left out, it goes with the skill (Best reads the sheets).
 Knowledge? knowledge = Text("--knowledge", null) switch
@@ -84,6 +86,14 @@ var measure = Text("--measure", null) switch
         w is [var wt] ? double.Parse(wt, System.Globalization.CultureInfo.InvariantCulture) : ThreatMeasure.Default.Weight),
     var m => throw new ArgumentException($"--measure wants G,R[,weight] or off, not {m}"),
 };
+// --ruthless R|merciless: a fixed GM intent, 0 to 1 (merciless also finishes the dying). --challenge easy|average|push: a director steers it.
+GmIntent? intent = (Text("--challenge", null), Text("--ruthless", null)) switch
+{
+    ({ } ch, _) => GmIntent.Directed(Enum.Parse<Challenge>(ch, ignoreCase: true)),
+    (_, "merciless") => GmIntent.Merciless,
+    (_, { } r) => GmIntent.Fixed(double.Parse(r, System.Globalization.CultureInfo.InvariantCulture)),
+    _ => null,
+};
 // Every utility GM built, so the look-ahead tally can be summed at the end.
 var utilityGms = new System.Collections.Concurrent.ConcurrentBag<UtilityGmBrain>();
 UtilityGmBrain Kept(UtilityGmBrain gm)
@@ -95,9 +105,9 @@ UtilityGmBrain Kept(UtilityGmBrain gm)
 IGmBrain Gm() => gmName switch
 {
     "tripping" => new TrippingGmBrain(),
-    "best" => Kept(new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure)),
-    "balanced" => Kept(new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure)),
-    "poor" => Kept(new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure)),
+    "best" => Kept(new UtilityGmBrain(BrainSkill.Best, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent)),
+    "balanced" => Kept(new UtilityGmBrain(BrainSkill.Balanced, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent)),
+    "poor" => Kept(new UtilityGmBrain(BrainSkill.Poor, knowledge: knowledge, caution: caution, peers: peers, foresight: foresight, measure: measure, intent: intent)),
     _ => new SimpleGmBrain(),
 };
 
@@ -179,7 +189,7 @@ Encounter Stage(IDiceRoller dice) => which switch
     "glamour" => SampleEncounters.GlamouredMill(data, dice, Gm()),
     "roadblock" => SampleEncounters.Roadblock(data, dice, Gm(), ambush: true),
     "gnoll" => SampleEncounters.GnollRaid(data, dice, Gm(), ambush: true),
-    "clearing" => SampleEncounters.WoodlandClearing(data, dice, Gm(), setup, prepared, placementSeed + dice.Roll(1000)),
+    "clearing" => SampleEncounters.WoodlandClearing(data, dice, Gm(), setup, prepared, placementSeed + dice.Roll(1000), ClearingBand()),
     "guardians" => SampleEncounters.ShrineGuardians(data, dice, Gm()),
     "stag" => SampleEncounters.HollowStagInTheBirchwood(data, dice, Gm()),
     _ => SampleEncounters.SignpostAmbush(data, dice, Gm(), ambush: true),
@@ -202,7 +212,7 @@ var fight = which switch
     "champion" => "Salla, Drovan, Joren, Mirella and Elthric v a Noble Champion and two retainers on the village green",
     "outriders" => "Salla, Drovan, Joren, Mirella and Elthric v four Tollroad Bandits on horseback and two ambushers on foot",
     "glamour" => "Salla, Drovan, Joren, Mirella and Elthric v two Tollroad Bandits, two wolves, four Vampire Bats and a Fen Glamourer at the old mill",
-    "clearing" => $"Salla, Drovan, Joren, Mirella and Elthric met at dusk in a woodland clearing by four skulkers, four wolves and four ratkin, placed by a {setup} setup" + (prepared ? ", lying in wait" : string.Empty),
+    "clearing" => $"Salla, Drovan, Joren, Mirella and Elthric met at dusk in a woodland clearing by skulkers, wolves and ratkin, placed by a {setup} setup" + (prepared ? ", lying in wait" : string.Empty),
     "gnoll" => "Salla, Drovan, Joren, Mirella and Elthric v a Duskfang Gnoll (Rampage) with a Tollroad Bandit and two Roadside Bandits",
     "roadblock" => "Salla, Drovan, Joren, Mirella and Elthric v a roadblock: four crossbows behind crates, four bandits behind carts, and the Tollroad Bandit",
     "guardians" => "Salla, Drovan, Joren, Mirella and Elthric v a Stoneheart Golem and two Animated Suits of Mail in a cloister yard",
@@ -390,6 +400,15 @@ var (weighedAll, changedAll, failedAll) = utilityGms.Aggregate((0, 0, 0), (t, g)
 if (weighedAll > 0)
 {
     Console.WriteLine($"Look-ahead: {weighedAll} decisions weighed, {changedAll} ({(double)changedAll / weighedAll:P0}) taken other than the top-scored plan, {failedAll} games lost to a refusal.");
+}
+
+// The GM's ruthlessness round by round, averaged over every fight still going at that round.
+if (utilityGms.Any(g => g.Intent.Steer is not null))
+{
+    var rounds = utilityGms.Select(g => g.RuthlessnessByRound).Where(r => r.Count > 0).ToList();
+    var by = Enumerable.Range(0, Math.Min(8, rounds.Max(r => r.Count)))
+        .Select(i => rounds.Where(r => r.Count > i).Average(r => r[i]).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture));
+    Console.WriteLine($"Ruthlessness by round: {string.Join(" ", by)} (fight mean {rounds.Average(r => r.Average()):0.00}).");
 }
 
 int Option(string name, int fallback) => int.TryParse(Text(name, null), out var value) ? value : fallback;

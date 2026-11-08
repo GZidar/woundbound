@@ -54,12 +54,16 @@ public class PlacementTests
     }
 
     [Fact]
-    public void APoorSetup_Huddles()
+    public void APoorSetup_WalksTheShooterUp_AndLeavesTheBladesAtTheBack_InTheOpen()
     {
         var band = Placed(SetupSkill.Poor);
+        var fighter = new GridPosition(5, 9);
+        var crossbow = band.Single(c => c.Name == "Crossbow");
+        var wolf = band.Single(c => c.Name == "Wolf");
 
-        var widest = band.SelectMany(a => band.Select(b => a.DistanceTo(b))).Max();
-        Assert.True(widest <= 3, $"spread {widest}");
+        Assert.True(crossbow.Position.DistanceTo(fighter) <= 3, $"crossbow at {crossbow.Position}");
+        Assert.True(wolf.Position.DistanceTo(fighter) >= 9, $"wolf at {wolf.Position}");
+        Assert.All(band, c => Assert.Equal(Cover.None, Bushes.CoverAgainst(fighter, c.Position)));
     }
 
     [Theory]

@@ -103,6 +103,14 @@ namespace WoundBound.Game.Combat.Brains
         /// Either way, no creature can aim at somebody it can't see: the rules refuse it.
         /// </summary>
         bool PeersThroughFog => true;
+
+        /// <summary>
+        /// Whether the GM lets <paramref name="creature"/> break although no Morale trait says so: a
+        /// non-Solo adversary below half its Body, or one that has watched <paramref name="alliesDown"/>
+        /// of its side drop (GM Reference §8, "Let non-Solo adversaries break"). It is a GM easing a fight
+        /// it wants the party to win. By default, never.
+        /// </summary>
+        bool LetsBreak(BattleView view, Combatant creature, int alliesDown) => false;
     }
 
     /// <summary>One thing an adversary does on its turn.</summary>

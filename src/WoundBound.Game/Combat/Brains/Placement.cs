@@ -17,7 +17,7 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>A band facing the party at a sensible distance, taking the ground as it comes.</summary>
         Neutral,
 
-        /// <summary>Bunched together, far back, in the open.</summary>
+        /// <summary>Every creature where it does least: shooters too close, blades too far back, all in the open and the light.</summary>
         Poor,
     }
 
@@ -109,8 +109,21 @@ namespace WoundBound.Game.Combat.Brains
             switch (skill)
             {
                 case SetupSkill.Poor:
-                    // As far back as the zone goes, and huddled together.
-                    return nearest - (placed.Count == 0 ? 0 : 1.5 * placed.Min(a => a.DistanceTo(square)));
+                    // Each creature where it does least: shooters walked up into the party's reach, blades
+                    // left at the back to arrive late and one by one, everyone in the open and in the light.
+                    double poor = IsShooter(creature) ? -Math.Abs(nearest - 2) : -Math.Abs(nearest - 11);
+                    poor -= 2 * party.Average(p => setting.CoverAgainst(p.Position, square, creature.Across) switch
+                    {
+                        Cover.Full => 1.0,
+                        Cover.Partial => 0.6,
+                        _ => 0,
+                    });
+                    if (dark.TryGetValue(square, out var unseen))
+                    {
+                        poor -= unseen switch { Visibility.None => 1.5, Visibility.Poor => 0.75, _ => 0 };
+                    }
+
+                    return poor;
 
                 case SetupSkill.Neutral:
                     // The right distance, in a line facing the party: nothing more is weighed.

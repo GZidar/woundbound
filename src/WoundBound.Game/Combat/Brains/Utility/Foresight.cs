@@ -81,7 +81,9 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private Option? Foresee(BattleView view, GmTurn turn, List<Option> options)
         {
             var sight = Foresight;
-            if (!sight.LooksAhead || options.Count < 2 || !view.Encounter.CanForkAtStep)
+            // Its games are scored on who wins, so it looks ahead only when it plays for the kill:
+            // a merciful GM's plans would be pulled back towards the ruthless one (2026-11-08).
+            if (!sight.LooksAhead || options.Count < 2 || !view.Encounter.CanForkAtStep || Ruthlessness < 1)
             {
                 return null;
             }
@@ -148,7 +150,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private static double?[,] PlayForward(Encounter live, GmTurn turn, IReadOnlyList<Option> candidates, int[] seeds,
             IReadOnlyList<(Combatant Creature, double Worth)> worth, Foresight sight, Knowledge knowledge, bool peers)
         {
-            var steps = candidates.Select(option => (First: StepFor(option, turn),
+            var steps = candidates.Select(option => (First: Step(option, turn),
                 Then: option.Kind == OptionKind.Move && option.Then is { } next ? FollowUp(option with { Kind = next, Square = null }, turn) : null)).ToList();
             var outcomes = new double?[candidates.Count, seeds.Length];
             Parallel.For(0, candidates.Count * seeds.Length, n =>
@@ -207,7 +209,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         {
             try
             {
-                return StepFor(then, turn) is var step && step != GmStep.End ? step : null;
+                return Step(then, turn) is var step && step != GmStep.End ? step : null;
             }
             catch (InvalidOperationException)
             {

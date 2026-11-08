@@ -947,13 +947,19 @@ namespace WoundBound.Game.Combat
         /// <summary>
         /// A clearing in the woods at dusk — a random encounter, nobody's set piece: trees to stand
         /// behind (full cover), lines of bushes (partial), a scree of broken rock, and the party's own
-        /// lights against the gloom. The band met there — four Reedmarsh Skulkers, four Timber Wolves and
-        /// four Bramble Ratkin, none of them quick to break, a Standard Challenge for five (GM Reference §5) — is placed by the GM's
+        /// lights against the gloom. The band met there — three Reedmarsh Skulkers, two Timber Wolves and
+        /// two Bramble Ratkin, none of them quick to break — is placed by the GM's
         /// setup (<see cref="Brains.Placement"/>), anywhere from Short to Long of the party, lying in
         /// wait when <paramref name="prepared"/>.
+        ///
+        /// <para>The band is sized to play as a Standard fight, not priced as one. Twelve of them (4/4/4,
+        /// Threat 5) cost a Standard Challenge, yet the Best party won only 3-17% of fights against them here, and 42% even on
+        /// open ground in daylight. Seven (Threat 3, priced Easy) give the party 77% wins against a Neutral
+        /// setup lying in wait, as the other Standard fights do (2026-11-08). A big mixed band, archers
+        /// screening a pack, is worth more than its rows add up to.</para>
         /// </summary>
         public static Encounter WoodlandClearing(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null,
-            Brains.SetupSkill setup = Brains.SetupSkill.Smart, bool prepared = true, int seed = 7)
+            Brains.SetupSkill setup = Brains.SetupSkill.Smart, bool prepared = true, int seed = 7, (int Skulkers, int Wolves, int Ratkin)? size = null)
         {
             var party = new List<Combatant>
             {
@@ -963,26 +969,34 @@ namespace WoundBound.Game.Combat
                 CombatantFactory.FromCharacter(MirellaVask(data, lantern: true), new GridPosition(10, 8)),
                 CombatantFactory.FromCharacter(ElthricDane(data, torch: true), new GridPosition(10, 10)),
             };
-            var band = new List<Combatant>
-            {
-                CombatantFactory.FromAdversary(data.Adversary("Reedmarsh Skulker"), "First skulker", new GridPosition(0, 0)),
-                CombatantFactory.FromAdversary(data.Adversary("Reedmarsh Skulker"), "Second skulker", new GridPosition(0, 1)),
-                CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "First wolf", new GridPosition(0, 2)),
-                CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "Second wolf", new GridPosition(0, 3)),
-                CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Biter", new GridPosition(0, 4)),
-                CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Shiv", new GridPosition(0, 5)),
-                CombatantFactory.FromAdversary(data.Adversary("Reedmarsh Skulker"), "Third skulker", new GridPosition(0, 6)),
-                CombatantFactory.FromAdversary(data.Adversary("Reedmarsh Skulker"), "Fourth skulker", new GridPosition(0, 7)),
-                CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "Third wolf", new GridPosition(0, 8)),
-                CombatantFactory.FromAdversary(data.Adversary("Timber Wolf"), "Fourth wolf", new GridPosition(0, 9)),
-                CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Sneak", new GridPosition(0, 10)),
-                CombatantFactory.FromAdversary(data.Adversary("Bramble Ratkin"), "Ratkin Nipper", new GridPosition(0, 11)),
-            };
+            var band = ClearingBand(data, size ?? DefaultClearingBand);
 
             Brains.Placement.Place(band, party, WoodlandAtDusk, data.Environment, data.RangeBands, FieldWidth, FieldHeight,
                 Brains.Placement.ZoneAround(party, FieldWidth, FieldHeight, minimum: 3, maximum: 12), setup, prepared, new Random(seed));
             return new Encounter(FieldWidth, FieldHeight, [.. party, .. band], data.RangeBands, dice, gm,
                 setting: WoodlandAtDusk, environment: data.Environment);
+        }
+
+        /// <summary>The clearing's band as it is fought: how many Skulkers, Wolves and Ratkin.</summary>
+        public static (int Skulkers, int Wolves, int Ratkin) DefaultClearingBand { get; } = (3, 2, 2);
+
+        /// <summary>The clearing's band, named in order, all placed later by the GM's setup.</summary>
+        private static List<Combatant> ClearingBand(GameData data, (int Skulkers, int Wolves, int Ratkin) band)
+        {
+            string[] order = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth"];
+            var made = new List<Combatant>();
+            void Add(string statblock, string noun, int count)
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    made.Add(CombatantFactory.FromAdversary(data.Adversary(statblock), $"{order[i]} {noun}", new GridPosition(0, made.Count)));
+                }
+            }
+
+            Add("Reedmarsh Skulker", "skulker", band.Skulkers);
+            Add("Timber Wolf", "wolf", band.Wolves);
+            Add("Bramble Ratkin", "ratkin", band.Ratkin);
+            return made;
         }
 
         /// <summary>The clearing: dusk under the trees, so a light is what anybody is seen by.</summary>

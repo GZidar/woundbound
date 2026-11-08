@@ -398,7 +398,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 foreach (var victim in caught)
                 {
                     var blow = assess.Blow(actor, line, victim, line.DamageDieSides, assess.Dodge(victim) + View.VisibilityDodgeModifier(victim, seer: actor));
-                    var value = blow.ExpectedDealt * assess.PerWound(victim) + 0.3 * blow.Kill * assess.Value(victim);
+                    var value = blow.ExpectedDealt * assess.PerWound(victim) + assess.KillWorth(victim, blow.Kill);
                     worth += victim.Side == actor.Side ? -1.5 * value : value;
                 }
 
@@ -503,6 +503,30 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var (worth, with) = assess.BestAttack(actor, at, target);
                 if (with is null || (checkRules && !View.CanAttack(actor, target)))
                 {
+                    continue;
+                }
+
+                var downed = target.IsDefenceless && actor.Side == Side.Adversaries && target.Side != Side.Adversaries && !assess.FinishesTheDowned;
+                if (downed && assess.Ruthlessness < Assessor.SparesTheDownedBelow)
+                {
+                    continue; // a merciful GM leaves anybody lying helpless alone
+                }
+
+                if (downed && target.DiesLikeACharacter && target.BodyStatus is BodyStatus.Dying or BodyStatus.Stable)
+                {
+                    // A downed character is not to be finished (the user's ruling, 2026-11-08): players
+                    // rightly hate it. A merciful GM leaves them alone. Any harder GM may lay one blow on each,
+                    // once a fight, and only one that can't kill them: the threat is what holds the table.
+                    // A hit on the dying takes a flat wound (Core Rules §4, "Dying"), so it waits for one still
+                    // at 0 or better, who stays two failed Presence rolls from death after it.
+                    if (assess.Menaced?.Contains(target) == true
+                        || target.Body - 1 < Rules.Calculation.PlayStateCalculator.MinBodyWounds + 2)
+                    {
+                        continue;
+                    }
+
+                    yield return new Option(OptionKind.Attack, Assessor.MenaceWorth * assess.Ruthlessness * Wants(actor, target),
+                        $"{with.Name} at {target.Name}, lying there", Target: target, With: with);
                     continue;
                 }
 
@@ -1043,7 +1067,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 var dodge = assess.Dodge(target) + View.VisibilityDodgeModifier(target);
                 var now = assess.Blow(helper, with, target, with.DamageDieSides, dodge);
                 var down = assess.Blow(helper, with, target, with.DamageDieSides, dodge - 2);
-                gain += (down.ExpectedDealt - now.ExpectedDealt) * assess.PerWound(target) + 0.3 * (down.Kill - now.Kill) * assess.Value(target);
+                gain += (down.ExpectedDealt - now.ExpectedDealt) * assess.PerWound(target) + assess.KillWorth(target, down.Kill - now.Kill);
             }
 
             return assess.ControlChance(actor, target, topples: true) * (gain + HarryWorth(actor, target, care: 1));
@@ -1053,7 +1077,8 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// What a manoeuvre's Stamina costs: the Stamina, and for the party the Opportunity it banks
         /// the GM — an adversary's spend hands nobody anything (GM Reference §9).
         /// </summary>
-        private double SpendCostFor(Combatant actor) => actor.Side == Side.Party ? 1.0 : 0.6;
+        /// <remarks>A merciful GM buys fewer extra actions: each is more harm piled on the party.</remarks>
+        private double SpendCostFor(Combatant actor) => actor.Side == Side.Party ? 1.0 : 0.6 + 0.8 * (1 - assess.Pressing);
 
         /// <summary>
         /// A Disarm: the target Off-guard — easier to hit for everyone still to act, worse at hitting

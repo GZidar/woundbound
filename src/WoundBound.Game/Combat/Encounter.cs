@@ -4629,12 +4629,18 @@ namespace WoundBound.Game.Combat
                 return;
             }
 
-            foreach (var creature in Fighting(Side.Adversaries).Where(a => !a.IsBroken && a.Morale is not null).ToList())
+            foreach (var creature in Fighting(Side.Adversaries).Where(a => !a.IsBroken).ToList())
             {
-                if (creature.Morale!.IsBroken(creature, AlliesDown(creature), BelievedBody(creature)))
+                if (creature.Morale is { } morale && morale.IsBroken(creature, AlliesDown(creature), BelievedBody(creature)))
                 {
                     creature.IsBroken = true;
-                    Write($"{creature.Name} has had enough ({creature.Morale.Trait}) — it breaks, and looks for a way out.");
+                    Write($"{creature.Name} has had enough ({morale.Trait}) — it breaks, and looks for a way out.");
+                }
+                else if (creature.Role != AdversaryRole.Solo && creature.Build is null && !creature.IsSteed && !creature.IsPhantom
+                         && !view.MustNotEscape(creature) && gm.LetsBreak(GmView, creature, AlliesDown(creature)))
+                {
+                    creature.IsBroken = true;
+                    Write($"{creature.Name} has seen enough — the GM lets it break, and it looks for a way out.");
                 }
             }
         }

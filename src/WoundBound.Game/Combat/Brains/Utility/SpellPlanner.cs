@@ -344,7 +344,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                         : Encounter.SwarmCoverage(target, plan) is { } covered ? (Math.Min(covered, target.Body), covered >= target.Body ? 1 : 0)
                         : (dealt, kill);
                 }
-                var value = (odds.Success * dealt * PerWound(target, type) + 0.3 * odds.Success * kill * assess.Value(target))
+                var value = (odds.Success * dealt * PerWound(target, type) + assess.KillWorth(target, odds.Success * kill))
                             * (target.Side == actor.Side ? -1.5 : 1);
                 worth += value;
             }

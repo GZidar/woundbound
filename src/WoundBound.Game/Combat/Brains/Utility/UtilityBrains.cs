@@ -44,9 +44,11 @@ namespace WoundBound.Game.Combat.Brains.Utility
         private readonly Random random;
 
         public UtilityGmBrain(BrainSkill? skill = null, Random? random = null, Knowledge? knowledge = null, double caution = GmCaution, bool? peers = null,
-            Foresight? foresight = null, ThreatMeasure? measure = null)
+            Foresight? foresight = null, ThreatMeasure? measure = null, GmIntent? intent = null)
         {
             Skill = skill ?? BrainSkill.Best;
+            Intent = intent ?? GmIntent.Ruthless;
+            Ruthlessness = Intent.Ruthlessness;
             Foresight = foresight ?? Foresight.For(Skill);
             Measure = measure ?? ThreatMeasure.For(Skill);
             planning = Plays with { Care = Plays.Care * caution };
@@ -96,9 +98,63 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>The knowledge that goes with a skill when none is named: the challenge scales both together.</summary>
         public static Knowledge KnowledgeFor(BrainSkill skill) => skill.Name == BrainSkill.Best.Name ? Knowledge.Sheets : Knowledge.Seen;
 
+        /// <summary>How it sets its ruthlessness: fixed, or steered round by round towards a challenge.</summary>
+        public GmIntent Intent { get; }
+
+        /// <summary>How hard it plays for the kill this round, 0 to 1 (<see cref="Assessor.Ruthlessness"/>).</summary>
+        public double Ruthlessness { get; private set; }
+
+        /// <summary>Each round's ruthlessness as the director set it, from round 1 — for the sim and the table to read.</summary>
+        public IReadOnlyList<double> RuthlessnessByRound => steeredRounds;
+
+        private readonly List<double> steeredRounds = [];
+        private int steeredRound;
+
+        /// <summary>
+        /// Once a round, before anything in it is chosen, the director reads the party's lead and
+        /// eases off or presses on towards its challenge. Round 1 keeps the starting ruthlessness.
+        /// </summary>
+        private void SteerRound(BattleView view)
+        {
+            if (view.Round == steeredRound)
+            {
+                return;
+            }
+
+            steeredRound = view.Round;
+            if (Intent.Steer is { } challenge && view.Round > 1)
+            {
+                Ruthlessness = GmIntent.Steered(Ruthlessness, challenge, GmIntent.Lead(view));
+            }
+
+            steeredRounds.Add(Ruthlessness);
+        }
+
+        /// <summary>
+        /// A GM short of ruthless lets its creatures break as GM Reference §8 suggests, so the fight ends
+        /// in a rout rather than a body count: below half its own Body, or once half its side is down.
+        /// Breaking at the first ally down routed whole bands in two rounds (sims, 2026-11-08), which is no fight at all.
+        /// </summary>
+        public bool LetsBreak(BattleView view, Combatant creature, int alliesDown)
+        {
+            if (Ruthlessness >= LetsBreakBelow)
+            {
+                return false;
+            }
+
+            var band = view.Combatants.Count(c => c.Side == creature.Side && !c.IsSteed && !c.IsPhantom);
+            return creature.Body * 2 < creature.BodyMax || alliesDown * 2 >= band;
+        }
+
+        /// <summary>The ruthlessness under which the GM lets its creatures break (<see cref="LetsBreak"/>).</summary>
+        public const double LetsBreakBelow = 0.3;
+
         /// <summary>An assessor that sees the party as this GM does.</summary>
         private Assessor Assess(BattleView view) => new(view, Knowledge, Side.Adversaries)
         {
+            Ruthlessness = Ruthlessness,
+            FinishesTheDowned = Intent.FinishesTheDowned,
+            Menaced = menaced,
             Measured = Measure.Measures && measured.Count > 0 ? measured : null,
             MeasuredWeight = Measure.Weight,
         };
@@ -136,6 +192,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
 
         public override Combatant ChooseOwedTurn(BattleView view)
         {
+            SteerRound(view);
             var candidates = view.YetToAct.ToList();
             return Choose.Pick(candidates, a => FreshTurnWorth(view, a), Plays, random);
         }
@@ -143,13 +200,15 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// <summary>Buys an extra turn where one is worth more than an Opportunity kept.</summary>
         public override Combatant? ChooseExtraTurn(BattleView view)
         {
+            SteerRound(view);
             var best = view.Adversaries.Where(a => a.CanTakeExtraTurn && !a.IsBroken)
                 .Select(a => (Adversary: a, Worth: FreshTurnWorth(view, a)))
                 .OrderByDescending(x => x.Worth)
                 .FirstOrDefault();
             // A banked Opportunity keeps, so it waits for a turn worth having; an Immediate one
             // lapses before its spender's next turn, and a modest turn beats none at all.
-            var bar = view.ImmediateOpportunities > 0 ? ImmediateBar : 1.0;
+            // A merciful GM buys fewer: each extra turn is more harm piled on the party.
+            var bar = (view.ImmediateOpportunities > 0 ? ImmediateBar : 1.0) * (2 - Math.Pow(Math.Clamp(Ruthlessness, 0, 1), 2));
             return best.Adversary is not null && best.Worth >= bar ? best.Adversary : null;
         }
 
@@ -164,6 +223,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             // A new round: what the party actually does, measured from where the fight stands, before
             // anything is chosen on it (the user's direction, 2026-11-07).
             MeasureRound(view, turn);
+            SteerRound(view);
 
             var actor = turn.Actor;
             if (actor.IsBroken)
@@ -253,7 +313,20 @@ namespace WoundBound.Game.Combat.Brains.Utility
         }
 
         /// <summary>The step an option chosen on <paramref name="turn"/> asks the encounter for.</summary>
-        private static GmStep StepFor(Option choice, GmTurn turn) =>
+        private GmStep StepFor(Option choice, GmTurn turn)
+        {
+            if (choice.Kind == OptionKind.Attack && choice.Target is { IsDefenceless: true, Side: not Side.Adversaries } downed)
+            {
+                menaced.Add(downed);
+            }
+
+            return Step(choice, turn);
+        }
+
+        /// <summary>The downed characters it has laid its one blow on (<see cref="Assessor.Menaced"/>).</summary>
+        private readonly HashSet<Combatant> menaced = [];
+
+        private static GmStep Step(Option choice, GmTurn turn) =>
             choice.Kind switch
             {
                 OptionKind.Move => new GmStep.Move(choice.Square!.Value),

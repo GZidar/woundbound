@@ -447,8 +447,62 @@ namespace WoundBound.Game.Combat.Brains.Utility
         public static double SpendPrice(Combatant c, double blow) =>
             c.TacticalSpendsPerRound - c.TacticalSpendsThisRound <= 1 ? 0.5 + 0.5 * Math.Max(0, blow) : 0.5;
 
-        /// <summary>What one wound to <paramref name="c"/> is worth: its value spread over the wounds it can take — a Minion has one.</summary>
-        public double PerWound(Combatant c) => Value(c) / Math.Max(1, c.IsMinion ? 1 : c.Body);
+        /// <summary>
+        /// What one wound to <paramref name="c"/> is worth: its value spread over the wounds it can take — a Minion has one.
+        /// A GM short of ruthless (<see cref="Ruthlessness"/>) holds a wound to a character already hurt as worth
+        /// less, so its harm spreads instead of piling on whoever is nearest to dropping.
+        /// </summary>
+        public double PerWound(Combatant c)
+        {
+            var perWound = Value(c) / Math.Max(1, c.IsMinion ? 1 : c.Body);
+            var mercy = 1 - Mercy(c);
+            if (mercy <= 0 || c.IsMinion || c.BodyMax <= 0)
+            {
+                return perWound;
+            }
+
+            var healthy = Math.Clamp((double)c.Body / c.BodyMax, 0, 1);
+            return perWound * (1 - mercy + mercy * healthy * healthy);
+        }
+
+        /// <summary>What dropping <paramref name="target"/> is worth on top of the wounds, at a chance <paramref name="kill"/>: less to a merciful GM.</summary>
+        public double KillWorth(Combatant target, double kill) => 0.3 * kill * Value(target) * Mercy(target);
+
+        /// <summary>
+        /// How hard this brain plays for the kill, 0 to 1 — the GM's intent, not its cleverness (the
+        /// user's ruling, 2026-11-08). At 1 it focus-fires and finishes the dying; lower, it spreads its
+        /// harm, cares less for dropping anyone, buys fewer extra actions, and under
+        /// <see cref="SparesTheDownedBelow"/> leaves the dying alone. Every move is still the best one for that intent.
+        /// </summary>
+        public double Ruthlessness { get; init; } = 1;
+
+        /// <summary>The ruthlessness under which a GM leaves a dying character alone.</summary>
+        public const double SparesTheDownedBelow = 0.5;
+
+        /// <summary>
+        /// Whether this GM finishes the dying: only at its most extreme, Merciless (<see cref="GmIntent.Merciless"/>).
+        /// Below that it lays at most one blow on each, one that can't kill (the user's ruling, 2026-11-08).
+        /// </summary>
+        public bool FinishesTheDowned { get; init; }
+
+        /// <summary>The downed characters this GM has already laid its one blow on, this fight.</summary>
+        public IReadOnlySet<Combatant>? Menaced { get; init; }
+
+        /// <summary>
+        /// What one blow on a downed character that can't kill them is worth at full ruthlessness: a little
+        /// fear for the table, about a third of a middling blow at someone standing, so it is chosen only
+        /// when little better is in reach.
+        /// </summary>
+        public const double MenaceWorth = 0.4;
+
+        /// <summary>
+        /// How hard this brain piles on <paramref name="target"/>, 0 to 1: only a GM's foes are spared anything.
+        /// It goes as the square of the ruthlessness, because sims (2026-11-08) found the top half of a straight dial did nothing.
+        /// </summary>
+        public double Mercy(Combatant target) => side == Side.Adversaries && target.Side != Side.Adversaries ? Pressing : 1;
+
+        /// <summary>How hard this GM presses, from its ruthlessness: <see cref="Mercy"/>'s curve.</summary>
+        public double Pressing => Math.Pow(Math.Clamp(Ruthlessness, 0, 1), 2);
 
         /// <summary>The harm <paramref name="c"/> does in a turn to the enemy it would best hit, wherever they stand.</summary>
         public double Threat(Combatant c)
@@ -847,7 +901,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// a little more for dropping the target outright, all at once.
         /// </summary>
         public double Worth((double Hit, double ExpectedDealt, double Kill) blow, Combatant target) =>
-            blow.ExpectedDealt * PerWound(target) + 0.3 * blow.Kill * Value(target);
+            blow.ExpectedDealt * PerWound(target) + KillWorth(target, blow.Kill);
 
         /// <summary>
         /// The blows <paramref name="creature"/> invites standing on <paramref name="square"/> until
