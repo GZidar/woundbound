@@ -101,4 +101,47 @@ public class SceneBriefTests
             Assert.Contains(move.Square, hold.Zone.Squares);
         }
     }
+
+    [Fact]
+    public void ABanditBesideThePrize_TakesIt_AndItFallsWhereItsCarrierFalls()
+    {
+        var encounter = SampleEncounters.StrongboxRaid(Data, new ScriptedDice());
+        var prize = encounter.Prize!;
+        var bandit = encounter.Combatants.Single(c => c.Name == "Bandit on the left");
+        foreach (var character in encounter.Combatants.Where(c => c.Side == Side.Party))
+        {
+            character.Position = new GridPosition(character.Position.X - 6, character.Position.Y);
+        }
+
+        bandit.Position = new GridPosition(prize.At!.Value.X + 1, prize.At.Value.Y);
+        bandit.HasMove = true;
+        bandit.ActionsRemaining = 1;
+        var gm = new UtilityGmBrain(foresight: Foresight.None, measure: ThreatMeasure.None);
+        var turn = new GmTurn(bandit, isExtraTurn: false, bonusAvailable: false);
+
+        var step = gm.NextStep(encounter.View, turn);
+        if (step is GmStep.Move move)
+        {
+            Assert.Equal(prize.At, move.Square);
+            bandit.Position = move.Square;
+            bandit.HasMove = false;
+            step = gm.NextStep(encounter.View, turn);
+        }
+
+        Assert.IsType<GmStep.TakePrize>(step);
+    }
+
+    [Fact]
+    public void ATakeGoal_IsMetOnceTheCarrierIsOffTheBoard()
+    {
+        var encounter = SampleEncounters.StrongboxRaid(Data, new ScriptedDice());
+        var bandit = encounter.Combatants.Single(c => c.Name == "Bandit on the left");
+        encounter.Prize!.At = null;
+        encounter.Prize.Carrier = bandit;
+        Assert.Equal(ObjectiveStatus.InProgress, encounter.GoalStatus);
+
+        bandit.HasFled = true;
+
+        Assert.Equal(ObjectiveStatus.Achieved, encounter.GoalStatus);
+    }
 }

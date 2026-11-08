@@ -91,6 +91,12 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Why the fight is happening and what the GM's side wants (null: a fight to the finish).</summary>
         public SceneBrief? Brief => encounter.Brief;
 
+        /// <summary>The prize the GM's side means to carry off, if any.</summary>
+        public Prize? Prize => encounter.Prize;
+
+        /// <summary>Why <paramref name="who"/> can't pick up the prize now, or null if they can.</summary>
+        public string? TakePrizeRefusal(Combatant who) => encounter.TakePrizeRefusal(who);
+
         /// <summary>One of <paramref name="attacker"/>'s attacks from <paramref name="from"/>, at <paramref name="target"/> standing on <paramref name="targetAt"/>.</summary>
         /// <summary>A second of the attacker's kind within reach of the target, for Pack Tactics; null if none.</summary>
         public Combatant? PackMateOf(Combatant attacker, Combatant target) => encounter.PackMateOf(attacker, target);

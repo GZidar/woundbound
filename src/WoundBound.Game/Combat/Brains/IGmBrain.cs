@@ -223,6 +223,9 @@ namespace WoundBound.Game.Combat.Brains
         /// <summary>Take <paramref name="Weapon"/> from the pack into hand, for an action (Core Rules §15).</summary>
         public sealed record DrawWeapon(Rules.Models.WeaponDefinition Weapon) : GmStep;
 
+        /// <summary>Pick up the prize its brief wants carried off (<see cref="AdversaryGoal.Take"/>), for an action.</summary>
+        public sealed record TakePrize : GmStep;
+
         /// <summary>Pick a weapon up off the ground where it stands, for an action.</summary>
         public sealed record PickUpWeapon(GroundWeapon Lying) : GmStep;
 

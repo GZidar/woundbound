@@ -2568,6 +2568,16 @@ namespace WoundBound.Game.Combat
                     TakeStep(turn, done);
                     return;
 
+                case GmStep.TakePrize:
+                    if (TakePrizeRefusal(actor) is { } noPrize)
+                    {
+                        throw new InvalidOperationException($"The GM brain had {actor.Name} take the prize: {noPrize}");
+                    }
+
+                    TakePrize(actor);
+                    TakeStep(turn, done);
+                    return;
+
                 case GmStep.BuyExtraAction:
                     if (TacticalSpendRefusal(actor) is { } spendWhy)
                     {

@@ -1113,6 +1113,71 @@ namespace WoundBound.Game.Combat
         }
 
         /// <summary>
+        /// The strongbox — staged for the game to show a Take goal: the party's cart on the open road,
+        /// its strongbox on the ground beside it, and the toll-master's men come for the box, not for
+        /// blood. Four Roadside Bandits and two Ambushers with the Tollroad Bandit leading them. The
+        /// carrier runs east, down the road. Daylight.
+        /// </summary>
+        public static Encounter StrongboxRaid(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null, GmSetup? setup = null)
+        {
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(8, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(8, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(6, 11)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(6, 8)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(5, 9)),
+                CombatantFactory.FromAdversary(data.Adversary("Tollroad Bandit"), "Tollroad Bandit", new GridPosition(17, 9)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit on the left", new GridPosition(16, 6)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit on the right", new GridPosition(16, 12)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Bandit at the back", new GridPosition(18, 5)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Last bandit", new GridPosition(18, 13)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Crossbow on the left", new GridPosition(20, 8)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Crossbow on the right", new GridPosition(20, 11)),
+            };
+
+            var setting = Setting.Daylight with
+            {
+                Name = "The strongbox",
+                CoverPieces = Setting.CoverOf(Cover.Partial, (9, 7, 10, 7)),
+                Deployment = [DeploymentZone.Of("down the road", hidden: false, (15, 2, 21, 16))],
+            };
+            var strongbox = new Prize("strongbox", new GridPosition(9, 9));
+            return new Encounter(FieldWidth, FieldHeight, Deployed(combatants, setting, data, setup), data.RangeBands, dice, gm,
+                setting: setting, environment: data.Environment,
+                brief: new SceneBrief(Stakes.Relevant, new AdversaryGoal.Take(strongbox, DeploymentZone.Of("the road east", hidden: false, (26, 0, 27, 17))),
+                    Commitment.Committed, "The toll-master wants his strongbox back, and doesn't much care who's guarding it"));
+        }
+
+        /// <summary>
+        /// The jetty — staged for the game to show an Escape goal: smugglers caught on the shore with
+        /// their boat waiting to the east, four Roadside Bandits making for it while two Ambushers
+        /// cover them. They want away, not a fight. The party comes up from the west. Daylight.
+        /// </summary>
+        public static Encounter JettyEscape(GameData data, IDiceRoller dice, Brains.IGmBrain? gm = null)
+        {
+            var combatants = new List<Combatant>
+            {
+                CombatantFactory.FromCharacter(SallaRinehart(data), new GridPosition(5, 8)),
+                CombatantFactory.FromCharacter(JorenBlacke(data), new GridPosition(5, 10)),
+                CombatantFactory.FromCharacter(DrovanThale(data), new GridPosition(3, 11)),
+                CombatantFactory.FromCharacter(MirellaVask(data), new GridPosition(3, 8)),
+                CombatantFactory.FromCharacter(ElthricDane(data), new GridPosition(2, 9)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Smuggler with the bale", new GridPosition(11, 8)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Smuggler with the cask", new GridPosition(11, 10)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Smuggler at the nets", new GridPosition(12, 6)),
+                CombatantFactory.FromAdversary(RoadsideBandit, "Smuggler by the post", new GridPosition(12, 12)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Lookout on the crates", new GridPosition(15, 7)),
+                CombatantFactory.FromAdversary(BanditAmbusher, "Lookout by the boat", new GridPosition(15, 11)),
+            };
+
+            return new Encounter(FieldWidth, FieldHeight, combatants, data.RangeBands, dice, gm,
+                setting: Setting.Daylight with { Name = "The jetty" }, environment: data.Environment,
+                brief: new SceneBrief(Stakes.Relevant, new AdversaryGoal.Escape(DeploymentZone.Of("the boat", hidden: false, (25, 7, 27, 11))),
+                    Commitment.Committed, "Smugglers who'd rather lose the cargo than their necks"));
+        }
+
+        /// <summary>
         /// Outriders on the road — staged for the game: four Tollroad Bandits on
         /// riding horses (Core Rules §9, "Mounts": Fast, a horse's hooves to borrow, a horse to strike
         /// instead), with two Ambushers and their crossbows on foot behind. Daylight, open ground. The

@@ -353,6 +353,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 OptionKind.Throw => new GmStep.Throw(choice.Target!, choice.WithBonus && turn.BonusAvailable),
                 OptionKind.DrawWeapon => new GmStep.DrawWeapon(choice.Weapon!),
                 OptionKind.PickUpWeapon => new GmStep.PickUpWeapon(choice.Lying!),
+                OptionKind.TakePrize => new GmStep.TakePrize(),
                 OptionKind.Exploit => new GmStep.Exploit(choice.Exploit!.Value),
                 OptionKind.RaiseShield => new GmStep.RaiseShield(choice.Target),
                 OptionKind.DuckBack => new GmStep.DuckBack(),

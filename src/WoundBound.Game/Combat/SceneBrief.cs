@@ -48,6 +48,37 @@ namespace WoundBound.Game.Combat
         /// Their creatures fight from inside it and don't chase anyone out of it.
         /// </summary>
         public sealed record Hold(DeploymentZone Zone, int Rounds) : AdversaryGoal($"Hold {Zone.Name} for {Rounds} rounds");
+
+        /// <summary>
+        /// Seize <paramref name="Prize"/> and carry it off the board, towards <paramref name="Exit"/>
+        /// where there is one. It's met once its carrier gets beyond Long of every character.
+        /// </summary>
+        public sealed record Take(Prize Prize, DeploymentZone? Exit = null) : AdversaryGoal($"Take {Prize.Name}");
+
+        /// <summary>
+        /// Get away: <paramref name="Who"/>, or at least half the band where nobody is named, beyond
+        /// Long of every character, towards <paramref name="Exit"/> where there is one.
+        /// </summary>
+        public sealed record Escape(DeploymentZone? Exit = null, IReadOnlyList<Combatant>? Who = null)
+            : AdversaryGoal(Who is { Count: > 0 } ? $"Get {string.Join(" and ", Who.Select(w => w.Name))} away" : "Get away");
+    }
+
+    /// <summary>
+    /// Something worth carrying off: a strongbox, a relic, a ledger. It lies on the board until a
+    /// creature picks it up for an action, and falls where its carrier falls.
+    /// </summary>
+    public sealed class Prize(string name, GridPosition at)
+    {
+        public string Name { get; } = name;
+
+        /// <summary>Where it lies, or null while somebody carries it.</summary>
+        public GridPosition? At { get; internal set; } = at;
+
+        /// <summary>Who carries it, if anybody.</summary>
+        public Combatant? Carrier { get; internal set; }
+
+        /// <summary>Carried off the board.</summary>
+        public bool IsGone => Carrier?.HasFled == true;
     }
 
     /// <summary>

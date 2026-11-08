@@ -18,6 +18,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
         Mount,
         DrawWeapon,
         PickUpWeapon,
+        TakePrize,
         BuyExtraAction,
         RegainFooting,
         Cast,
@@ -711,6 +712,13 @@ namespace WoundBound.Game.Combat.Brains.Utility
                 }
             }
 
+            // The prize its brief wants carried off, lying where this creature would stand.
+            if (actor.Side == Side.Adversaries && View.Prize is { At: { } prizeAt } && Footprints.At(at, actor.Across).Contains(prizeAt)
+                && (at != actor.Position || !checkRules || View.TakePrizeRefusal(actor) is null))
+            {
+                yield return new Option(OptionKind.TakePrize, PrizeWorth, $"take the {View.Prize.Name}");
+            }
+
             // An enemy's mount: the blow it takes, and the chance of bringing its rider down with it —
             // Prone in the next square, and on foot from then on (Core Rules §9, "Mounts").
             foreach (var steed in View.EnemySteeds(actor))
@@ -1184,7 +1192,61 @@ namespace WoundBound.Game.Combat.Brains.Utility
         /// Where a creature would rather stand: where its Role wants it (<see cref="Standing"/>), and
         /// inside the ground it is holding, if its brief says so (<see cref="HoldPull"/>).
         /// </summary>
-        private double Position(Combatant actor, GridPosition square) => Standing(actor, square) + HoldPull(actor, square);
+        private double Position(Combatant actor, GridPosition square) => Standing(actor, square) + HoldPull(actor, square) + GoalPull(actor, square);
+
+        /// <summary>What snatching up the prize is worth: more than a good blow, since it is what they came for.</summary>
+        public const double PrizeWorth = 3.0;
+
+        /// <summary>Whether <paramref name="actor"/> is trying to get off the board: one of those escaping, or the prize's carrier.</summary>
+        private bool Leaving(Combatant actor) =>
+            actor.Side == Side.Adversaries && !actor.IsBroken && View.Brief?.Goal switch
+            {
+                AdversaryGoal.Escape escape => escape.Who is not { Count: > 0 } who || who.Contains(actor),
+                AdversaryGoal.Take take => take.Prize.Carrier == actor,
+                _ => false,
+            };
+
+        /// <summary>
+        /// Where its brief wants a creature to go: off the board for those escaping and the prize's
+        /// carrier, towards the exit where there is one; and to the prize for the nearest two while it lies there.
+        /// </summary>
+        private double GoalPull(Combatant actor, GridPosition square)
+        {
+            if (actor.Side != Side.Adversaries || actor.IsBroken)
+            {
+                return 0;
+            }
+
+            if (Leaving(actor))
+            {
+                var exit = View.Brief!.Goal switch
+                {
+                    AdversaryGoal.Escape escape => escape.Exit,
+                    AdversaryGoal.Take take => take.Exit,
+                    _ => null,
+                };
+                var clear = Math.Min(View.DistanceToNearestCharacter(square), View.LongRangeSquares + 1);
+                var toExit = exit is null ? 0 : exit.Squares.Min(z => square.DistanceTo(z));
+                return ExitPull * clear - (exit is null ? 0 : 0.5 * ExitPull * toExit);
+            }
+
+            if (View.Prize is { At: { } prizeAt } && View.Adversaries.Where(a => !a.IsBroken && !a.IsOutOfFight)
+                    .OrderBy(a => a.Position.DistanceTo(prizeAt)).Take(PrizeSeekers).Contains(actor))
+            {
+                return -PrizePull * square.DistanceTo(prizeAt);
+            }
+
+            return 0;
+        }
+
+        /// <summary>How many of the band, the nearest, go for the prize while it lies there.</summary>
+        public const int PrizeSeekers = 2;
+
+        /// <summary>What each square nearer the lying prize is worth to those going for it.</summary>
+        public const double PrizePull = 0.8;
+
+        /// <summary>How much each square further from the party is worth to a creature trying to get away.</summary>
+        public const double ExitPull = 0.8;
 
         /// <summary>
         /// A creature holding ground (<see cref="AdversaryGoal.Hold"/>) wants to stand inside its zone
@@ -1229,7 +1291,7 @@ namespace WoundBound.Game.Combat.Brains.Utility
             var nearestReal = View.EnemiesOf(actor).Where(e => !e.IsPhantom && !e.IsOutOfFight).Select(e => actor.DistanceFrom(square, e))
                 .Concat(Hunted(actor, square)).DefaultIfEmpty(int.MaxValue).Min();
             var stayWithin = View.LongRangeSquares - (actor.Side == Side.Adversaries ? 2 : 0);
-            if (!actor.IsBroken && nearestReal > stayWithin && View.EnemiesOf(actor).Any(e => !e.IsBroken))
+            if (!actor.IsBroken && !Leaving(actor) && nearestReal > stayWithin && View.EnemiesOf(actor).Any(e => !e.IsBroken))
             {
                 return -3;
             }
